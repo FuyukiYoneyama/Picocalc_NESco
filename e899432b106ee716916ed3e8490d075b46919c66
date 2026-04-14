@@ -12,3 +12,10 @@
 - `PPURAM`、`g_PalRAM`、`SPRRAM` は reset で clear する
 - この契約は、Lode Runner の個別対策ではなく
   PPU の常識的な reset/power-on 初期化として固定して扱う
+
+### 9.49 `0.0.116` の狙い
+
+- 挙動を変えず、reset 後初回フレームの PPU 初期状態を事実として残す
+- `0.0.116` では最初の `$2002` read だけ
+  `PPU_R2`、`g_nScanLine`、`PPU_Addr`、`PPU_Temp`、`PPU_Latch`、`fineX`
+  を 1 回だけ出す
