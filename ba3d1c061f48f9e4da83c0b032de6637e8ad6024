@@ -1,0 +1,6 @@
+### 9.49 `0.0.116` の狙い
+
+- 挙動を変えず、reset 後初回フレームの PPU 初期状態を事実として残す
+- `0.0.116` では最初の `$2002` read だけ
+  `PPU_R2`、`g_nScanLine`、`PPU_Addr`、`PPU_Temp`、`PPU_Latch`、`fineX`
+  を 1 回だけ出す
