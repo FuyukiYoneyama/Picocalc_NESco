@@ -1,0 +1,10 @@
+### 9.53 `0.0.120` の狙い
+
+- `0.0.119` では前scanline終端 read にまで suppress を広げた結果、
+  `02-vbl_set_time` の `--` 窓が広すぎる形になった
+- そこで `0.0.120` ではその suppress を外し、
+  scanline 241 冒頭の `$2002` read だけを特別扱いする
+- 具体的には、scanline 241 かつ `g_wPassedClocks==0` の read では
+  返す `status` から VBlank bit を落とし、pending NMI も cancel する
+- さらに `g_wPassedClocks<=1` までは pending NMI の cancel だけを維持し、
+  `VB_START` / `VB_START2` に近い最小モデルを比較する
