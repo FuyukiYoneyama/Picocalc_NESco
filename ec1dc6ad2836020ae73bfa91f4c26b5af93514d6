@@ -1,0 +1,9 @@
+### 9.52 `0.0.119` の狙い
+
+- `0.0.118` で `01-vbl_basics` と `03-vbl_clear_time` は通ったが、
+  `02-vbl_set_time` と `06-suppression` はまだ落ちている
+- そこで今回は VBlank set edge 近傍だけに絞り、
+  scanline 240 終端の `$2002` read で次の VBlank set を suppress し、
+  scanline 241 冒頭の `$2002` read で pending NMI を cancel する
+- frame 全体の進行量や `$2002` の最小副作用は変えず、
+  set edge / suppression の窓だけを 1 手で比較する
