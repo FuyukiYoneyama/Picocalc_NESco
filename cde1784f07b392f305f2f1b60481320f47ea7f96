@@ -1,0 +1,9 @@
+### 9.56 `0.0.123` の狙い
+
+- 方針を切り替え、`ppu_vbl_nmi` ではなく
+  `blargg_ppu_tests_2005.09.15b/vram_access.nes` を優先する
+- 現行の `$2007` read は palette read 時に immediate value を返すだけで、
+  underlying nametable address を delayed read buffer に入れていなかった
+- そこで `0.0.123` では、
+  palette read のとき `PPU_R7 = PPU_VRamRead(addr & 0x2FFF)` にして
+  hidden nametable data を buffer へ入れる
