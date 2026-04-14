@@ -6,3 +6,18 @@
   title 初期化列や `R2002` 周辺には Mesen2 との差が大きくないことも分かった
 - `0.0.115` ではいったんコードを `0.0.95` 相当まで切り戻し、
   効果未確認の PPU 初期化/`$2002` 実験を外した状態へ戻す
+
+### 9.48 現在の PPU 初期化契約
+
+- `PPU_Init()` は `PPU_R2=0` から開始する
+- `$2002` read の最小副作用は
+  - status return
+  - VBlank clear
+  - write toggle reset
+  に固定する
+- scroll / address 系は reset で
+  `PPU_Addr=0`、`PPU_Temp=0`、`PPU_Scr_H_Bit=0`、`PPU_Latch=0`
+  を明示する
+- `PPURAM`、`g_PalRAM`、`SPRRAM` は reset で clear する
+- この契約は、Lode Runner の個別対策ではなく
+  PPU の常識的な reset/power-on 初期化として固定して扱う
