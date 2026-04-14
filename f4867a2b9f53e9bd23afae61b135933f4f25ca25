@@ -1,0 +1,8 @@
+### 9.59 `0.0.126` の狙い
+
+- `0.0.125` でも `vbl_clear_time.nes` は `result=03` のままで、
+  clear edge を前に寄せても変化がなかった
+- 許可済み参照先では、`fixNES` は VBlank flag を `L241+2`、
+  NMI 許可を `L241+4` に置いている
+- 現行 `Picocalc_NESco` は VBlank set 後 `g_wPassedClocks>=2` で
+  NMI を立てているため、`0.0.126` ではそこだけ `>=4` に後ろへ寄せて比較する
