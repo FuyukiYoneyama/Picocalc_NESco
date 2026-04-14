@@ -1,0 +1,5 @@
+### 9.51 `0.0.118` の狙い
+
+- `ppu_vbl_nmi` の VBlank period / set time / clear time の失敗を受けて、
+  1 scanline あたりの CPU 実行量を `114` 固定から `113,114,114` の平均 `341/3` に寄せる
+- VBlank や `$2002` の副作用そのものではなく、まず frame 全体の CPU-PPU 進行量を公開仕様寄りにする
