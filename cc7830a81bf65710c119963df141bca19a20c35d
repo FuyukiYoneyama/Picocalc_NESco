@@ -1,0 +1,10 @@
+### 9.58 `0.0.125` の狙い
+
+- `0.0.124` の UART ログで、
+  `vram_access.nes` は最後に `result=01` まで進み、
+  `vbl_clear_time.nes` は `result=03` で止まることが確認できた
+- `result=03` は blargg の readme では
+  `VBL flag cleared too late` を意味する
+- そこで `0.0.125` では、
+  pre-render 行の開始で clear していた VBlank bit を
+  1 行前 (`scanline 260`) の終端側で落とす最小修正だけを比較する
