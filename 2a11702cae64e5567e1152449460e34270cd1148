@@ -1,0 +1,8 @@
+### 9.55 `0.0.122` の狙い
+
+- `0.0.121` でも `02-vbl_set_time` と `06-suppression` は変わらなかった
+- そこで `0.0.122` では、`scanline 241` 開始で即 VBlank set する形をやめる
+- `241` 行目ではまず pending 状態に置き、
+  CPU 側の命令境界と `$2002` read 直前で VBlank edge を進める
+- VBlank set は `g_wPassedClocks>=1`、
+  NMI は `g_wPassedClocks>=2` で発火させる最小モデルを比較する
