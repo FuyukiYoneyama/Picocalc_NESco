@@ -1,0 +1,802 @@
+# Picocalc_NESco Handover History
+
+この文書は、`Picocalc_NESco` の実装経緯をスレッド外へ残すための handover 用メモです。
+
+- 置き場所を `/nes2` 配下にした理由:
+  - 会話スレッドだけだと経緯が消える
+  - 他人へ引き継ぐには、TODO だけでなく「なぜそうなったか」が必要
+- 注意:
+  - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
+  - 戻した実験は「現在の採用状態ではない」と明記する
+
+## 1. 現在の基準点
+
+この文書を書いた時点の基準は次のとおり。
+
+- 現在の system version: `0.0.68`
+- 現在の `HEAD`: `0.0.68` の LCD fixed-cost 削減版
+- 作業ツリー: clean
+
+重要:
+
+- この時点の `HEAD` には、後述の `0.0.63` 以降の一部実験は残っていない
+- ただし、このスレッド上ではそれらを試し、効果や副作用を確認した
+- そのため、「git log に残っている経緯」と「会話上で判明した経緯」を分けて読むこと
+
+## 2. かなり前半の進捗
+
+以下は、初期 bring-up から ROM 起動までの大きな流れ。
+
+### 2.1 クリーンルーム前提の整理
+
+- `cleanroom_rebuild/docs` を読み、仕様化してから実装する方針を確認
+- `nesco_mapper_cleanroom_spec.md` から:
+  - Mapper 0 / 30 だけで閉じない
+  - 実装優先順は対象 ROM の mapper 番号で決める
+  - flash/write/IRQ は公開仕様と実トレースで検証する
+
+### 2.2 PicoCalc 側 bring-up の入口
+
+- `Picocalc_NESco` の build 停止要因を洗い出した
+- 初期には以下が問題だった
+  - Pico SDK include の不整合
+  - `InfoNES_SetupScr()` の重複定義
+  - LCD / keyboard / audio driver 未実装
+- ここを最小修正して、まず build を通す段階まで持っていった
+
+### 2.3 LCD bring-up
+
+経緯:
+
+- 最初は hardware SPI 前提で LCD を動かそうとした
+- 表示は不安定で、赤固定や黒画面が出た
+- 色フォーマットや init sequence を何度か見直した
+- 最終的に、PicoCalc 実機では「最小 PIO SPI-like path + wait_idle」で安定した
+
+この段階で判明したこと:
+
+- `hardware SPI` より、最小 PIO 転送の方が安定した
+- `CS/DC` は CPU 側で制御し、PIO は最小ビット転送に留める方がよかった
+- 色確認では `赤 → 緑 → 青 → 白 → 黒` が正しく出る状態まで到達した
+- 全画面 UI と NES viewport の両方を扱える表示モード切替を入れた
+
+重要な判断:
+
+- 18-bit 送信ではなく、NES 用途では `RGB565 2 byte/pixel` を採用する
+- `STRIP_HEIGHT` を使った strip 転送で LCD の command overhead を減らす
+
+### 2.4 キーボード bring-up
+
+- PicoCalc keyboard controller の I2C slave と key code を確認
+- menu navigation と in-game input が通るようになった
+- 実機向けキー割り当てとして、方向キー以外を次へ変更した
+  - `` ` `` = Select
+  - `-` = Start
+  - `[` = B
+  - `]` = A
+- `Esc` で ROM 選択へ戻る機能も実装した
+- `F1` を NES reset に割り当てた
+
+### 2.5 ROM menu / SD browser
+
+経緯:
+
+- 最初は「FLASH ROM / SD CARD」を選ぶ source menu 的な画面だった
+- これは仕様意図とズレていたため、`*.nes` ファイル選択画面へ変更した
+- その後、SD mount、directory scan、directory navigation を実装した
+
+この段階で達成したこと:
+
+- root だけでなく subdirectory もたどれる
+- parent directory は `[..]` 表記
+- `*.nes` と directory が区別して表示される
+- menu font は `PixelMplus` 由来のフル ASCII に切り替えた
+- 画面の最大表示件数を制限し、ページング/スクロールで下にはみ出さないようにした
+
+### 2.6 外部資産整理
+
+フォント:
+
+- `PixelMplus` 由来 font を `font/` で管理するよう整理した
+- generated header の出どころと license 導線を repo 内へ残した
+
+FatFs:
+
+- `fatfs/` は config と attribution を置く場所として整理した
+- 実体は `ChanFatFS` であることを README に明記した
+- 参照元 URL も repo 内の README へ書いた
+
+この整理で学んだこと:
+
+- 公開前提の文書にローカル絶対パスは書かない
+- `/nes2` より外のローカル環境情報は書かない
+- MIT でも attribution / license を消してよいわけではない
+
+## 3. Mapper 0 実行まで
+
+### 3.1 小さい ROM の方針
+
+- 小さい `*.nes` は RAM に読み込む
+- 大きい ROM は flash/XIP 側へ回す想定
+- ただし当面の immediate target は:
+  - `Mapper 0`
+  - `48KB 未満`
+  - SD から RAM 読み込み
+
+### 3.2 Xevious 起動
+
+このスレッド中で、`Xevious.nes` を
+
+- `mapper=0`
+- `mode=RAM`
+- `enabled=1`
+
+として判定し、SD から読み込んで実行開始するところまで到達した。
+
+初期症状:
+
+- メニュー残骸がゲーム画面左に残る
+- 背景が崩れる
+- ゲーム画面は「なんとなく動いている」が正常ではない
+
+## 4. PPU / 背景崩れの修正経緯
+
+Xevious 背景崩れについては、かなり重要なので詳細を残す。
+
+### 4.1 初期の疑い
+
+背景乱れで疑った項目:
+
+- `$2006` 二度書き
+- `$2007` の自動 increment
+- `PPU_CTRL bit2`
+- mirroring
+- `$2005` の fine/coarse scroll
+
+### 4.2 実際に効いた修正
+
+背景乱れに対して最も効いたのは、rendering off 中の loopy scroll 更新を止めた修正だった。
+
+観測された症状:
+
+- `$2006` で `3F00` を設定した直後なのに
+- `$2007` 書き込み先が `0B01 / 1B01 / 2B01 / 3B01` のように化ける
+
+これは、CPU が明示設定した `PPU_Addr` を、描画側が別経路で進めてしまっていたことが本命だった。
+
+採用した修正の要点:
+
+- rendering off のとき、`PPU_DrawLine()` で loopy scroll state を進めない
+- visible line でも背景色だけ描き、`PPU_Addr / PPU_Temp` を壊さない
+
+結果:
+
+- `0.0.41` 時点で Xevious 背景が正常に動くようになった
+
+### 4.3 fixNES との未解決差分
+
+背景は直ったが、まだ `fixNES` と完全一致ではないと認識している。
+
+保留項目:
+
+- `$2007` palette read buffer の扱い
+- `$2007` read/write 後の shadow read / prefetch
+- rendering 中 `$2007` write path の細かい一致
+
+判断:
+
+- いまは背景が正常に動いているため、差分は「不具合が出たときに再検討する保留項目」
+- 背景正常化後は、むやみにここを触らない方が安全
+
+## 5. 音の経緯
+
+音まわりは、かなり試行錯誤が多かったので分けて残す。
+
+### 5.1 最初の状態
+
+- APU 側では何か生成しているが、物理出力 driver が stub のままで無音
+
+### 5.2 PWM 音出しの第一段階
+
+- PicoCalc の音声出力へ PWM driver を接続して、とにかく音を出すところまで到達
+- しかし、最初は
+  - ノイズが非常に大きい
+  - 音楽として成立しない
+
+### 5.3 効いた修正
+
+このスレッドで「効いた」と確認できたのは次。
+
+#### `0.0.54` 付近
+
+- 音声出力の二重初期化を止めた
+
+#### `0.0.55` 付近
+
+- APU timer を sample 単位でなく CPU-cycle 基準へ寄せた
+
+#### `0.0.56` 付近
+
+- PWM carrier と sample update を分離した
+
+#### `0.0.57` 付近
+
+- HSync 側で frame sequencer を進めるようにした
+
+#### `0.0.58` 付近
+
+- 出力を PWM midpoint へ寄せる DC correction を入れた
+
+#### `0.0.59`
+
+- `audio_ring_available()` を見て low/high water で hysteresis mute を入れた
+- これは明確に効いた
+- ユーザー確認:
+  - `0.0.59 で無音は達成した`
+
+重要:
+
+- つまり「無音であるべき時間にノイズが鳴る」症状に対しては
+- APU よりも先に「出力側の供給の連続性」を直すことが効いた
+
+### 5.4 その後の迷走と反省点
+
+その後、速度問題に対して音側でいくつか実験した。
+
+#### `0.0.60`
+
+- audio diagnostic logging を追加
+
+#### `0.0.61`
+
+- ring buffer hot path の軽量化
+
+#### `0.0.62`
+
+- サンプルレートを 22.05kHz に下げた
+
+#### `0.0.64`
+
+- APU timing log を追加
+- 1秒ごとに UART へ次を出す
+  - `q` = quarter-frame 回数
+  - `h` = half-frame 回数
+  - `samples` = その1秒の生成サンプル数
+  - `rate` = 現在の設定サンプルレート
+- 目的:
+  - BGMだけテンポが遅い原因が
+    - frame sequencer 側か
+    - sample generation 側か
+    を切り分けること
+
+#### `0.0.65`
+
+- APU register write を「即時適用」から「時刻つき queue replay」へ変更
+- `ApuEvent { clocks, addr, data }` を本当に使うようにした
+- `InfoNES_pAPUHsync()` の sample loop 内で、sample 時刻までに到達した
+  event だけを順に適用するようにした
+- scanline をまたぐ event は queue に残し、次 scanline 向けに clock を rebasing する
+- 目的:
+  - BGM だけテンポが遅い問題について
+  - APU register write timing の崩れを本命として潰しにいくこと
+
+#### `0.0.66`
+
+- APU timing log を止めた
+- 代わりに PPU 側で 1秒ごとの軽い perf log を追加した
+- UART へ次を出す
+  - `frames`
+  - `scan`
+  - `cpu_hz`
+  - `cpu_pct`
+- 目的:
+  - APU ログの負荷を避けつつ
+  - 6502 本体が実時間の何割で動いているかを先に測ること
+
+#### `0.0.67`
+
+- perf log をさらに分解した
+- 1秒ごとに UART へ次を出す
+  - `cpu_us`
+  - `apu_us`
+  - `draw_us`
+  - `tail_us`
+- 目的:
+  - 本体速度低下の主犯が
+    - CPU step
+    - APU
+    - 描画
+    - その他 scanline 後半
+    のどこかを切ること
+
+#### `0.0.68`
+
+- `lcd_spi.c` の固定コスト削減を開始
+- 最初の一手として
+  - `lcd_write_command()` / `lcd_write_data()` の不要な idle wait を削減
+  - DMA config を初期化時に一度だけ組み、strip ごとに再利用
+- 表示仕様や `lcd_set_window()` の意味はまだ変えていない
+- 目的:
+  - まず安全に `draw_us` の固定費を落とすこと
+
+ここで重要な学び:
+
+- これは「本当の高速化」ではなく、音質を落として処理量を減らしただけ
+- ユーザーから明確に、
+  - これは高速化ではない
+  - こういう方向は筋が違う
+という指摘を受けた
+
+会話上ではさらに次の実験もした:
+
+- PWM slice を sample clock に使う実験
+- 11.025kHz 化
+
+ただし:
+
+- 現在の `HEAD` にはこれら後半の実験は残っていない
+- しかも、この方向はゲーム速度の本質解決にならず、画面乱れも起こしやすかった
+
+結論:
+
+- 音質を犠牲にする方向は「高速化」とは呼ばない
+- 今後、速度改善は emulator 本体と表示転送を対象にすべき
+
+## 6. 表示高速化の実験
+
+### 6.1 効いた修正
+
+- LCD を DMA-backed strip transfer に変えたことはかなり効いた
+- これで「実用になる」とユーザー評価が出た段階があった
+
+### 6.2 失敗した修正
+
+失敗例として、必ず引き継ぐべきもの:
+
+- `STRIP_HEIGHT=32`
+
+これは:
+
+- 表示乱れを起こした
+- テンポ遅れの根本解決にもならなかった
+
+このため、会話上ではいったん `0.0.67` として
+
+- 最後の表示実験だけ戻す
+- つまり `STRIP_HEIGHT=16` へ戻す
+
+という整理をした。
+
+ただし現時点の `HEAD` は `0.0.62` であり、会話上で一度作った `0.0.67` 系の commit は今の branch には残っていない。
+
+この点は、次の作業者が混乱しやすいので注意。
+
+## 7. 引き継ぎ上の重要ポイント
+
+### 7.1 いま確実に言えること
+
+- LCD / keyboard / SD browser / ROM menu / small Mapper 0 RAM launch は大筋で成立した
+- Xevious 背景崩れは、rendering off 中の loopy scroll 更新停止で直った
+- 音は出る
+- `0.0.59` 相当の hysteresis mute は「無音であるべき時間を無音にする」のに効いた
+
+### 7.2 いま触ると危険なポイント
+
+- 背景が直った後の PPU scroll/address 系を、根拠なくいじること
+- 音のサンプルレートを下げることを「高速化」と呼んで進めること
+- `STRIP_HEIGHT=32` を安易に再採用すること
+
+### 7.3 進捗管理の反省
+
+ユーザーから強く指摘された点:
+
+- 毎回コミットしていても、経緯を書かなければ引き継げない
+- `TODO` だけでは不十分
+- 何が成功し、何が失敗し、何を戻したかを書く必要がある
+
+今後の最低ルールとして残す:
+
+- 版番号を上げた変更は、build + commit に加えて「経緯」を残す
+- `TODO` だけでなく `History / Handover` を更新する
+- 「戻した変更」も記録する
+
+## 8. 現在の次アクション候補
+
+次の人が着手するときの候補はこの順が安全。
+
+1. 現在の `HEAD` が `0.0.69` 基準であることを確認する
+2. 背景正常化済みの PPU 状態を壊さない
+3. 音については `0.0.59` 相当の mute が効いた、という事実を重視する
+4. 高速化は「音を粗くする」以外の方向で考える
+5. 進捗文書だけでなく、この handover 文書も更新する
+
+## 9. 2026-04-12 追記
+
+### 9.1 `0.0.68` の結果
+
+- `lcd_spi.c` の wait 削減と DMA 設定使い回しは、表示を壊さず入れられた
+- ただし `draw_us` はほぼ変わらず、効果は小さかった
+- ここから、描画側の本命は `lcd_spi.c` の小さい固定費だけではなく、
+  `display.c` 側の line 変換コストも含むと判断した
+
+### 9.2 `0.0.69` の狙い
+
+- `InfoNES_PostDrawLine()` の RGB444→RGB565 変換を 4pixel 展開へ変更
+- 目的は、`draw_us` のうち CPU 側の scanline 変換部分を少しでも削ること
+- strip 戦略や window 再設定にはまだ踏み込まない
+
+### 9.3 `0.0.70` の狙い
+
+- `compositeSprites()` の scanline 固定費を下げる
+- visible sprite が 1 枚もない line では `sprite_buf[256]` を初期化しない
+- その場合、`PPU_DrawLine()` 側でも sprite overlay 判定を完全に飛ばす
+
+### 9.4 `0.0.71` の狙い
+
+- `PPU_DrawLine()` の背景 palette lookup を scanline 単位へ前寄せする
+- backdrop と BG palette 0..3 を line 先頭で `WORD[16]` に展開し、
+  毎ピクセルの `g_PalRAM / g_NesPalette` 参照を減らす
+- sprite が無い行では overlay 分岐も完全に外す
+
+### 9.5 `0.0.72` の狙い
+
+- `PPU_DrawLine()` の通常ケースを fast path 化する
+- `BG 有効・左端 clip なし` のとき、毎ピクセルの `bg_enabled/bg_clip`
+  判定を外して背景 bit 展開だけに寄せる
+- clip や BG disable を含む副作用の大きい経路は従来の分岐を残す
+
+### 9.6 `0.0.73` の狙い
+
+- `0.0.72` の fast path は効果が不安定だったため、そこを正にしない
+- `PPU_DrawLine()` の背景タイル取得で、nametable byte と attribute byte を
+  同一 page pointer から引く形に整理し、`PPUBANK` の bank 計算を減らす
+- palette 前展開の効果は維持しつつ、背景 tile fetch の固定費を少し下げる
+
+### 9.7 `0.0.74` の狙い
+
+- 背景タイル inner loop を通常タイルだけ 8pixel 展開する
+- fine-X を含む最初のタイルは従来の bit loop を維持し、通常タイルだけ
+  bit 展開と palette lookup をまとめて処理する
+- まず sprite 無し経路から効きを見て、表示崩れがないか確認する
+
+### 9.8 `0.0.75` の狙い
+
+- sprite あり経路にも通常タイルの 8pixel 展開を追加する
+- 背景 8pixel ぶんの値を先に作ってから、sprite overlay を同じ 8pixel
+  ブロック内で後段適用する
+- sprite 無し経路だけ速い状態から一歩進めて、通常プレイ時の `draw_us`
+  をさらに下げられるかを見る
+
+### 9.9 `0.0.76` の狙い
+
+- `compositeSprites()` の sprite palette 参照を scanline 単位へ前寄せする
+- sprite pixel ごとの `g_PalRAM[0x10 + pal_idx]` 参照を 16-entry の local cache
+  に置き換え、sprite 合成 hot path のメモリアクセスを減らす
+- 左端 clip 判定も `bool` 化して、細かい固定費を削る
+
+### 9.10 `0.0.77` の狙い
+
+- 6502 の命令フェッチ hot path を PRG ROM 専用 helper へ寄せる
+- `PC >= $8000` の opcode / operand fetch は汎用 `K6502_Read()` を通さず、
+  `ROMBANK` を直接読む
+- まずは opcode と PC 相対 operand の fetch だけを置き換え、挙動を変えずに
+  CPU 側の分岐コストを減らす
+
+### 9.11 `0.0.78` の狙い
+
+- `g_wCurrentClocks` は reset 時以外に consumer が見当たらないため、
+  `K6502_Step()` の hot path 更新を除去する
+- 毎命令の単調増加カウンタ更新を外して、CPU 固定費がどこまで下がるかを見る
+
+### 9.12 `0.0.79` の狙い
+
+- 6502 の absolute/indirect 系 operand read も PRG ROM fast path へ寄せる
+- `RD_ABS/RD_ABX/RD_ABY/RD_IZX/RD_IZY` と `read16()` を `read_cpu_data()`
+  経由にし、`$8000-$FFFF` の ROM 参照まで汎用 `K6502_Read()` の分岐を
+  通さないようにする
+- opcode fetch だけでなく ROM 上の定数テーブルや immediate/absolute operand
+  読み出しも軽くして、`cpu_us` をさらに下げられるかを見る
+
+### 9.13 `0.0.80` の狙い
+
+- `PPU_DrawLine()` の sprite あり 8pixel 展開経路で、実際は sprite が 1 つも
+  乗っていないタイルを fast path で抜ける
+- `sprite_buf[pixel_x..pixel_x+7]` を先に OR して、opaque sprite が無ければ
+  背景色 8pixel の書き込みだけで終える
+- sprite ありフレームでも「その tile には sprite が無い」ケースの固定費を減らし、
+  `draw_us` をもう一段下げられるかを見る
+
+### 9.14 `0.0.82` の狙い
+
+- `0.0.80` の「empty sprite overlay block」最適化は効かなかったので採らない
+- sprite 合成では最終 NES color index を抱え込まず、sprite palette slot を
+  `sprite_buf` に保持する
+- `PPU_DrawLine()` 側に 16-entry の `sprite_palette_rgb` を作り、
+  sprite overlay 時の `g_NesPalette[...]` 参照を per-pixel から per-line
+  へ前寄せして、sprite あり経路の色変換固定費を減らす
+
+### 9.15 `0.0.83` の狙い
+
+- `0.0.80` の empty sprite block fast path も、`0.0.82` の sprite RGB line cache も
+  `PERF` 上で効果が見えなかったため採らない
+- draw 側は一旦 `0.0.79` 相当の状態へ戻し、CPU 側の fast path が効いている
+  基準へ復帰する
+- 次の draw 最適化は、背景側でまだ pixel 単位に残っている経路を別筋で詰める
+
+### 9.16 `0.0.84` の狙い
+
+- `PPU_DrawLine()` の最初の半端タイルだけを本体ループから分離する
+- `PPU_Scr_H_Bit != 0` のときは先頭タイルを先に slow path で処理し、
+  その後の本体ループは `start_bit == 0` 前提で回せるようにする
+- 背景側に残っている pixel 単位経路を少しでも減らし、通常タイル列の分岐を
+  軽くする
+
+### 9.17 `0.0.85` の狙い
+
+- `bg_enabled && !bg_clip` を `bg_fast_path` として loop 外で一度だけ計算する
+- 本体ループの fast path 条件から小さい論理判定を外し、通常ケースでの
+  分岐コストをもう一段減らす
+- `0.0.84` の「最初の半端タイル分離」の延長として、通常タイル列をさらに
+  単純な条件で回せるようにする
+
+### 9.18 `0.0.86` の狙い
+
+- `bg_clip` が有効なときの左端 clip 領域を、本体ループの外で先に処理する
+- clip の残り 8pixel だけを専用 slow path で処理し、それ以降のタイル列は
+  `pixel_x >= 8` 前提で fast path に乗せやすくする
+- `0.0.84` の「半端タイル分離」を、左端 clip ケースへもう一段広げる
+
+### 9.19 `0.0.87` の狙い
+
+- sprite あり通常タイル列で、背景 8pixel の生成と sprite overlay を段階的に分離する
+- 背景 8pixel を先にまとめて作り、その後に sprite overlay だけを当てる形へ寄せる
+- sprite 有りでも背景 bit 展開側の fast path を保ちやすくする
+
+### 9.20 `0.0.88` の狙い
+
+- sprite あり通常タイル列の 8pixel 処理を `static inline` helper へ切り出す
+- 背景 8pixel 生成と sprite overlay 適用の境界を固定し、
+  block 単位処理の形を崩さずに次の比較ができるようにする
+
+### 9.21 `0.0.90` の狙い
+
+- `0.0.88` の helper 化は perf 改善が見えなかったため採らない
+- sprite あり通常タイル列の内容を `0.0.87` 相当に戻し、
+  helper 化だけを外した戻し版を固定する
+
+### 9.22 `0.0.91` の狙い
+
+- `script/mesen2_memo.txt` を `/nes2` 前提の備忘録へ整理する
+- `nes1` 固定パスや古い説明を外し、Mesen2 実行バイナリ、ROM 置き場、
+  headless 実行例、Windows/WSL 利用時の注意点をいまの運用に合わせて残す
+
+### 9.23 `0.0.92` の狙い
+
+- `Lode Runner` の画面乱れについて、Mesen2 はデバッガ用途だけで使って
+  `$2000/$2005/$2006/$2007` の挙動を観測した
+- `mapper0` の縦ミラー設定そのものではなく、`$2007` write 時の
+  rendering 中 loopy-style increment が本命と判断した
+- `0.0.92` では `PPU_RegisterWrite($2007)` を `fixNES` と同じ
+  `R0_INC_ADDR ? +32 : +1` の単純加算へ戻し、mid-frame nametable fill の
+  書き込み先が崩れないかを確認する
+
+### 9.24 `0.0.93` の狙い
+
+- `0.0.92` で変化が無かったため、次は `PPU_UpDown_Clip` に注目した
+- 現状は上端/下端の clip 行で `PPU_DrawLine()` が即 return しており、
+  loopy の X reload と Y increment まで止まっていた
+- `0.0.93` では rendering 有効時、clip 行でも loopy 更新だけは進めるようにし、
+  platform 都合の border clip が scroll/nametable 基準を崩さないか確認する
+
+### 9.25 `0.0.94` の狙い
+
+- `Lode Runner` は gameplay は正常だが title/menu だけ壊れているため、
+  draw hot path ではなく title/menu 初期化時の PPU 制御を本命と見直した
+- Mesen2 をデバッガとして観測すると、`$2002` を長くポーリングした後に
+  rendering off のまま palette / nametable を大量更新していた
+- 現行実装は VBlank 開始/終了を scanline 終端で反映しており、CPU から見る
+  VRAM 転送窓が 1 scanline 分短い可能性がある
+- `0.0.94` では VBlank 開始/終了を scanline 開始側へ寄せて、
+  title/menu の VRAM upload 窓不足が原因かどうかを確認する
+
+### 9.26 `0.0.95` の狙い
+
+- `Lode Runner` の title/menu が壊れるだけでなく、gameplay 後の title に
+  gameplay 画面の背景が残る、別 ROM 後の title に前のゲーム背景が残る、
+  という観測が出た
+- これは PPU レジスタ時序より、`PPURAM` の nametable 内容が session を跨いで
+  残っている症状と強く整合する
+- `0.0.95` では `PPU_Init()` で `PPURAM` 全体を clear し、
+  title/menu 背景が前のゲームの VRAM 残骸に引きずられていないか確認する
+
+### 9.27 `0.0.96` の狙い
+
+- `0.0.95` で session 跨ぎの残骸は整理できても、起動直後の title 自体は
+  依然として壊れている
+- 残る大きい差分として、`$2007` read の palette 特例、read buffer 更新、
+  increment 後の shadow read が `fixNES` とずれていた
+- `0.0.96` では `PPU_RegisterRead($2007)` を `fixNES` 寄りにして、
+  title/menu 初期化で使われる PPUDATA read path の差を切り分ける
+
+### 9.28 `0.0.97` の狙い
+
+- `パワーオン → START → リセット → ESC` の実ログから、速度や ROM load は
+  正常でも、reset と quit の分岐が見えていないことが分かった
+- `0.0.97` では `InfoNES_Main()` と `main()` に最小の UART ログを足して、
+  `PAD_SYS_RESET` / `PAD_SYS_QUIT` / session end / menu re-entry を明示する
+- 狙いは、画面残りが `NES reset` と `menu return` のどちらで起きるかを
+  まず因果関係として切り分けること
+
+### 9.29 `0.0.98` の狙い
+
+- `0.0.97` のログで、`RESET` は同一 session 内の `InfoNES_Reset()`、
+  `ESC` は session end 後の menu return だと切り分けられた
+- つまり gameplay 後 title の背景残りは、同一 ROM 内 reset 後に title が
+  全面再描画しない部分へ gameplay 画面が残っている可能性が高い
+- `0.0.98` では `PAD_SYS_RESET` 直後に NES viewport を黒クリアし、
+  reset 後の残像問題を起動直後 title の恒常的な壊れと分離する
+
+### 9.30 `0.0.98` 後の診断メモ
+
+- `0.0.98` でも `Lode Runner` の title/menu は変化しなかった
+- ここまでで効かなかったものは、
+  - `$2007` write increment の単純化
+  - clip 行での loopy 更新維持
+  - VBlank 開始/終了位置の変更
+  - `$2007` read buffer / shadow read の `fixNES` 寄せ
+  - `PAD_SYS_RESET` 直後の viewport 黒クリア
+- 一方で `0.0.95` の `PPURAM` clear は効いており、
+  session 跨ぎ / ROM 跨ぎの背景残骸は減った
+- ただし初回 title 自体は依然として壊れており、
+  「単純な未初期化メモリ」だけが主犯ではない
+- `PPU_Init()` は `PPU_R0/R1/R2/R3/R7`、`PPU_Addr`、`PPU_Temp`、
+  `PPU_Scr_H_Bit`、`PPU_Latch`、`PPURAM`、`g_PalRAM`、`SPRRAM`
+  を明示的に 0 初期化している
+- そのため、次の本命は「値の初期化漏れ」より、
+  `Mesen2` では暗黙に成立している
+  `$2002` / VBlank / NMI / latch まわりの状態機械差と判断した
+- 今後の調査対象:
+  - `$2002` 読みでの VBlank flag clear のタイミング
+  - VBlank 開始/終了と NMI の関係
+  - title/menu 初期化中の `rendering off` 前提での PPU 内部状態遷移
+
+### 9.31 `0.0.99` の狙い
+
+- `Lode Runner` では palette/attribute そのものより、
+  `$2002/$2005/$2006/$2007` と `w/t/v/x` の状態遷移差が本命と再整理した
+- `0.0.99` では挙動変更を止め、`$2002` read と `$2001` write の
+  `addr/temp/fineX/latch` ログを少数回だけ追加する
+- Mesen2 正常系の title/menu 初期化シーケンスと比較し、
+  `w` のクリアや rendering on/off 境界での PPU レジスタ状態が
+  どこでずれているかを先に事実で確定する
+
+### 9.32 `0.0.100` の狙い
+
+- `0.0.99` のログでは `$2002` read が大量に並ぶだけで、
+  最初の `VBlank=1` 後に起きる `$2005/$2006/$2007` を取り切れていない
+- `0.0.100` では最初の `VBlank=1` 検出を capture 開始点にして、
+  その後の少数回だけを集中的に記録する
+- Mesen2 側の trace script も同じ capture 条件へ寄せて、
+  `w/t/v/x` の比較対象をそのまま並べられる形にする
+
+### 9.33 `0.0.101` の狙い
+
+- `0.0.100` でも capture 窓の大半が `$2002` read に埋まり、
+  比較したい最初の `$2001/$2005/$2006/$2007` が十分に見えなかった
+- `0.0.101` では `$2002` を完全に capture 開始トリガ専用にし、
+  以後は原則ログしない
+- capture 窓も 48～64 イベントへ縮めて、
+  `Lode Runner` title/menu 初期化直後の scroll/address 設定列だけを
+  Mesen2 正常系と直接比較しやすくする
+
+### 9.34 `0.0.102` の狙い
+
+- `0.0.101` では `$2001` の連打が capture 窓を占有し、
+  比較したい `$2005/$2006/$2007` にまだ届かなかった
+- `0.0.102` では `$2001` の記録も最初の 4 件に制限し、
+  scroll/address 設定列を優先して取る
+
+### 9.35 `0.0.103` の狙い
+
+- Mesen2 正常系では最初の `R2002(VBlank=1)` の直後に
+  `W2001=00 -> W2006 -> W2005 -> W2000 -> W2007...` へ進む
+- Picocalc 側は同じ capture 条件でも `$2001` の on/off だけで止まり、
+  title 初期化の VRAM 更新列へ入れていない
+- `fixNES` を見ると `R2002` 後の VBlank/NMI には
+  `VBlankFlagCleared / VBlankClearCycle / NMIallowed` があり、
+  読み取った VBlank を同一 VBlank 中の NMI にそのまま食わせない
+- `0.0.103` では coarse scanline 実装の範囲で、
+  `$2002` read 時の pending NMI 抑止と、VBlank 開始直後の NMI を
+  1 scanline 遅らせる最小修正を試す
+
+### 9.36 `0.0.104` の狙い
+
+- `0.0.103` は変化なし
+- ここで観測コードを見直すと、`$2005/$2006/$2007` の capture ログが
+  `NESCO_DIAGNOSTICS` 条件の内側に残っていた
+- そのため `0.0.101`〜`0.0.103` の通常ビルドでは、
+  比較したかった scroll/address 設定列が最初から出ていなかった
+- `0.0.104` では挙動変更は止めて、
+  まず `$2005/$2006/$2007` の capture ログを通常ビルドでも出るように直す
+
+### 9.37 `0.0.105` の狙い
+
+- `0.0.104` で Mesen2 と同じ title 初期化列
+  (`$2001 -> $2006 -> $2005 -> $2007...`) が Picocalc 側にも見えた
+- これで「Picocalc だけが R2002 後に VRAM 更新列へ入れていない」仮説は外れた
+- 次の本命は PPU 列そのものではなく、
+  `R2002` 直後に CPU が見ている `PC / A / P(flags)` の差
+- `0.0.105` では Picocalc と Mesen2 の両方で
+  `CAPTURE_START` に `PC / A / P` を載せて比較できるようにする
+
+### 9.38 `0.0.106` の狙い
+
+- `0.0.105` の比較では `R2002` の瞬間の `PC=C2B0` は一致した
+- ただし CPU 状態は一致せず、
+  Picocalc は `$2002=80 A=00 P=26`、
+  Mesen2 は `R2002=90 A=10 P=04` だった
+- ここで差として残ったのは `PPUSTATUS` の low bits と、
+  write-only PPU register read の返り値
+- 現行実装は `$2002` を `PPU_R2` 直返し、write-only read は常に `0x00`
+  だが、これは Mesen2 の `R2002=90` と合わない
+- `0.0.106` では PPU open bus を最小実装し、
+  `$2002` の low 5 bits と write-only read をその bus 由来にする
+
+### 9.39 `0.0.107` の狙い
+
+- `0.0.106` で `R2002=90` と `A=10` は Mesen2 に揃った
+- 残る観測差は `P(flags)` と、`C2B0` 周辺の分岐へ効く zero-page 状態
+- `C2A8..C2B0` 付近のコードは `LDA $2002` ポーリングの後、
+  `$02/$10/$11` を使って title 初期化の分岐へ進む
+- `0.0.107` では `CAPTURE_START` に `$00/$01/$02/$10/$11` を載せて、
+  Picocalc と Mesen2 の zero-page を直接比較できるようにする
+
+### 9.40 `0.0.108` の狙い
+
+- `0.0.107` の比較では zero-page も Mesen2 と一致した
+- 残る観測差は `P(flags)` だけだった
+- `fixNES` の `ppuInit()` は初期化直後に `PPUSTATUS.VBlank` を立てている
+- `0.0.108` では他は触らず、`PPU_Init()` 直後の
+  `PPUSTATUS.VBlank` 初期値だけを `fixNES` に合わせる
+
+### 9.41 `0.0.109` の狙い
+
+- `0.0.108` の `PPUSTATUS.VBlank` 初期値は採用する
+- ただし `fixNES` との差として、`$2002` read 抑止中でも
+  こちらは VBlank 開始で `PPUSTATUS.VBlank` を毎回立てていた
+- `0.0.109` では `ReadReg2` 相当の最小差分として、
+  抑止中は VBlank 開始で `PPUSTATUS.VBlank` も立てない
+
+### 9.42 `0.0.110` の狙い
+
+- `0.0.109` の次段として、`fixNES` の `ReadReg2` にさらに寄せる
+- `0.0.110` では `$2002` read があったこと自体を 1 段保持する
+  `ReadReg2` 相当フラグを追加し、
+  その VBlank 開始では `PPUSTATUS.VBlank` と NMI 判定の両方を抑止する
+
+### 9.43 `0.0.111` の狙い
+
+- `0.0.110` はグレー画面でハングしたため不採用
+- `0.0.111` では `ReadReg2` 相当フラグ追加だけを戻し、
+  `0.0.109` 相当の PPU 状態へ戻す
+
+### 9.44 `0.0.112` の狙い
+
+- `0.0.108` の `PPUSTATUS.VBlank` 初期値は維持する
+- その次の 1 手として、初回フレームの開始位置だけを見直す
+- `0.0.112` では `PPU_Init()` の `g_nScanLine` を `261` にして、
+  最初の `PPU_Cycle()` が pre-render line から始まるようにする
+
+### 9.45 `0.0.113` の狙い
+
+- NESdev の power-up/reset 挙動に合わせる 1 手として、
+  reset 後しばらく `$2000/$2001/$2005/$2006` write を無視する
+- `0.0.113` では最初の VBlank が来るまでこの 4 register への write を
+  PPU 状態へ反映しない
+
+### 9.46 `0.0.114` の狙い
+
+- NESdev の `PPU power up state` では `PPUSTATUS` bit7 は
+  reset 後 unchanged であり、固定 1 前提ではない
+- `0.0.114` では `PPU_Init()` の `PPU_R2` 初期値を 0 に戻し、
+  `PPUSTATUS.VBlank` を power/reset 直後から固定で立てない
