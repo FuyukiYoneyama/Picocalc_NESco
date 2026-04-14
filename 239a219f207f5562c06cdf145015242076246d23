@@ -1,0 +1,8 @@
+### 9.57 `0.0.124` の狙い
+
+- `blargg` の結果画面は記号表示で、写真だけでは failure code を
+  毎回一意に読みにくい
+- `vram_access.nes` と `vbl_clear_time.nes` の ROM 本体を確認すると、
+  `result` 変数は zero-page `$00F0` に置かれている
+- そこで `0.0.124` では CPU RAM write 経路で `$00F0` への書き込みだけを
+  UART に出し、画面キャプチャに頼らず failure code を事実として確認する
