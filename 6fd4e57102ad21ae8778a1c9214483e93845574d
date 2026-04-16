@@ -1,0 +1,6 @@
+0.0.157 delay pre-render vertical copy
+
+- 実装変更として pre-render の vertical copy を VBLANK_END_SCANLINE 開始時の即時反映から外し、その scanline の後半相当へ遅らせた
+- VBlank clear 自体は pre-render 開始時に維持しつつ、PPU_Addr vertical copy だけを PPU_Cycle() 終端へ送っている
+- 目的は loopy vertical copy の位置を pre-render 後半へ少し寄せ、scan=0 前後での PPU_Addr/PPU_Temp の単純化を抑えられるかを見ること
+- 次は 0.0.157 を実機へ入れ、Lode Runner の背景崩れと PPU_PRERENDER_COPY_* / PPU_DRAWLINE_* の変化を確認する
