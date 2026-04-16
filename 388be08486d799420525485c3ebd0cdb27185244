@@ -15,3 +15,24 @@
   必要なときだけ `NESCO_RUNTIME_LOGS=ON` で同じ観測を復活できる形にした
 - `build/` で `make clean && make -j4` を実行し、
   `warning:` / `error:` が出ないことを確認した
+
+### 9.82 `0.0.148` の小粒 timing 修正
+
+- 書いた日時: `2026-04-16 20:43 JST`
+- 現行 core の仕様差分のうち、
+  まず副作用が小さいものから詰める方針で
+  controller / OAM DMA / PPU timing の局所修正を入れた
+- `core/cpu.c` では、
+  標準コントローラ前提で `$4016/$4017` の 8bit 読み出し後は
+  `1` を返すように変更した
+- `core/cpu.c` では、
+  `$4014` OAM DMA の停止サイクルを
+  `g_wPassedClocks` の parity を見て `513/514` で分岐させた
+- `core/ppu.c` では、
+  rendered odd frame の終端で CPU scanline phase を 1 つ進める
+  最小の odd-frame 補正を追加した
+- `core/ppu.c` では、
+  VBlank 中に `$2000` の NMI enable を 0→1 にしたとき
+  pending NMI を立てる最小修正を追加した
+- `PROGRESS_TODO.md` に今回の変更点と次の観測対象を追記した
+- `build/` で `make -j4` を実行し、ビルド成功を確認した
