@@ -1,0 +1,6 @@
+0.0.155 PPU_DrawLine entry probe
+
+- 0.0.154 でも PPU_LOOPY_START は scan=241 だが PPU_LOOPY_* は scan=4 から始まった
+- post-window probe 中だけ PPU_DrawLine() の入口と early return を PPU_DRAWLINE_ENTER / BORDER / MASKED として記録するようにした
+- 目的は scan=242..3 で PPU_DrawLine() 自体が走っていないのか、border/clip 条件で戻っているのかを切り分けること
+- 次は 0.0.155 を実機へ入れ、PPU_DRAWLINE_* と PPU_LOOPY_* の関係を確認する
