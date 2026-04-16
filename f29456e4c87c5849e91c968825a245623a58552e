@@ -1,0 +1,33 @@
+### 9.85 `0.0.151` の post-window loopy probe
+
+- 書いた日時: `2026-04-16 21:27 JST`
+- `0.0.150` の比較では、
+  second-window 後半の
+  `W2006 / W2005 / W2000`
+  列と再設定先アドレスは Pico 側でもかなり揃っていた
+- そのため、残る本命を
+  register write 列そのものではなく
+  render 側の loopy 更新
+  (`reload_x / coarse_x / fine_y`)
+  と見て次へ進めることにした
+- `0.0.151` では、
+  `end_window` 後に rendering が戻った最初の 8 scanline だけ
+  `PPU_LOOPY_BEFORE_RELOAD`
+  `PPU_LOOPY_AFTER_RELOAD`
+  `PPU_LOOPY_TILE_INC`
+  `PPU_LOOPY_BEFORE_FINEY`
+  `PPU_LOOPY_AFTER_FINEY`
+  を出す軽い probe を追加した
+- 既存の second-window 用
+  `PPU_W2006 / PPU_W2007 / PPU_WIN_W2005 / PPU_WIN_W2000`
+  はそのまま残している
+- `build/` で `cmake -S . -B build -DNESCO_RUNTIME_LOGS=ON`
+  の後に `make -j4` を実行し、
+  `PicoCalc NESco Ver. 0.0.151 Build Apr 16 2026 21:26:22`
+  を生成した
+- 次はこの build を実機へ入れ、
+  `PPU_LOOPY_*` を含む UART ログを取り、
+  Mesen2 側の
+  `mesen_loderunner_second_window_loopy.log`
+  と直接並べて、
+  loopy 更新のどの段で差分が出るかを確認する
