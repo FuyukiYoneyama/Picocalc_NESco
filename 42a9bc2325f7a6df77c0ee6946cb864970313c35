@@ -1,0 +1,7 @@
+0.0.163 Remove $2006 second-write PPU_R7 priming
+
+- Rechecked the real side effects after the second $2006 write on the restored 0.0.155 base.
+- InfoNES_SetupScr() is still a no-op in this platform.
+- Removed the immediate PPU_R7 priming for pattern-table addresses after the second $2006 write.
+- Built with NESCO_RUNTIME_LOGS=ON.
+- Build ID: PicoCalc NESco Ver. 0.0.163 Build Apr 16 2026 22:52:13
