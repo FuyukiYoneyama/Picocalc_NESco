@@ -1,0 +1,7 @@
+0.0.159 Narrow pre-render vertical copy
+
+- Keep the pre-render copy at VBLANK_END_SCANLINE start.
+- Copy only loopy vertical bits (0x7BE0: fine Y / coarse Y / NT-Y) from PPU_Temp to PPU_Addr.
+- Avoid pulling in non-vertical fields during pre-render copy after the strong regression seen in 0.0.157.
+- Built with NESCO_RUNTIME_LOGS=ON.
+- Build ID: PicoCalc NESco Ver. 0.0.159 Build Apr 16 2026 22:29:17
