@@ -1,0 +1,6 @@
+0.0.162 Restore 0.0.155 ppu.c from git
+
+- Restored core/ppu.c by git checkout from commit f417d2c.
+- Verified core/ppu.c has no diff against f417d2c after checkout.
+- Built with NESCO_RUNTIME_LOGS=ON.
+- Build ID: PicoCalc NESco Ver. 0.0.162 Build Apr 16 2026 22:47:10
