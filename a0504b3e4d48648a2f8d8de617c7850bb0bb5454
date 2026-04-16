@@ -1,0 +1,6 @@
+0.0.164 Focus logs on first visible frame
+
+- Reviewed IMG_8231.MOV against pico20260416_230124.log and confirmed the first visible game frame is already corrupted.
+- Kept 0.0.162 behavior as the base and disabled second-window/post-window runtime log arming/output in core/ppu.c.
+- Left title capture logs enabled so comparison can focus on title-init and first visible frame instead of later noisy probes.
+- Built with NESCO_RUNTIME_LOGS=ON; Build ID: PicoCalc NESco Ver. 0.0.164 Build Apr 16 2026 23:15:26.
