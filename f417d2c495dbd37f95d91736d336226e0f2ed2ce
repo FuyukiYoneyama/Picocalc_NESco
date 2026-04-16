@@ -1,0 +1,6 @@
+0.0.156 pre-render vertical copy probe
+
+- 0.0.155 で scan=0..3 は PPU_DrawLine() に入っているが PPU_DRAWLINE_BORDER に落ちることが確認できた
+- 次の本命を pre-render での vertical copy 位置に絞るため、VBLANK_END_SCANLINE での PPU_Addr copy 前後を PPU_PRERENDER_COPY_BEFORE / AFTER として記録するようにした
+- 目的は scan=0 に入る前に PPU_Addr/PPU_Temp がどこで 0000 系へ寄るのかを確認すること
+- 次は 0.0.156 を実機へ入れ、PPU_PRERENDER_COPY_* と PPU_DRAWLINE_* のつながりを確認する
