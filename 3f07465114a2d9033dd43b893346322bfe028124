@@ -1,0 +1,6 @@
+0.0.160 Restore 0.0.156 pre-render copy base
+
+- Restore the pre-render vertical copy expression to the 0.0.156 form.
+- Keep a small adjustment only: run that copy only when R1_RENDERING is enabled.
+- Built with NESCO_RUNTIME_LOGS=ON.
+- Build ID: PicoCalc NESco Ver. 0.0.160 Build Apr 16 2026 22:36:17
