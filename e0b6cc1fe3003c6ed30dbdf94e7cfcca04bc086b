@@ -1,0 +1,6 @@
+0.0.152 post-window phase fix
+
+- pico20260416_212200.log で end_window が 2 回出る一方、PPU_LOOPY_* が 0 件だった
+- $2001 != 0 の再書き込みで phase==2 を即座に 0 に戻していたため、PPU_DrawLine() 前に probe が止まる可能性があった
+- phase==1 の最初の nonzero write だけで end_window と post-window probe を開始し、phase==2 中の追加 nonzero write では probe を止めないようにした
+- 次は 0.0.152 を実機へ入れ、PPU_LOOPY_* が出るかを確認する
