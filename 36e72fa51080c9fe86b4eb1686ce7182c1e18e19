@@ -1,0 +1,7 @@
+0.0.161 Revert 0.0.160 pre-render experiment
+
+- pico20260416_223749.log still showed a black screen on 0.0.160.
+- The R1_RENDERING guard did not prevent pre-render copy from running in the failing case.
+- Reverted the 0.0.160 guard so pre-render copy matches the 0.0.156 code path again.
+- Built with NESCO_RUNTIME_LOGS=ON.
+- Build ID: PicoCalc NESco Ver. 0.0.161 Build Apr 16 2026 22:39:44
