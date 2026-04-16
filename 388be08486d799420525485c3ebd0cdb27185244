@@ -1,0 +1,17 @@
+### 9.81 `0.0.147` の整理
+
+- 書いた日時: `2026-04-16 20:05 JST`
+- プレイ中の UART 出力でゲーム進行が止まりやすくなっていたため、
+  実機観測用の重いランタイムログを一括で切れるように整理した
+- `CMakeLists.txt` に `NESCO_RUNTIME_LOGS` オプションを追加し、
+  既定値は `OFF` にした
+- `core/ppu.c` の
+  `PPU_INIT` / `PPU_DUMP` / `PPU_W2006` / `PPU_W2007` / `PERF`
+  などのランタイムログは
+  `NESCO_RUNTIME_LOGS` 定義時だけ有効になるように変更した
+- `core/cpu.c` の `CPU_LR` も同じく
+  `NESCO_RUNTIME_LOGS` 定義時だけ有効になるように変更した
+- これにより、通常ビルドではログ出力なしでプレイ可能、
+  必要なときだけ `NESCO_RUNTIME_LOGS=ON` で同じ観測を復活できる形にした
+- `build/` で `make clean && make -j4` を実行し、
+  `warning:` / `error:` が出ないことを確認した
