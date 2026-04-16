@@ -1,0 +1,5 @@
+0.0.166 Extend title capture window
+
+- 0.0.165 showed that title_fill_early had some 20-filled nametable data, but frame_on had returned to mostly 00.
+- Extended the title capture runtime window from 96 to 224 events so the writes between those two dump points stay visible in one UART log.
+- Built with NESCO_RUNTIME_LOGS=ON; Build ID: PicoCalc NESco Ver. 0.0.166 Build Apr 16 2026 23:26:57.
