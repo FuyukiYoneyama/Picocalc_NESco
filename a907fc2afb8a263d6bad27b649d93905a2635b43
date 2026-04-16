@@ -1,0 +1,1 @@
+0.0.168 Disable title/frame runtime logs\n\n- stop title-init and frame-on diagnostics after the 0.0.167 Lode Runner fix is confirmed\n- no behavior change, only disable PPU_INIT / PPU_TITLE_* / PPU_DUMP runtime output\n- built Picocalc_NESco.elf and confirmed Build ID: PicoCalc NESco Ver. 0.0.168 Build Apr 17 2026 00:01:45
