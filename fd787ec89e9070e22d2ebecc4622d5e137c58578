@@ -1,0 +1,31 @@
+### 9.84 `0.0.150` の second-window scroll/control 追跡
+
+- 書いた日時: `2026-04-16 21:05 JST`
+- `0.0.149` の比較で、
+  タイトル初期化先頭の
+  `R2002 -> W2001 -> W2006 -> W2005 -> W2000 -> W2007`
+  列は Pico 側でも Mesen2 と揃っていることを確認できた
+- 一方、Lode Runner の崩れ本体は
+  2 回目 `PPUMASK=00` 窓の後半に残っており、
+  `DD5D/DD74` 系の `$2006` 再設定まわりが引き続き主戦場
+- ここでは `$2006/$2007` だけでなく、
+  直前後の `$2005/$2000` と
+  `PPU_Addr/PPU_Temp/R2`
+  も並べないと、loopy state のズレ開始点を切りにくい
+- そこで `0.0.150` では、
+  second-window 中かつ `PPU_R1==00` のときだけ
+  `PPU_WIN_W2005` と `PPU_WIN_W2000`
+  を追加で出すようにした
+- 既存の `PPU_W2006/PPU_W2007/PPU_DUMP` と組み合わせることで、
+  Pico 側でも
+  `W2005/W2000/W2006/W2007`
+  のまとまりを直接比較できる
+- `build/` で `cmake -S . -B build -DNESCO_RUNTIME_LOGS=ON`
+  の後に `make -j4` を実行し、
+  `PicoCalc NESco Ver. 0.0.150 Build Apr 16 2026 21:03:50`
+  を生成した
+- 次はこの build を実機へ入れ、
+  second-window 中の
+  `PPU_WIN_W2005/PPU_WIN_W2000/PPU_W2006`
+  を `mesen_nmi_timing.log` と突き合わせて、
+  `$2006` 再設定直前の state 差分を確認する
