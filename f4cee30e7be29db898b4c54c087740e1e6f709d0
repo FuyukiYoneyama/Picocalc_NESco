@@ -1,0 +1,6 @@
+0.0.165 Add title/frame VRAM dumps
+
+- Compared 0.0.164 Pico title-init log against Mesen2 and found the observed early register-write sequence still matched.
+- Added broader Pico VRAM dumps using ppu_diag_dump_title_vram() at title_palette_done, title_fill_early, and first rendering-enable frame_on.
+- Kept second-window/post-window logs disabled so the new dumps stay focused on first visible frame comparison.
+- Built with NESCO_RUNTIME_LOGS=ON; Build ID: PicoCalc NESco Ver. 0.0.165 Build Apr 16 2026 23:20:52.
