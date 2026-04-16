@@ -1,0 +1,6 @@
+0.0.154 VBlank ordering split
+
+- scanline 241 開始時に VBlank/NMI と LoadFrame/Pad/MapperVSync をまとめて進めていた処理を分離した
+- VBlank flag と NMI pending は従来どおり CPU がその scanline を実行する前に立てる
+- LoadFrame/Pad/MapperVSync は K6502_Step() の直後へ遅らせ、CPU から見える順序を整理した
+- 次は 0.0.154 を実機へ入れ、タイトル崩れと PPU_LOOPY_START/PPU_LOOPY_* の開始位置を確認する
