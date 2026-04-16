@@ -1,0 +1,6 @@
+0.0.153 post-window probe window expansion
+
+- 0.0.152 では PPU_LOOPY_* は出たが scan=4 から始まり、second-window 直後を直接見ているとはまだ言えなかった
+- post-window probe の観測窓を 8 から 32 scanline に広げた
+- PPU_LOOPY_START を追加し、probe 開始時点の scan/addr/temp/latch/r0/r1/r2 を即確認できるようにした
+- 次は 0.0.153 を実機へ入れ、PPU_LOOPY_START と PPU_LOOPY_* の開始位置を確認する
