@@ -1,0 +1,6 @@
+0.0.158 revert delayed pre-render copy
+
+- 0.0.157 で入れた pre-render vertical copy の遅延変更を取り下げた
+- pico20260416_221832.log では PPU_PRERENDER_COPY_AFTER 直後に addr=0408 などへ強く寄る状態が大量に出ており、実機では黒画面になった
+- まずは表示復帰を優先し、pre-render vertical copy は従来どおり VBLANK_END_SCANLINE 開始時の即時反映へ戻した
+- 次は 0.0.158 を実機へ入れ、表示復帰を確認する
