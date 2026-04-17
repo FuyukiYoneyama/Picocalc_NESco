@@ -1,0 +1,6 @@
+0.0.203 Start CPU Step 3 with RAM fast path
+
+- widened the read_cpu_data/K6502_Read boundary
+- added internal RAM fast path for $0000-$1FFF reads inside read_cpu_data()
+- added cpu_ram_fast PERF counter
+- build: Apr 18 2026 01:50:33
