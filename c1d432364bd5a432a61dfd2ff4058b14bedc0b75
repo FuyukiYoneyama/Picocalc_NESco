@@ -1,0 +1,6 @@
+0.0.179 Split compositeSprites PERF and skip empty rows
+
+- add PERF fields spr_fetch_us, spr_store_us, spr_skip_rows, spr_write_px
+- split compositeSprites() cost into fetch/setup side and sprite_buf write side
+- skip fully transparent sprite rows before entering the pixel loop
+- build confirmed: PicoCalc NESco Ver. 0.0.179 Build Apr 17 2026 15:44:54
