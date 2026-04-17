@@ -1,0 +1,6 @@
+0.0.200 Safe CPU zero-page writes
+
+- extended CPU Step 2 safe domain into zero-page writes
+- switched official zero-page STA/STX/STY and zero-page RMW writeback to direct RAM writes
+- added cpu_zp_w PERF counter
+- build: Apr 18 2026 01:26:11
