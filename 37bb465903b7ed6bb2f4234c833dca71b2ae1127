@@ -1,0 +1,6 @@
+0.0.173 Revert 0.0.172 sprite span experiment
+
+- 0.0.172 caused visible sprite/character flicker in runtime testing
+- core/ppu.c was restored from commit db83abb (0.0.171) via git checkout
+- retained the 0.0.171 sprite_min_x/sprite_max_x optimization and dropped the 2-span specialization
+- Build ID: Apr 17 2026 14:50:20
