@@ -1,0 +1,6 @@
+0.0.209 Revert ineffective sprite tile mask precheck
+
+- reverted core/ppu.c to the 0.0.207 basis from git after 0.0.208 regressed in PERF
+- facts from pico20260418_075745.log: cpu_hz and draw_us worsened versus 0.0.207, and spr_comp_us/spr_expand_us/spr_overlay_us/spr_cache_us/ovl_tiles/ovl_pixels all trended higher
+- conclusion: tile-mask precheck alone was not effective in this scene
+- next sprite work should target overlay-body straightening or sprite_buf representation changes instead of precheck tuning
