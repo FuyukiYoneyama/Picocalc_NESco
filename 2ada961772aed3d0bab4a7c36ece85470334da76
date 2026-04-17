@@ -1,0 +1,1 @@
+0.0.210: straightened the fast 8px overlay branch by gathering tile opaque state once into an opaque mask, while keeping sprite_buf/stamp semantics unchanged. Built with make clean && make -j4; Build ID: PicoCalc NESco Ver. 0.0.210 Build Apr 18 2026 08:10:34.
