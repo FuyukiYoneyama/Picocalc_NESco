@@ -1,0 +1,1 @@
+0.0.169 Re-enable PERF output for speed check\n\n- keep gameplay runtime logs disabled\n- re-enable the 1-second [PERF] aggregate on normal Pico build\n- built Picocalc_NESco.elf and confirmed Build ID: PicoCalc NESco Ver. 0.0.169 Build Apr 17 2026 00:22:46
