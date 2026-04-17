@@ -1,0 +1,1 @@
+0.0.185: Replaced the simple linear audio mix with pulse and TND lookup tables, and removed the extra centered-output gain added in 0.0.184. Built successfully as PicoCalc NESco Ver. 0.0.185 Build Apr 17 2026 22:43:10.
