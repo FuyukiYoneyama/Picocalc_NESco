@@ -1,0 +1,1 @@
+0.0.212: reverted the 0.0.211 fast overlay branch reshape by restoring core/ppu.c from 0.0.210 via git checkout after the user reported horizontal line flicker. Built with make clean && make -j4; Build ID: PicoCalc NESco Ver. 0.0.212 Build Apr 18 2026 08:21:39.
