@@ -1,0 +1,7 @@
+0.0.197
+
+Step 3 replaced full sprite_buf clears with stamp-based validity tracking so stale sprite bytes are ignored without a per-scanline memset.
+
+Overlay and tile-opaque checks now honor the stamp generation, keeping sprite semantics while removing the old whole-buffer clear from the hot path.
+
+Build ID: Apr 18 2026 01:32:59
