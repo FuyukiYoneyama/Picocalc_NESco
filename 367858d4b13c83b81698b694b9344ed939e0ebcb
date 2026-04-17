@@ -1,0 +1,7 @@
+0.0.198
+
+Started CPU hot-path tightening by bypassing K6502_Read/Write for accesses that are provably internal RAM: stack push/pop, zero-page reads, zero-page indirect pointer fetches, and official zero-page RMW reads.
+
+This keeps CPU semantics the same while shaving overhead from guaranteed RAM-only operations before looking at broader CPU path changes.
+
+Build ID: Apr 18 2026 01:43:42
