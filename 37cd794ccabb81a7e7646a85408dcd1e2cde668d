@@ -1,0 +1,6 @@
+0.0.176 Revert ineffective sprite-row optimization
+
+- 0.0.175 did not show a meaningful improvement in runtime testing or PERF logs
+- core/ppu.c was restored from commit 0dfe2d1 (0.0.174) via git checkout
+- retained the 0.0.174 compositeSprites fixed-cost trimming and dropped the row-skip/px-range optimization
+- Build ID: Apr 17 2026 15:03:51
