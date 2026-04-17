@@ -1,0 +1,6 @@
+0.0.207 Add expand/overlay split PERF counters
+
+- keep behavior unchanged and extend sprite PERF for the next design step
+- PERF now reports spr_expand_us (former spr_store_us), spr_overlay_us, ovl_tiles and ovl_pixels
+- ovl_pixels counts actual overlay pixels touched across fine-X/clip loops and 8px tile overlay paths
+- purpose: decide whether expand or overlay is the next dominant sprite cost after cache stabilization
