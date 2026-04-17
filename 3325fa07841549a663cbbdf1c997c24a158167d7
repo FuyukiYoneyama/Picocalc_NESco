@@ -1,0 +1,6 @@
+0.0.180 Split compositeSprites collect and expand
+
+- refactor compositeSprites() into a collect pass and an expand pass
+- collect minimal sprite-row info into rows[8] before palette/buffer expansion
+- keep the transparent-row skip and existing PERF split counters
+- build confirmed: PicoCalc NESco Ver. 0.0.180 Build Apr 17 2026 21:56:10
