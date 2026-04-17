@@ -1,0 +1,1 @@
+0.0.192: replace shared audio ring count with write/read delta SPSC ring to reduce false underruns and duplicate-sounding playback artifacts.
