@@ -1,1 +1,3 @@
 Correction: actual confirmed Build ID for 0.0.169 is PicoCalc NESco Ver. 0.0.169 Build Apr 17 2026 14:16:22.
+
+0.0.170 Add detailed PERF breakdown\n\n- keep title/frame gameplay logs disabled\n- extend [PERF] with lightweight draw-path counters for sprite and clip analysis\n- built Picocalc_NESco.elf and confirmed Build ID: PicoCalc NESco Ver. 0.0.170 Build Apr 17 2026 14:21:17
