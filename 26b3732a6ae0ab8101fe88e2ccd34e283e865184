@@ -1,0 +1,6 @@
+0.0.206 Extend narrow CPU Step 3 into read16 helpers
+
+- kept Step 3 in helper-local scope after 0.0.205
+- read16() now uses direct PRG reads for contiguous PRG addresses
+- read16_wrap() now precomputes wrapped high-byte address and uses direct PRG reads when both bytes are in PRG
+- purpose: reduce K6502_Read() usage in reset/IRQ vector fetch and JMP indirect helper paths without widening read_cpu_data()
