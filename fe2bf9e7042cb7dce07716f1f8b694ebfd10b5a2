@@ -1,0 +1,6 @@
+0.0.177 Skip unnecessary tile overlay in sprite range
+
+- added sprite_tile_has_opaque() for 8-pixel tiles
+- background fast path now stays on the cheap path when a tile lies inside sprite_min_x/max_x but contains no opaque sprite pixels
+- intended to reduce draw_us in heavier sp_max=6-8 scenes with broad sprite ranges
+- Build ID: Apr 17 2026 15:05:48
