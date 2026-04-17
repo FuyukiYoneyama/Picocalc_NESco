@@ -1,0 +1,6 @@
+0.0.178 Add sprite path perf split counters
+
+- add PERF fields spr_comp_us, spr_ovl_us, ovl_tiles
+- time compositeSprites() separately from sprite overlay work in PPU_DrawLine()
+- count overlay tiles actually entering sprite overlay paths
+- build confirmed: PicoCalc NESco Ver. 0.0.178 Build Apr 17 2026 15:31:23
