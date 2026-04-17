@@ -1,0 +1,5 @@
+0.0.202 One more CPU Step 2 pass
+
+- continued safe-domain CPU optimization one more time
+- aligned unofficial zero-page paths (SLO/RLA/SRE/RRA/DCP/ISB, SAX, LAX) with direct RAM access where address space is guaranteed internal RAM
+- build: Apr 18 2026 01:43:11
