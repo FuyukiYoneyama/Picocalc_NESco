@@ -1,0 +1,6 @@
+0.0.199 CPU-oriented PERF display
+
+- shifted [PERF] output toward CPU evaluation
+- added 1-second counters for prg_fast_reads, stack_ops, zp_reads, zp_ptr_reads, zp_rmw_reads
+- kept cpu_hz/cpu_pct/cpu_us plus compact sprite context for comparison
+- build: Apr 18 2026 01:13:42
