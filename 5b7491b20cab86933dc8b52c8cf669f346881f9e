@@ -1,0 +1,7 @@
+0.0.208 Replace sprite_tile_has_opaque precheck with tile mask
+
+- implement the first low-risk expand/overlay step after the 0.0.207 measurements
+- compositeSprites() now fills s_sprite_tile_mask[33] alongside sprite_buf/stamp
+- sprite_tile_has_opaque() uses the tile mask instead of eight sprite_pixel_has_opaque() probes
+- sprite_buf/stamp semantics and overlay body remain unchanged
+- purpose: remove the 8x precheck scan before tile overlay and start the tile-oriented path conservatively
