@@ -1,1 +1,9 @@
 Correction: actual confirmed Build ID for 0.0.170 is PicoCalc NESco Ver. 0.0.170 Build Apr 17 2026 14:25:08.
+
+0.0.171 Sprite overlay optimization for common 1-2 sprite lines
+
+- compositeSprites() now reports sprite_min_x/sprite_max_x for opaque pixels on the scanline
+- PPU_DrawLine() skips sprite_buf checks outside that range
+- 8-pixel BG fast path now bypasses sprite overlay work when the tile lies fully outside the sprite range
+- Build ID: Apr 17 2026 14:39:03
+- Goal: reduce draw_us in the common low-sp_max but high-sp_lines/sp_sum case seen in PERF logs
