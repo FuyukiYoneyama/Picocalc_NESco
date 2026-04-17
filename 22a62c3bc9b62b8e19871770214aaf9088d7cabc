@@ -1,0 +1,1 @@
+0.0.211: straightened the fast 8px sprite overlay branch further by computing opaque_mask once and splitting no-sprite tiles from overlay tiles inside the same branch. Built with make clean && make -j4; Build ID: PicoCalc NESco Ver. 0.0.211 Build Apr 18 2026 08:19:15.
