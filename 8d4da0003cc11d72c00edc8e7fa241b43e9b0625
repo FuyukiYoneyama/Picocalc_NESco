@@ -1,0 +1,1 @@
+0.0.186: Added one-second AUDIO_MIX diagnostics for ring overrun plus mix, noise, and DPCM peaks. Built successfully as PicoCalc NESco Ver. 0.0.186 Build Apr 17 2026 22:54:10.
