@@ -1,0 +1,6 @@
+0.0.174 Trim compositeSprites fixed work
+
+- delayed sprite palette expansion until the first visible sprite on the scanline
+- skip fully left-clipped sprites before pattern fetch when R1_CLIP_SP is active
+- kept the 0.0.173 rendering path otherwise unchanged
+- Build ID: Apr 17 2026 14:52:20
