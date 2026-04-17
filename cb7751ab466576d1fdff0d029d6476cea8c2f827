@@ -1,0 +1,1 @@
+0.0.194: raise audio sample rate from 16000 to 18000 as a middle-step check for muddy output while preserving the current mix and ring design.
