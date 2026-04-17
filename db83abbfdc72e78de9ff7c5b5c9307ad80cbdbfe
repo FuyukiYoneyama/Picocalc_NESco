@@ -1,0 +1,7 @@
+0.0.172 Narrow common sprite overlay checks with up-to-two spans
+
+- compositeSprites() now returns up to two sprite spans for the common <=2 sprite case
+- PPU_DrawLine() uses those spans for pixel and tile overlay checks
+- lines with 3 or more sprites fall back to the previous sprite_min_x/sprite_max_x range behavior
+- Build ID: Apr 17 2026 14:46:29
+- Goal: reduce draw_us further when two separated sprites share a scanline
