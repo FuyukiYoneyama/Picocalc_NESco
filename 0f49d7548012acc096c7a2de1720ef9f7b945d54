@@ -1,0 +1,7 @@
+0.0.196
+
+Step 2 moved sprite-cache build out of PPU_DrawLine and into the visible-line path in PPU_Cycle, while leaving a measured fallback for unexpected invalid cache use.
+
+PERF now includes spr_cache_miss so we can confirm whether draw-time fallback builds still happen after the timing change.
+
+Build ID: Apr 18 2026 01:19:33
