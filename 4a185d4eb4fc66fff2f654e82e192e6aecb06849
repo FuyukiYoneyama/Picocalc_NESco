@@ -1,0 +1,1 @@
+0.0.187: Hooked audio_debug_poll() into the scanline runtime so AUDIO and AUDIO_MIX diagnostics actually appear in UART logs. Built successfully as PicoCalc NESco Ver. 0.0.187 Build Apr 17 2026 22:58:10.
