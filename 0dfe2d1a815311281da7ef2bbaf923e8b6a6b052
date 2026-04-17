@@ -1,0 +1,6 @@
+0.0.175 Trim sprite-row fixed work
+
+- skip fully transparent sprite rows when plane0|plane1 == 0
+- precompute px_start/px_end for the sprite pixel loop to avoid per-pixel range checks
+- kept the 0.0.174 rendering behavior otherwise unchanged
+- Build ID: Apr 17 2026 15:00:22
