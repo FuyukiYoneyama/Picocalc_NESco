@@ -1,0 +1,5 @@
+0.0.183 Disable PERF log output
+
+- stop normal [PERF] UART output by disabling ppu_perf_poll logging
+- keep the code path otherwise unchanged so the current compatibility and speed baseline stays intact
+- build confirmed: PicoCalc NESco Ver. 0.0.183 Build Apr 17 2026 22:33:00
