@@ -1,0 +1,6 @@
+0.0.205 Narrow CPU Step 3 to PC fetch helpers
+
+- narrowed Step 3 after reverting the broad read_cpu_data() RAM fast path in 0.0.204
+- fetch_pc_byte() now reads PRG directly for PC >= 000
+- added fetch_pc_word() and switched EA_ABS() to use it
+- purpose: keep Step 3 in a local fetch/helper domain instead of widening read_cpu_data() again
