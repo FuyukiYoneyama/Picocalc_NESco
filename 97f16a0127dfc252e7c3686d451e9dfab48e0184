@@ -1,0 +1,7 @@
+0.0.195
+
+Step 1 of the sprite-path redesign added a scanline sprite cache, re-enabled PERF output, and introduced cache counters for rebuild time, rebuild count, and invalidations.
+
+The cache is invalidated on $2004 OAM writes, $4014 DMA, and PPUCTRL sprite-size changes so the first stage keeps live sprite semantics while making cache reuse measurable.
+
+Build ID: Apr 18 2026 00:45:20
