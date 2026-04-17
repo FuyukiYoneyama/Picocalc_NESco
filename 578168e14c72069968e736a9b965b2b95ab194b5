@@ -1,0 +1,5 @@
+0.0.213
+- 第2世代 expand/overlay 再設計の Step 1 として観測追加のみを実施
+- PERF に spr_mask_us と spr_resolve_us を追加
+- 挙動変更は入れず、tile precheck と overlay resolve の重さを切り分ける版
+- Build ID: PicoCalc NESco Ver. 0.0.213 Build Apr 18 2026 08:50:50
