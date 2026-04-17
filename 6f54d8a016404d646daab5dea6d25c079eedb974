@@ -1,0 +1,5 @@
+0.0.201 Safe CPU zero-page unofficial paths
+
+- continued CPU Step 2 into unofficial zero-page opcodes
+- switched unofficial zero-page reads/writes for SLO/RLA/SRE/RRA/DCP/ISB, SAX, LAX to direct RAM access where safe
+- build: Apr 18 2026 01:34:05
