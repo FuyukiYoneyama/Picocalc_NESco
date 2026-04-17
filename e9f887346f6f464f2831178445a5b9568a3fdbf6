@@ -1,0 +1,6 @@
+0.0.204 Revert CPU Step 3 RAM fast path
+
+- restored core/cpu.c, core/cpu.h, core/ppu.c to the 0.0.202 tracked state from git
+- kept CPU PERF display without cpu_ram_fast
+- Step 3 will continue later with a narrower fetch/helper redesign instead of broadening read_cpu_data()
+- build: Apr 18 2026 01:56:46
