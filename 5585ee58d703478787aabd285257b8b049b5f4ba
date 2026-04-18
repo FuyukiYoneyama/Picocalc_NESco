@@ -1,0 +1,5 @@
+0.0.215
+- 第2世代 expand/overlay 再設計の Step 3 として fast 8px overlay branch を tile-oriented 表現へ切替
+- fast branch は s_sprite_tile_mask / s_sprite_tile_behind_mask / s_sprite_tile_color を参照
+- 旧 sprite_buf/stamp は fallback pixel branch と非 fast 経路に残す
+- Build ID: PicoCalc NESco Ver. 0.0.215 Build Apr 18 2026 09:07:48
