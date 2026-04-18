@@ -1,0 +1,5 @@
+0.0.214
+- 第2世代 expand/overlay 再設計の Step 2 として 8px 中間表現を並行生成
+- sprite_tile_mask[33], sprite_tile_behind_mask[33], sprite_tile_color[33][8] を追加
+- 旧 sprite_buf/stamp は維持し、render 側の参照先はまだ切り替えない
+- Build ID: PicoCalc NESco Ver. 0.0.214 Build Apr 18 2026 09:01:52
