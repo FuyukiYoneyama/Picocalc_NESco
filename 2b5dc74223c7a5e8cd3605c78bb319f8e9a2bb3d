@@ -1,0 +1,4 @@
+0.0.216
+- 0.0.215 の fast 8px overlay branch 切替を不採用として 0.0.214 基準へ戻した
+- ユーザー確認では Lode Runner のキャラクタがちらついた
+- Build ID: PicoCalc NESco Ver. 0.0.216 Build Apr 18 2026 09:14:03
