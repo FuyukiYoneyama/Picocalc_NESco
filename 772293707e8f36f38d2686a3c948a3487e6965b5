@@ -1,0 +1,16 @@
+2026-04-18 以降の経緯まとめ
+
+- 旧 core ベースの PicoCalc_NESco 路線を discontinue とし、/home/fuyuki/pico_dvl/codex/nes2/infones を本体として使う方針へ転換した。
+- 目標を「PicoCalc 上で動く、公開可能な GPL ライセンスの NES エミュレーター」へ更新した。
+- Picocalc_NESco/infones へ infones ディレクトリ全体をコピーした。
+- nes1/Picocalc_InfoNES と InfoNES_devtxt を参照し、infones と PicoCalc platform の接続方法を文書化した。
+- 接続設計では、main.c は C の entry point として残し、C++ 側へは platform/infones_bridge.h の bridge API 経由で入る方針を固定した。
+- ROM 起動契約は selected_path を main.c -> rom_image_set_selected_path() -> InfoNES_Menu() -> InfoNES_Load(selected_path) で渡す形に固定し、InfoNES_ReadRom(NULL) の意味は変更しないと決めた。
+- InfoNES_Error() は platform/infones_session.cpp に一本化し、FrameSkip と InfoNES_SetLineBuffer() は infones core 側所有として扱う方針を固定した。
+- infones の build 境界は INTERFACE のまま使わず、STATIC library 化する前提を文書に反映した。InfoNES_Mapper.cpp は mapper/*.cpp を #include で内包するため、mapper 個別 cpp を target_sources へ重ねない方針も固定した。
+- INFONES_MIGRATION_PLAN_20260418.md は INFONES_PLATFORM_CONNECTION_PLAN_20260419.md へ統合し、移行方針と接続設計の正本を 1 本化した。
+- PROGRESS_TODO.md は履歴を持たない入口文書へ整理し、作業上の注意点・現在の TODO・段階的実装計画だけを残す形へ更新した。
+- Picocalc_NESco_HISTORY.md は履歴の正本として扱う運用へ整理した。完了した作業は TODO から外し、結果つきで HISTORY へ移す方針を明文化した。
+- PROGRESS_TODO.md には infones 接続作業を Phase 0 から Phase 8 までに分解した実行計画と、各 phase の確認手順・完了条件を追記した。
+- git / build 運用も補足し、git コマンドは Picocalc_NESco を worktree root として使うこと、通常ビルドと CMake 再生成ビルドの使い分けを明文化した。
+- 現在の HEAD は文書設計と作業手順の整理まで完了しており、次段は PROGRESS_TODO.md の phase に従って実装へ入る段階である。
