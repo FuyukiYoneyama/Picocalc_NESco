@@ -290,6 +290,103 @@ static char menu_state_code(BYTE last_state) {
     }
 }
 
+static void menu_build_debug_code(char debug_code[4], BYTE last_key, BYTE last_state) {
+    static const char hex[] = "0123456789ABCDEF";
+
+    debug_code[0] = hex[(last_key >> 4) & 0x0F];
+    debug_code[1] = hex[last_key & 0x0F];
+    debug_code[2] = menu_state_code(last_state);
+    debug_code[3] = '\0';
+}
+
+static void menu_draw_index(int entry_count, int selected) {
+    char index_text[20];
+    int index_w;
+    int index_x;
+
+    snprintf(index_text, sizeof(index_text), "%d/%d", selected + 1, entry_count);
+    index_w = menu_measure_text_width(index_text, CHAR_ADVANCE, FONT_W, FONT_SCALE);
+    index_x = 312 - index_w;
+    if (index_x < 220) {
+        index_x = 220;
+    }
+    menu_fill_rect(220, 28, 92, FONT_H, MENU_BG);
+    menu_draw_text_span(index_x, 28, 312 - index_x, index_text, MENU_DIM, MENU_BG);
+}
+
+static void menu_draw_status_line(const rom_menu_entry_info_t *entries,
+                                  int entry_count,
+                                  int selected,
+                                  const char *status_text) {
+    const char *effective_status = (status_text && *status_text)
+                                       ? status_text
+                                       : menu_default_status(entries, entry_count, selected);
+
+    menu_fill_rect(8, 42, 220, FONT_H, MENU_BG);
+    if (effective_status && *effective_status) {
+        menu_draw_text_span(8, 42, 220, effective_status, MENU_DIM, MENU_BG);
+    }
+}
+
+static void menu_draw_debug_code(BYTE last_key, BYTE last_state) {
+    char debug_code[4];
+
+    menu_build_debug_code(debug_code, last_key, last_state);
+    menu_draw_text_span(290, 304, 18, debug_code, MENU_STATUS, MENU_BG);
+}
+
+static int menu_row_visible_index(int index, int first_visible) {
+    int row = index - first_visible;
+
+    if (row < 0 || row >= MENU_LIST_MAX_VISIBLE) {
+        return -1;
+    }
+    return row;
+}
+
+static void menu_draw_entry_row(const rom_menu_entry_info_t *entries,
+                                int entry_count,
+                                int index,
+                                int first_visible,
+                                int selected) {
+    int row = menu_row_visible_index(index, first_visible);
+    int y;
+    WORD row_bg;
+    WORD row_fg;
+
+    if (row < 0 || index < 0 || index >= entry_count) {
+        return;
+    }
+
+    y = MENU_LIST_Y + row * MENU_ROW_H;
+    row_bg = (index == selected) ? MENU_HILITE : MENU_BG;
+    row_fg = entries[index].enabled ? MENU_FG : MENU_DIM;
+
+    menu_fill_rect(8, y - 2, 304, 25, row_bg);
+    if (index == selected) {
+        menu_draw_text_span(12, y + 2, 12, ">", MENU_FG, row_bg);
+    }
+    menu_draw_text_span(24, y + 2, 280, entries[index].label, row_fg, row_bg);
+    menu_draw_text_span(24, y + 12, 280, entries[index].detail, MENU_DIM, row_bg);
+}
+
+static void menu_update_selection_rows(const rom_menu_entry_info_t *entries,
+                                       int entry_count,
+                                       int old_selected,
+                                       int selected,
+                                       int first_visible,
+                                       BYTE last_key,
+                                       BYTE last_state,
+                                       const char *status_text) {
+    if (old_selected != selected) {
+        menu_draw_entry_row(entries, entry_count, old_selected, first_visible, selected);
+        menu_draw_entry_row(entries, entry_count, selected, first_visible, selected);
+    }
+    menu_draw_index(entry_count, selected);
+    menu_draw_status_line(entries, entry_count, selected, status_text);
+    menu_draw_debug_code(last_key, last_state);
+}
+
 static void menu_render(const rom_menu_entry_info_t *entries,
                         int entry_count,
                         int selected,
@@ -297,61 +394,27 @@ static void menu_render(const rom_menu_entry_info_t *entries,
                         BYTE last_key,
                         BYTE last_state,
                         const char *status_text) {
-    char debug_code[4];
-    char index_text[20];
-    const char *effective_status;
-    static const char hex[] = "0123456789ABCDEF";
-    int index_w;
-    int index_x;
-
-    debug_code[0] = hex[(last_key >> 4) & 0x0F];
-    debug_code[1] = hex[last_key & 0x0F];
-    debug_code[2] = menu_state_code(last_state);
-    debug_code[3] = '\0';
-
     display_set_mode(DISPLAY_MODE_FULLSCREEN);
     menu_fill_rect(0, 0, 320, 320, MENU_BG);
     menu_draw_title_bar();
 
     menu_draw_text_span(8, 28, 120, "FILE MENU", MENU_DIM, MENU_BG);
-    snprintf(index_text, sizeof(index_text), "%d/%d", selected + 1, entry_count);
-    index_w = menu_measure_text_width(index_text, CHAR_ADVANCE, FONT_W, FONT_SCALE);
-    index_x = 312 - index_w;
-    if (index_x < 220) {
-        index_x = 220;
-    }
-    menu_draw_text_span(index_x, 28, 312 - index_x, index_text, MENU_DIM, MENU_BG);
-    effective_status = (status_text && *status_text)
-                           ? status_text
-                           : menu_default_status(entries, entry_count, selected);
-    if (effective_status && *effective_status) {
-        menu_draw_text_span(8, 42, 220, effective_status, MENU_DIM, MENU_BG);
-    }
+    menu_draw_index(entry_count, selected);
+    menu_draw_status_line(entries, entry_count, selected, status_text);
     menu_fill_rect(8, 56, 304, 2, MENU_ACCENT);
 
     for (int row = 0; row < MENU_LIST_MAX_VISIBLE; row++) {
         int i = first_visible + row;
-        int y = MENU_LIST_Y + row * MENU_ROW_H;
 
         if (i >= entry_count) {
             break;
         }
-
-        WORD row_bg = (i == selected) ? MENU_HILITE : MENU_BG;
-        WORD row_fg = entries[i].enabled ? MENU_FG : MENU_DIM;
-        if (i == selected) {
-            menu_fill_rect(8, y - 2, 304, 25, row_bg);
-            menu_draw_text_span(12, y + 2, 12, ">", MENU_FG, row_bg);
-            menu_draw_text_span(24, y + 2, 280, entries[i].label, row_fg, row_bg);
-        } else {
-            menu_draw_text_span(24, y + 2, 280, entries[i].label, row_fg, row_bg);
-        }
-        menu_draw_text_span(24, y + 12, 280, entries[i].detail, MENU_DIM, row_bg);
+        menu_draw_entry_row(entries, entry_count, i, first_visible, selected);
     }
 
     menu_fill_rect(8, 280, 304, 2, MENU_ACCENT);
     menu_draw_text_span(8, 304, 280, "UP/DOWN MOVE  ENTER/- OPEN  H/? HELP", MENU_DIM, MENU_BG);
-    menu_draw_text_span(290, 304, 18, debug_code, MENU_STATUS, MENU_BG);
+    menu_draw_debug_code(last_key, last_state);
 }
 
 static void menu_render_help(int help_page, BYTE last_key, BYTE last_state, const char *status_text) {
@@ -634,6 +697,9 @@ const char *picocalc_rom_menu(void) {
                     status_text = NULL;
                 }
             } else if (key == KEY_UP) {
+                int old_selected = selected;
+                int old_first_visible = first_visible;
+
                 selected--;
                 if (selected < 0) {
                     selected = entry_count - 1;
@@ -644,7 +710,21 @@ const char *picocalc_rom_menu(void) {
                                                             ? "PRESS ENTER/- TO START"
                                                             : "PRESS ENTER/- TO OPEN")
                                                         : "ENTRY NOT AVAILABLE YET";
+                if (first_visible == old_first_visible) {
+                    menu_update_selection_rows(entries,
+                                               entry_count,
+                                               old_selected,
+                                               selected,
+                                               first_visible,
+                                               last_key,
+                                               last_state,
+                                               status_text);
+                    continue;
+                }
             } else if (key == KEY_DOWN) {
+                int old_selected = selected;
+                int old_first_visible = first_visible;
+
                 selected++;
                 if (selected >= entry_count) {
                     selected = 0;
@@ -655,6 +735,17 @@ const char *picocalc_rom_menu(void) {
                                                             ? "PRESS ENTER/- TO START"
                                                             : "PRESS ENTER/- TO OPEN")
                                                         : "ENTRY NOT AVAILABLE YET";
+                if (first_visible == old_first_visible) {
+                    menu_update_selection_rows(entries,
+                                               entry_count,
+                                               old_selected,
+                                               selected,
+                                               first_visible,
+                                               last_key,
+                                               last_state,
+                                               status_text);
+                    continue;
+                }
             } else if (key == KEY_ENTER || key == KEY_MINUS) {
                 if (entries[selected].enabled) {
                     if (entries[selected].kind == ROM_ENTRY_DIRECTORY ||

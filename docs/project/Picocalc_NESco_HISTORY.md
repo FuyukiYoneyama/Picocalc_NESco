@@ -10545,6 +10545,34 @@ Xevious 背景崩れについては、かなり重要なので詳細を残す。
   `docs/project/PLANS.md`
   へ完了済み計画として移した
 
+## 1.44 `1.0.1` ROM menu 選択移動の再描画範囲を縮小 (2026-04-26)
+
+- system version を
+  `1.0.1`
+  へ更新した
+- ROM menu
+  で上下キーを押すたびに
+  `menu_render()`
+  が全画面を消去して再描画していた
+- 選択行の移動で scroll
+  が発生しない場合は、
+  旧選択行、
+  新選択行、
+  index、
+  status、
+  debug code
+  だけを再描画するようにした
+- scroll
+  位置が変わる場合、
+  directory
+  移動、
+  help、
+  screenshot
+  後などは従来どおり full render
+  を使う
+- 目的は ROM menu
+  のカーソル移動時のチラつき低減
+
 ## 1.11 `0.3.21` BokosukaWars trace 領域を uf2loader 保護域から退避 (2026-04-25)
 
 - system version を
