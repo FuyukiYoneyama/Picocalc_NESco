@@ -10469,6 +10469,71 @@ Xevious 背景崩れについては、かなり重要なので詳細を残す。
   `50f6b2aafeadcdf473c45d1515345bea6b98ba3668a659350aa92362bd41fd1e`
   のままと確認した
 
+## 1.43 GitHub Actions 最小 build CI を導入 (2026-04-26)
+
+- `docs/design/GITHUB_ACTIONS_BUILD_CI_PLAN_20260426.md`
+  を追加し、
+  GitHub Actions
+  による最小 build CI
+  の設計を固定した
+- `.github/workflows/build.yml`
+  を追加した
+- workflow
+  は
+  `push`
+  `pull_request`
+  `workflow_dispatch`
+  で起動する
+- `pico-sdk`
+  は
+  `raspberrypi/pico-sdk`
+  の
+  `2.2.0`
+  を
+  `actions/checkout@v4`
+  で取得し、
+  submodule
+  は
+  recursive
+  に取得する
+- configure
+  は
+  `cmake -S . -B build -G Ninja -DPICO_SDK_PATH="$GITHUB_WORKSPACE/pico-sdk"`
+  を使う
+- build
+  は
+  `cmake --build build -j4`
+  を使う
+- CI
+  では
+  `build/Picocalc_NESco.elf`
+  と
+  `build/Picocalc_NESco.uf2`
+  の生成を確認し、
+  artifact
+  `picocalc-nesco-firmware`
+  として保存する
+- CI
+  は build
+  自動確認のみを目的とし、
+  実機 smoke、
+  release 作成、
+  tag 発行、
+  release publish
+  は対象外とした
+- `README.md`
+  の build
+  節へ、
+  GitHub Actions
+  は clean configure / build
+  と生成物確認のみで、
+  実機確認を含まないことを追記した
+- `docs/project/TASKS.md`
+  から CI 導入 task
+  を外し、
+  `docs/project/PLANS.md`
+  へ完了済み計画として移した
+
 ## 1.11 `0.3.21` BokosukaWars trace 領域を uf2loader 保護域から退避 (2026-04-25)
 
 - system version を

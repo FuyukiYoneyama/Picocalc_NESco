@@ -25,6 +25,8 @@
    - 音量調整の正本設計。
 9. `docs/audio/AUDIO_POP_SUPPRESSION_POWERON_INIT_PLAN_20260422.md`
    - 電源 ON 時 1 回 init による音声 pop 抑制設計。
+10. `docs/design/GITHUB_ACTIONS_BUILD_CI_PLAN_20260426.md`
+   - GitHub Actions による最小 build CI 導入設計。
 
 ## 現在必要な計画
 
@@ -32,6 +34,12 @@
 
 ## 完了済み計画 / 結果
 
+- GitHub Actions 最小 build CI 導入
+  - 設計: `docs/design/GITHUB_ACTIONS_BUILD_CI_PLAN_20260426.md`
+  - 実装: `.github/workflows/build.yml`
+  - clean configure / build / UF2・ELF artifact 保存までを自動確認対象とする。
+  - 実機 smoke、release 作成、tag 発行、release publish は対象外。
+  - 2026-04-26 に実装。
 - `1.0.0` release gate
   - 判定基準: `docs/release/RELEASE_GATE_1_0_0.md`
   - `0.4.5` smoke 結果を AS-IS 根拠として採用し、
