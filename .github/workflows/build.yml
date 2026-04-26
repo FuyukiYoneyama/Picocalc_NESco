@@ -14,7 +14,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Install toolchain
         run: |
@@ -30,7 +30,7 @@ jobs:
             python3
 
       - name: Checkout Pico SDK
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: raspberrypi/pico-sdk
           ref: 2.2.0
@@ -47,10 +47,12 @@ jobs:
         run: |
           test -f build/Picocalc_NESco.elf
           test -f build/Picocalc_NESco.uf2
-          strings build/Picocalc_NESco.elf | grep 'PicoCalc NESco Ver\.' | head -n 1
+          banner="$(strings build/Picocalc_NESco.elf | grep 'PicoCalc NESco Ver\.' | head -n 1)"
+          test -n "$banner"
+          printf '%s\n' "$banner"
 
       - name: Upload firmware artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: picocalc-nesco-firmware
           retention-days: 7

@@ -10490,7 +10490,7 @@ Xevious 背景崩れについては、かなり重要なので詳細を残す。
   の
   `2.2.0`
   を
-  `actions/checkout@v4`
+  `actions/checkout@v6`
   で取得し、
   submodule
   は
@@ -10513,6 +10513,17 @@ Xevious 背景崩れについては、かなり重要なので詳細を残す。
   artifact
   `picocalc-nesco-firmware`
   として保存する
+- `actions/upload-artifact@v7`
+  で
+  UF2 / ELF
+  のみを artifact
+  として保存する
+- banner
+  確認は
+  `PicoCalc NESco Ver.`
+  prefix
+  の存在確認に限定し、
+  version 値そのものは固定しない
 - CI
   は build
   自動確認のみを目的とし、

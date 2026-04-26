@@ -121,7 +121,7 @@ repo 内ファイル内容、
   の
   "Store and share data with workflow artifacts"
   では、
-  `actions/upload-artifact@v4`
+  `actions/upload-artifact@v7`
   を使って
   file / directory
   を保存できる。
@@ -213,7 +213,7 @@ repo 内ファイル内容、
   checkout では
   submodule も必ず取得する。
   実装時は
-  `actions/checkout@v4`
+  `actions/checkout@v6`
   に
   `repository: raspberrypi/pico-sdk`
   `ref: 2.2.0`
@@ -409,8 +409,12 @@ install package は最初の実装では次に固定する:
 - version 値そのものは CI では固定しない。
 
 具体式:
-- `strings build/Picocalc_NESco.elf | grep 'PicoCalc NESco Ver\\.' | head -n 1`
-  が 1 行以上返ることを確認する。
+- `banner="$(strings build/Picocalc_NESco.elf | grep 'PicoCalc NESco Ver\\.' | head -n 1)"`
+  で banner 文字列を取り出す。
+- `test -n "$banner"`
+  で 1 行以上返っていることを確認する。
+- `printf '%s\n' "$banner"`
+  で CI log に確認した banner を出す。
 - `grep '1.0.0'`
   のような固定 version check は入れない。
 
@@ -422,7 +426,7 @@ install package は最初の実装では次に固定する:
 ### Step 6. artifact upload step を設計する
 
 やること:
-- `actions/upload-artifact@v4`
+- `actions/upload-artifact@v7`
   で
   `.uf2`
   と
@@ -463,9 +467,9 @@ job:
 - `build-firmware`
 
 step 順:
-1. checkout repository with `actions/checkout@v4`
+1. checkout repository with `actions/checkout@v6`
 2. install toolchain / build packages
-3. checkout `pico-sdk` with `actions/checkout@v4`
+3. checkout `pico-sdk` with `actions/checkout@v6`
    - `repository: raspberrypi/pico-sdk`
    - `ref: 2.2.0`
    - `path: pico-sdk`
