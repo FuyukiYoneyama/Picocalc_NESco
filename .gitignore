@@ -1,0 +1,32 @@
+# Build output
+build/
+*.elf
+*.uf2
+*.bin
+*.hex
+*.map
+*.dis
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+!infones/linux/Makefile
+
+# Object files
+*.o
+*.a
+
+# Editor
+.vscode/
+*.swp
+*~
+Picocalc_NESco_HISTORY.md
+docs/images/readme_candidates/*.png
+
+# macOS
+.DS_Store
+
+# Pico SDK (external dependency, not vendored)
+pico-sdk/

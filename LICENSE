@@ -1,0 +1,49 @@
+Picocalc_NESco License Overview
+
+This repository is not under a single uniform license.
+
+The current tree contains multiple components with different license sources:
+
+- Project-owned top-level integration and most platform-side code:
+  - MIT License
+  - This includes the repository root LICENSE text below, and source files in
+    `platform/` and `drivers/` whose headers say `MIT License`
+- `infones/`:
+  - GNU General Public License Version 2
+  - See `infones/doc/GPL2`
+- `fatfs/`:
+  - FatFs license from ChaN
+  - See `fatfs/LICENSE.txt`
+- `font/`:
+  - M+ / PixelMplus derived font data
+  - See `font/LICENSE.txt`
+- `core/`:
+  - Source headers in the current tree say `MIT License`
+  - Project status note: licensing / provenance for this subtree is not yet
+    considered fully unified, so do not treat `core/` as a separately cleared
+    standalone license block without reviewing the files in context
+
+For convenience, the MIT text used for the project-owned part of the tree is
+copied below.
+
+MIT License
+
+Copyright (c) 2026 Picocalc_NESco Contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

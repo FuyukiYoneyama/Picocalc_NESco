@@ -1,0 +1,66 @@
+; lcd_spi.pio -- minimal PIO SPI-equivalent bit engine for LCD transfers
+;
+; Scope:
+; - byte-serial shift engine only
+; - suitable for LCD payload transfer
+; - CS and DC are controlled by CPU-side GPIO, not by this PIO program
+;
+; Behavioral contract:
+; - one bit transfer uses two phases
+; - phase A: SCK low, present one MOSI bit
+; - phase B: SCK high
+; - mode 0 equivalent
+; - SCK idle low
+; - MSB first
+;
+; Expected C-side configuration:
+; - OUT pin base = MOSI
+; - side-set pin = SCK
+; - out_shift: MSB-first, autopull, pull threshold = 8
+; - SPI_bit_rate = clk_sys / (2 * clkdiv)
+
+.program lcd_spi_min
+.side_set 1 opt
+
+.wrap_target
+    out pins, 1    side 0
+    nop            side 1
+.wrap
+
+% c-sdk {
+static inline void lcd_spi_min_program_init(PIO pio,
+                                            uint sm,
+                                            uint offset,
+                                            uint mosi_pin,
+                                            uint sck_pin,
+                                            float clk_div) {
+    pio_gpio_init(pio, mosi_pin);
+    pio_gpio_init(pio, sck_pin);
+
+    pio_sm_set_consecutive_pindirs(pio, sm, mosi_pin, 1, true);
+    pio_sm_set_consecutive_pindirs(pio, sm, sck_pin, 1, true);
+
+    pio_sm_config c = lcd_spi_min_program_get_default_config(offset);
+    sm_config_set_out_pins(&c, mosi_pin, 1);
+    sm_config_set_sideset_pins(&c, sck_pin);
+    sm_config_set_out_shift(&c, false, true, 8);
+    sm_config_set_fifo_join(&c, PIO_FIFO_JOIN_TX);
+    sm_config_set_clkdiv(&c, clk_div);
+
+    pio_sm_init(pio, sm, offset, &c);
+    pio_sm_set_enabled(pio, sm, true);
+}
+
+static inline void lcd_spi_min_put(PIO pio, uint sm, uint8_t value) {
+    while (pio_sm_is_tx_fifo_full(pio, sm)) {
+    }
+    *(volatile uint8_t *) &pio->txf[sm] = value;
+}
+
+static inline void lcd_spi_min_wait_idle(PIO pio, uint sm) {
+    uint32_t sm_stall_mask = 1u << (sm + PIO_FDEBUG_TXSTALL_LSB);
+    pio->fdebug = sm_stall_mask;
+    while (!(pio->fdebug & sm_stall_mask)) {
+    }
+}
+%}
