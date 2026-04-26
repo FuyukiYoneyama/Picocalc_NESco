@@ -10573,6 +10573,30 @@ Xevious 背景崩れについては、かなり重要なので詳細を残す。
 - 目的は ROM menu
   のカーソル移動時のチラつき低減
 
+## 1.45 `1.0.2` ROM menu key release 時の full render を抑制 (2026-04-26)
+
+- system version を
+  `1.0.2`
+  へ更新した
+- `1.0.1`
+  では上下キーの
+  press
+  時は部分再描画になったが、
+  key release
+  イベントが最後の共通
+  `menu_render()`
+  に落ち、
+  ボタンを離した後に full render
+  が走っていた
+- `KEY_STATE_PRESSED`
+  以外のイベントでは full render
+  を行わず、
+  通常 menu
+  では右下 debug code
+  のみ更新して抜けるようにした
+- 実機検証で ROM menu
+  の上下移動時のチラつき低減を確認した
+
 ## 1.11 `0.3.21` BokosukaWars trace 領域を uf2loader 保護域から退避 (2026-04-25)
 
 - system version を

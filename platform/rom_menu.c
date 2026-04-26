@@ -786,6 +786,11 @@ const char *picocalc_rom_menu(void) {
                 fflush(stdout);
                 status_text = "SELECTABLE *.NES FILE NOT AVAILABLE";
             }
+        } else {
+            if (!show_help) {
+                menu_draw_debug_code(last_key, last_state);
+            }
+            continue;
         }
 
         first_visible = menu_clamp_first_visible(entry_count, selected, first_visible);
