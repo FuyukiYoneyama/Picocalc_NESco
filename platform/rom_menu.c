@@ -522,6 +522,20 @@ static int menu_clamp_first_visible(int entry_count, int selected, int first_vis
     return first_visible;
 }
 
+static int menu_keep_visible_or_clamp(int entry_count, int selected, int first_visible) {
+    if (selected >= first_visible && selected < first_visible + MENU_LIST_MAX_VISIBLE) {
+        return first_visible;
+    }
+    return menu_clamp_first_visible(entry_count, selected, first_visible);
+}
+
+static int menu_page_first_for_index(int index) {
+    if (index < 0) {
+        return 0;
+    }
+    return (index / MENU_LIST_MAX_VISIBLE) * MENU_LIST_MAX_VISIBLE;
+}
+
 static void menu_discard_pending_keys(void) {
 #ifdef PICO_BUILD
     absolute_time_t until = make_timeout_time_ms(120);
@@ -699,17 +713,25 @@ const char *picocalc_rom_menu(void) {
             } else if (key == KEY_UP) {
                 int old_selected = selected;
                 int old_first_visible = first_visible;
+                int old_row = selected - first_visible;
+                int page_scroll_up = (old_row == 0 && selected > 0);
+                int wrap_up = 0;
 
                 selected--;
                 if (selected < 0) {
                     selected = entry_count - 1;
+                    first_visible = menu_page_first_for_index(selected);
+                    wrap_up = 1;
+                } else if (page_scroll_up) {
+                    first_visible = menu_page_first_for_index(selected);
+                } else {
+                    first_visible = menu_keep_visible_or_clamp(entry_count, selected, first_visible);
                 }
-                first_visible = menu_clamp_first_visible(entry_count, selected, first_visible);
-                status_text = entries[selected].enabled
-                                                        ? ((entries[selected].kind == ROM_ENTRY_FILE)
-                                                            ? "PRESS ENTER/- TO START"
-                                                            : "PRESS ENTER/- TO OPEN")
-                                                        : "ENTRY NOT AVAILABLE YET";
+                status_text = menu_default_status(entries, entry_count, selected);
+                if (page_scroll_up || wrap_up) {
+                    menu_render(entries, entry_count, selected, first_visible, last_key, last_state, status_text);
+                    continue;
+                }
                 if (first_visible == old_first_visible) {
                     menu_update_selection_rows(entries,
                                                entry_count,
@@ -724,17 +746,31 @@ const char *picocalc_rom_menu(void) {
             } else if (key == KEY_DOWN) {
                 int old_selected = selected;
                 int old_first_visible = first_visible;
+                int old_row = selected - first_visible;
+                int old_visible_count = entry_count - first_visible;
+                int page_scroll_down;
+                int wrap_down = 0;
+
+                if (old_visible_count > MENU_LIST_MAX_VISIBLE) {
+                    old_visible_count = MENU_LIST_MAX_VISIBLE;
+                }
+                page_scroll_down = (old_row == old_visible_count - 1 && selected + 1 < entry_count);
 
                 selected++;
                 if (selected >= entry_count) {
                     selected = 0;
+                    first_visible = 0;
+                    wrap_down = 1;
+                } else if (page_scroll_down) {
+                    first_visible = menu_page_first_for_index(selected);
+                } else {
+                    first_visible = menu_keep_visible_or_clamp(entry_count, selected, first_visible);
                 }
-                first_visible = menu_clamp_first_visible(entry_count, selected, first_visible);
-                status_text = entries[selected].enabled
-                                                        ? ((entries[selected].kind == ROM_ENTRY_FILE)
-                                                            ? "PRESS ENTER/- TO START"
-                                                            : "PRESS ENTER/- TO OPEN")
-                                                        : "ENTRY NOT AVAILABLE YET";
+                status_text = menu_default_status(entries, entry_count, selected);
+                if (page_scroll_down || wrap_down) {
+                    menu_render(entries, entry_count, selected, first_visible, last_key, last_state, status_text);
+                    continue;
+                }
                 if (first_visible == old_first_visible) {
                     menu_update_selection_rows(entries,
                                                entry_count,

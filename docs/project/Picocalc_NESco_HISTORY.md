@@ -10597,6 +10597,54 @@ Xevious 背景崩れについては、かなり重要なので詳細を残す。
 - 実機検証で ROM menu
   の上下移動時のチラつき低減を確認した
 
+## 1.46 `1.0.4` ROM menu 上下端移動をページ送り型に変更 (2026-04-27)
+
+- system version を
+  `1.0.4`
+  へ更新した
+- ROM menu
+  の選択カーソルが表示中 list
+  の最下行にある状態で下矢印を押したとき、
+  1 行ずつ scroll
+  するのではなく、
+  次の項目を新しい表示ページの先頭に出すようにした
+- 表示中 list
+  の最上行にある状態で上矢印を押したときも、
+  前の項目を新しい表示ページの最下行に出すようにした
+- 先頭項目
+  `SYSTEM FLASH`
+  から上矢印で末尾へ wrap
+  する場合も、
+  最終ページを表示してカーソルが見えるようにした
+- 上下端から先頭 / 末尾へ wrap
+  する場合は共通の
+  `menu_clamp_first_visible()`
+  を通さず、ページ境界を維持して full render
+  するようにした
+- 最終ページの項目数が
+  `MENU_LIST_MAX_VISIBLE`
+  未満の場合は、
+  ページ送り後の空行あり layout
+  を通常移動中も維持するようにした
+- page
+  境界を
+  `MENU_LIST_MAX_VISIBLE`
+  件単位に固定し、
+  上下どちらから page
+  をまたいでも同じ表示範囲になるようにした
+- 通常の上下移動は部分再描画を維持し、
+  page scroll
+  が必要な場合だけ full render
+  する
+- 目的は ROM menu
+  の 1 行 scroll
+  連発によるチラつき低減
+- この変更は
+  `feature/screenshot-viewer`
+  branch
+  上の先行 bug fix
+  として扱う
+
 ## 1.11 `0.3.21` BokosukaWars trace 領域を uf2loader 保護域から退避 (2026-04-25)
 
 - system version を
