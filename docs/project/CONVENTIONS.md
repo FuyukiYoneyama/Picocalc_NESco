@@ -56,6 +56,36 @@
   7. commit する。
   8. release tag が必要な場合は、公開対象 commit に tag を付ける。
 
+## branch 運用
+
+- 公開済み `main` は、利用者が見に来てもよい安定版として扱う。
+- 新機能、bug fix、実機確認が必要な変更は、原則として `main` から短命の作業 branch を作って進める。
+- 常設の `develop` branch は当面作らない。
+  - ひとり開発では、作業ごとの短命 branch の方が状態を追いやすい。
+- branch 名は内容が分かる短い名前にする。
+  - 例: `fix/rom-menu-flicker`
+  - 例: `feature/screenshot-viewer`
+  - 例: `mapper/mapper87-choplifter`
+  - 例: `ci/build-check`
+- 作業開始時の基本手順:
+  1. `git switch main`
+  2. `git pull`
+  3. `git switch -c <branch-name>`
+- 作業 branch 上で実装、build、必要な文書更新を行う。
+- 実機確認用 UF2 は試作品名にする。
+  - 例: `Picocalc_NESco-test.uf2`
+  - 実機確認前に release 名の UF2 として扱わない。
+- 実機確認が必要な変更では、確認完了前に `main` へ merge / push しない。
+- 実機確認で問題があれば、同じ作業 branch 上で修正し、build と確認を繰り返す。
+- 実機確認と CI が通った後に、必要なら version、README、HISTORY、TASKS を最終更新する。
+- `main` への取り込み手順:
+  1. `git switch main`
+  2. `git pull`
+  3. `git merge --no-ff <branch-name>`
+  4. `git push`
+- release が必要な場合だけ、`main` の公開対象 commit に tag を付ける。
+- tag / GitHub Release / release UF2 添付は、実機確認済みの変更だけを対象にする。
+
 ## 実装前確認
 
 実装前に、その変更がどの領域に属するかを分類します。

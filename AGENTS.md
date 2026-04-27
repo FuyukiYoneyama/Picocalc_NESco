@@ -30,6 +30,9 @@
 ## 作業時の基本姿勢
 
 - 変更前に `git status --short` を確認する。
+- 公開済み `main` は安定版として扱う。
+- 新機能、bug fix、実機確認が必要な変更は、原則として `main` から短命の作業 branch を作って進める。
+- 実機未確認の変更を `main` に push しない。
 - ユーザーが明示的に求めた変更以外の refactor は避ける。
 - 既存の未コミット変更を勝手に戻さない。
 - 実機確認が必要な変更では、人間側の作業回数を減らす設計にする。
@@ -49,4 +52,5 @@
 - version は `platform/version.h` の `PICOCALC_NESCO_VERSION` を更新する。
 - build ID は ELF / UF2 生成物から確認する。
 - 作業完了時は、必要に応じて `README.md`、`docs/project/TASKS.md`、`docs/project/Picocalc_NESco_HISTORY.md` を更新する。
-- ユーザーが明示的に不要と言わない限り、意味のある作業単位で commit する。
+- 作業 branch 上では、ユーザーが明示的に不要と言わない限り、意味のある作業単位で commit する。
+- `main` への merge / push / tag / release は、実機確認またはユーザーの明示承認後に行う。
