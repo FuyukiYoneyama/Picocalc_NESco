@@ -10,6 +10,26 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.4 PPU background breakdown 計測ブランチ (2026-04-29)
+
+- `feature/hot-path-metrics` の `[CORE1_BASE]` に、`ppu_bg_us` の内訳メトリクスを追加した
+- 目的は、背景描画の主な時間が mapper 切替、clear、setup、tile render、clip のどこにあるかを実機ログで切り分けること
+- 追加した項目:
+  - `ppu_bg_mapper_us`
+  - `ppu_bg_clear_us`
+  - `ppu_bg_setup_us`
+  - `ppu_bg_tile_us`
+  - `ppu_bg_clip_us`
+- 計測は scanline 内の大きな区間単位で行い、tile 1 個ごとの計測は避けた
+- system version を `1.1.4` に更新した
+- build 確認:
+  - `NESCO_CORE1_BASELINE_LOG=ON`
+  - banner: `PicoCalc NESco Ver. 1.1.4 Build Apr 29 2026 08:12:20`
+  - UF2 SHA-256: `7f38030b3a0a0feaf178bdc0626e58cb53b2ad67aeb17d81179a3a11a2ea8730`
+  - ELF SHA-256: `6c7e8d579b04a13fa5b11d39ca3d86be9aae595a025dfe15b4f2a383be03c9cd`
+  - `.bss = 97272`
+  - `1.1.3` から `.bss` は 40 bytes 増加した
+
 ## 1.1.3 ROM start log 計測ブランチ (2026-04-29)
 
 - `feature/hot-path-metrics` の計測ログに、game 開始時 1 回だけ `[ROM_START]` を出す処理を追加した

@@ -227,6 +227,11 @@ uint64_t g_perf_cpu_us = 0;
 uint64_t g_perf_apu_us = 0;
 uint64_t g_perf_draw_us = 0;
 uint64_t g_perf_ppu_bg_us = 0;
+uint64_t g_perf_ppu_bg_mapper_us = 0;
+uint64_t g_perf_ppu_bg_clear_us = 0;
+uint64_t g_perf_ppu_bg_setup_us = 0;
+uint64_t g_perf_ppu_bg_tile_us = 0;
+uint64_t g_perf_ppu_bg_clip_us = 0;
 uint64_t g_perf_ppu_sprite_us = 0;
 uint64_t g_perf_mapper_hsync_us = 0;
 uint64_t g_perf_mapper_vsync_us = 0;
@@ -258,6 +263,11 @@ inline void perf_reset()
   g_perf_apu_us = 0;
   g_perf_draw_us = 0;
   g_perf_ppu_bg_us = 0;
+  g_perf_ppu_bg_mapper_us = 0;
+  g_perf_ppu_bg_clear_us = 0;
+  g_perf_ppu_bg_setup_us = 0;
+  g_perf_ppu_bg_tile_us = 0;
+  g_perf_ppu_bg_clip_us = 0;
   g_perf_ppu_sprite_us = 0;
   g_perf_mapper_hsync_us = 0;
   g_perf_mapper_vsync_us = 0;
@@ -346,7 +356,7 @@ inline void perf_log_if_due(uint64_t now_us)
           ? "stretch"
           : "normal";
 
-  printf("[CORE1_BASE] t_us=%llu frames=%lu fps_x100=%llu frame_us_avg=%llu frame_us_max=%llu cpu_us=%llu apu_us=%llu draw_us=%llu ppu_bg_us=%llu ppu_sprite_us=%llu mapper_hsync_us=%llu mapper_vsync_us=%llu load_frame_us=%llu tail_us=%llu lcd_wait_us=%llu lcd_flush_us=%llu lcd_queue_wait_us=%llu lcd_queue_wait_count=%lu frame_pacing_sleep_us=%llu frame_pacing_sleep_count=%lu audio_wait_us=%llu audio_wait_count=%lu pad_interval_us_avg=%llu pad_interval_us_max=%llu input_events=%u view_mode=%s\n",
+  printf("[CORE1_BASE] t_us=%llu frames=%lu fps_x100=%llu frame_us_avg=%llu frame_us_max=%llu cpu_us=%llu apu_us=%llu draw_us=%llu ppu_bg_us=%llu ppu_bg_mapper_us=%llu ppu_bg_clear_us=%llu ppu_bg_setup_us=%llu ppu_bg_tile_us=%llu ppu_bg_clip_us=%llu ppu_sprite_us=%llu mapper_hsync_us=%llu mapper_vsync_us=%llu load_frame_us=%llu tail_us=%llu lcd_wait_us=%llu lcd_flush_us=%llu lcd_queue_wait_us=%llu lcd_queue_wait_count=%lu frame_pacing_sleep_us=%llu frame_pacing_sleep_count=%lu audio_wait_us=%llu audio_wait_count=%lu pad_interval_us_avg=%llu pad_interval_us_max=%llu input_events=%u view_mode=%s\n",
          static_cast<unsigned long long>(now_us),
          static_cast<unsigned long>(g_perf_frames),
          static_cast<unsigned long long>(fps_x100),
@@ -356,6 +366,11 @@ inline void perf_log_if_due(uint64_t now_us)
          static_cast<unsigned long long>(g_perf_apu_us),
          static_cast<unsigned long long>(g_perf_draw_us),
          static_cast<unsigned long long>(g_perf_ppu_bg_us),
+         static_cast<unsigned long long>(g_perf_ppu_bg_mapper_us),
+         static_cast<unsigned long long>(g_perf_ppu_bg_clear_us),
+         static_cast<unsigned long long>(g_perf_ppu_bg_setup_us),
+         static_cast<unsigned long long>(g_perf_ppu_bg_tile_us),
+         static_cast<unsigned long long>(g_perf_ppu_bg_clip_us),
          static_cast<unsigned long long>(g_perf_ppu_sprite_us),
          static_cast<unsigned long long>(g_perf_mapper_hsync_us),
          static_cast<unsigned long long>(g_perf_mapper_vsync_us),
@@ -1412,6 +1427,11 @@ void __not_in_flash_func(InfoNES_DrawLine)()
   BYTE bySprCol;
   BYTE pSprBuf[NES_DISP_WIDTH + 7];
   uint64_t bg_start_us = 0;
+  uint64_t bg_mapper_start_us = 0;
+  uint64_t bg_clear_start_us = 0;
+  uint64_t bg_setup_start_us = 0;
+  uint64_t bg_tile_start_us = 0;
+  uint64_t bg_clip_start_us = 0;
   uint64_t sprite_start_us = 0;
 
   /*-------------------------------------------------------------------*/
@@ -1424,22 +1444,50 @@ void __not_in_flash_func(InfoNES_DrawLine)()
   }
 
   /* MMC5 VROM switch */
+  if constexpr (kPerfLogToSerial)
+  {
+    bg_mapper_start_us = time_us_64();
+  }
   MapperRenderScreen(1);
+  if constexpr (kPerfLogToSerial)
+  {
+    g_perf_ppu_bg_mapper_us += time_us_64() - bg_mapper_start_us;
+  }
 
   // Pointer to the render position
   //  pPoint = &WorkFrame[PPU_Scanline * NES_DISP_WIDTH];
   assert(WorkLine);
   pPoint = WorkLine;
   pOpaquePoint = BackgroundOpaqueLine;
+  if constexpr (kPerfLogToSerial)
+  {
+    bg_clear_start_us = time_us_64();
+  }
   InfoNES_MemorySet(BackgroundOpaqueLine, 0, NES_DISP_WIDTH);
+  if constexpr (kPerfLogToSerial)
+  {
+    g_perf_ppu_bg_clear_us += time_us_64() - bg_clear_start_us;
+  }
 
   // Clear a scanline if screen is off
   if (!(PPU_R1 & R1_SHOW_SCR))
   {
+    if constexpr (kPerfLogToSerial)
+    {
+      bg_clear_start_us = time_us_64();
+    }
     InfoNES_MemorySet(pPoint, 0, NES_DISP_WIDTH << 1);
+    if constexpr (kPerfLogToSerial)
+    {
+      g_perf_ppu_bg_clear_us += time_us_64() - bg_clear_start_us;
+    }
   }
   else
   {
+    if constexpr (kPerfLogToSerial)
+    {
+      bg_setup_start_us = time_us_64();
+    }
     nNameTable = PPU_NameTableBank;
 
 #if 0
@@ -1538,6 +1586,11 @@ void __not_in_flash_func(InfoNES_DrawLine)()
 
     pbyNameTable = PPUBANK[nNameTable] + nY * 32 + nX;
     pAttrBase = PPUBANK[nNameTable] + 0x3c0 + (nY / 4) * 8;
+    if constexpr (kPerfLogToSerial)
+    {
+      g_perf_ppu_bg_setup_us += time_us_64() - bg_setup_start_us;
+      bg_tile_start_us = time_us_64();
+    }
     emitBgTile(pbyNameTable,
                pAttrBase,
                nX,
@@ -1610,6 +1663,11 @@ void __not_in_flash_func(InfoNES_DrawLine)()
                pOpaquePoint,
                0,
                PPU_Scr_H_Bit);
+    if constexpr (kPerfLogToSerial)
+    {
+      g_perf_ppu_bg_tile_us += time_us_64() - bg_tile_start_us;
+      bg_clip_start_us = time_us_64();
+    }
 
     /*-------------------------------------------------------------------*/
     /*  Backgroud Clipping                                               */
@@ -1636,6 +1694,10 @@ void __not_in_flash_func(InfoNES_DrawLine)()
       pPointTop = WorkLine;
       InfoNES_MemorySet(pPointTop, 0, NES_DISP_WIDTH << 1);
       InfoNES_MemorySet(BackgroundOpaqueLine, 0, NES_DISP_WIDTH);
+    }
+    if constexpr (kPerfLogToSerial)
+    {
+      g_perf_ppu_bg_clip_us += time_us_64() - bg_clip_start_us;
     }
   }
 
