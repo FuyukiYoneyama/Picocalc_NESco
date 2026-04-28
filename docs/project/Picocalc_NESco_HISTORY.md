@@ -10781,6 +10781,12 @@ Xevious 背景崩れについては、かなり重要なので詳細を残す。
   は
   `a94e962e962171937dfb108e37b3c3842aca04db033d41feab9ea1d5090f549b`
   だった
+- 実機確認で screenshot BMP
+  を表示できた
+- これにより、ROM menu
+  から過去に撮った screenshot BMP
+  を選択して PicoCalc
+  本体で確認する初期機能は完了扱いにした
 
 ## 1.11 `0.3.21` BokosukaWars trace 領域を uf2loader 保護域から退避 (2026-04-25)
 

@@ -18,13 +18,6 @@
 
 ## 保留中の改善候補
 
-- `[active]` ROM menu から過去に撮った screenshot BMP を選択して表示できる機能を設計・実装する
-  - 作業 branch: `feature/screenshot-viewer`
-  - Phase 1: viewer 入口は実装済み
-  - Phase 2: BMP 一覧表示は実装済み、実機確認済み
-  - Phase 3: BMP 表示処理は実装済み、実機確認待ち
-  - BMP 読み込み用 buffer は必要時に動的確保し、表示終了後に解放する
-  - 実機未確認のまま `main` へ merge / push しない
 - `[deferred]` audio ring size を `4096` から `2048` へ下げられるか再評価する
   - 現時点では RAM に余裕があるため、今すぐの課題ではない
 - `[deferred]` 音量調整は `docs/audio/AUDIO_OUTPUT_GAIN_REDESIGN_20260422.md` を正本として必要時に再開する
