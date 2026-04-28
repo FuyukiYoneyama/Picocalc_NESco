@@ -62,6 +62,8 @@ enum {
     KEY_B_UPPER  = 'B',
     KEY_H_LOWER  = 'h',
     KEY_H_UPPER  = 'H',
+    KEY_S_LOWER  = 's',
+    KEY_S_UPPER  = 'S',
     KEY_QUESTION = '?',
     KEY_ESC      = 0xB1,
     KEY_F5       = 0x85,
@@ -413,7 +415,28 @@ static void menu_render(const rom_menu_entry_info_t *entries,
     }
 
     menu_fill_rect(8, 280, 304, 2, MENU_ACCENT);
-    menu_draw_text_span(8, 304, 280, "UP/DOWN MOVE  ENTER/- OPEN  H/? HELP", MENU_DIM, MENU_BG);
+    menu_draw_text_span(8, 304, 280, "UP/DOWN MOVE ENTER/- OPEN S VIEW H HELP", MENU_DIM, MENU_BG);
+    menu_draw_debug_code(last_key, last_state);
+}
+
+static void menu_render_screenshot_viewer(BYTE last_key, BYTE last_state, const char *status_text) {
+    const char *effective_status = (status_text && *status_text) ? status_text : "ESC BACK";
+
+    display_set_mode(DISPLAY_MODE_FULLSCREEN);
+    menu_fill_rect(0, 0, 320, 320, MENU_BG);
+    menu_draw_title_bar();
+
+    menu_draw_text_span(8, 28, 160, "SCREENSHOT VIEW", MENU_DIM, MENU_BG);
+    menu_fill_rect(8, 42, 220, FONT_H, MENU_BG);
+    menu_draw_text_span(8, 42, 220, effective_status, MENU_DIM, MENU_BG);
+    menu_fill_rect(8, 56, 304, 2, MENU_ACCENT);
+
+    menu_fill_rect(8, MENU_LIST_Y - 2, 304, 25, MENU_BG);
+    menu_draw_text_span(24, MENU_LIST_Y + 2, 280, "NO SCREENSHOTS", MENU_FG, MENU_BG);
+    menu_draw_text_span(24, MENU_LIST_Y + 12, 280, "PHASE 1 PLACEHOLDER", MENU_DIM, MENU_BG);
+
+    menu_fill_rect(8, 280, 304, 2, MENU_ACCENT);
+    menu_draw_text_span(8, 304, 280, "ESC BACK", MENU_DIM, MENU_BG);
     menu_draw_debug_code(last_key, last_state);
 }
 
@@ -582,6 +605,7 @@ const char *picocalc_rom_menu(void) {
     BYTE last_key = 0;
     BYTE last_state = 0;
     int show_help = 0;
+    int show_screenshot_viewer = 0;
     int help_page = HELP_PAGE_HELP;
     const char *status_text = NULL;
 
@@ -651,6 +675,23 @@ const char *picocalc_rom_menu(void) {
         menu_log_key(key, state);
 
         if (state == KEY_STATE_PRESSED) {
+            if (show_screenshot_viewer) {
+                if (key == KEY_ESC || key == KEY_ENTER || key == KEY_MINUS) {
+                    show_screenshot_viewer = 0;
+                    status_text = NULL;
+                    menu_discard_pending_keys();
+                    menu_render(entries, entry_count, selected, first_visible, last_key, last_state, status_text);
+                    continue;
+                }
+                if (key == KEY_H_LOWER || key == KEY_H_UPPER || key == KEY_QUESTION) {
+                    status_text = "HELP DISABLED IN VIEW";
+                } else {
+                    status_text = "ESC BACK";
+                }
+                menu_render_screenshot_viewer(last_key, last_state, status_text);
+                continue;
+            }
+
             if (key == KEY_F5) {
                 nesco_screenshot_result_t ss_result;
 
@@ -667,6 +708,12 @@ const char *picocalc_rom_menu(void) {
                          "%s",
                          (ss_result == NESCO_SCREENSHOT_OK) ? "SCREENSHOT SAVED" : "SCREENSHOT FAILED");
                 status_text = status_buf;
+            } else if (!show_help && (key == KEY_S_LOWER || key == KEY_S_UPPER)) {
+                show_screenshot_viewer = 1;
+                status_text = "ESC BACK";
+                menu_discard_pending_keys();
+                menu_render_screenshot_viewer(last_key, last_state, status_text);
+                continue;
             } else if (key == KEY_H_LOWER || key == KEY_H_UPPER || key == KEY_QUESTION) {
                 show_help = !show_help;
                 status_text = NULL;
