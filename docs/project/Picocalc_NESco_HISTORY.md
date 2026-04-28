@@ -10,6 +10,24 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.7 background full tile direct path 実験ブランチ (2026-04-29)
+
+- `feature/hot-path-metrics` で、background full tile path の descriptor 経由を一部避ける実験を追加した
+- 目的は、`1.1.6` の `renderBgTileFull()` 分離だけでは効果が小さかったため、full tile で `BgTileDescriptor` を構築せずに描画へ進めるかを確認すること
+- 変更内容:
+  - `renderBgTileFullDirect()` を追加した
+  - full tile の場合は `emitBgTile()` 側で `patternRow` を直接求め、`renderBgTileFullDirect(patternRow, pal, dst, dstOpaque)` を呼ぶ
+  - partial tile path は従来どおり `BgTileDescriptor` と `renderBgTile()` を使う
+  - `MapperPPU()` の呼び出し順は変更していない
+- system version を `1.1.7` に更新した
+- build 確認:
+  - `NESCO_CORE1_BASELINE_LOG=ON`
+  - banner: `PicoCalc NESco Ver. 1.1.7 Build Apr 29 2026 08:58:58`
+  - UF2 SHA-256: `0aa02fee28756a76b5626ce54d2a1453c004ec8ce232f9b3e9e2a5f074bd331e`
+  - ELF SHA-256: `10cf7370aaae610aabb0a673ac8c0875f75112ddf8597471189bea8ed4be3c99`
+  - `.bss = 97308`
+  - `1.1.6` から `.bss` は変化なし
+
 ## 1.1.6 `renderBgTile()` full tile path 小改善ブランチ (2026-04-29)
 
 - `feature/hot-path-metrics` で、`renderBgTile()` の full tile path を小さく分離した
@@ -28,6 +46,21 @@
   - ELF SHA-256: `721b5076d53ae758c18787fe89616e26e8cf81582a66d1eaf488fe0f1b00eee8`
   - `.bss = 97308`
   - `1.1.5` から `.bss` は変化なし
+- 実機比較:
+  - log: `/home/fuyuki/pico_dvl/codex/log/pico20260429_085008.log`
+  - user 操作: `LodeRunner`、`Xevious`、`Project_DART_V1.0` を順に play
+  - `[ROM_START]` で確認した ROM:
+    - `LodeRunner.nes`: mapper 0
+    - `Xevious.nes`: mapper 0
+    - `Project_DART_V1.0.nes`: mapper 30
+  - `1.1.5` からの比較:
+    - `LodeRunner.nes`: fps +0.41%、`frame_us_avg` -0.33%、`ppu_bg_tile_render_us` -0.96%
+    - `Xevious.nes`: fps +0.33%、`frame_us_avg` -0.40%、`ppu_bg_tile_render_us` +0.13%
+    - `Project_DART_V1.0.nes`: fps +0.16%、`frame_us_avg` -0.20%、`ppu_bg_tile_render_us` -0.23%
+  - 判断:
+    - 画面意味を変えない小変更としては build 上問題ない
+    - ただし高速化効果は測定誤差程度で、単独では有効な改善とは判断しない
+    - 次は `BgTileDescriptor` を経由しない full tile direct path を確認する
 
 ## 1.1.5 PPU background tile 内訳計測ブランチ (2026-04-29)
 
