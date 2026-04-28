@@ -30,7 +30,10 @@
 
 ## 現在必要な計画
 
-- 現時点ではなし。
+- ROM menu screenshot BMP viewer
+  - 計画: `docs/design/SCREENSHOT_VIEWER_WORK_PLAN_20260427.md`
+  - 作業 branch: `feature/screenshot-viewer`
+  - ROM menu から `0:/screenshots/*.BMP` を選択して表示する機能。
 
 ## 完了済み計画 / 結果
 
