@@ -303,11 +303,13 @@ static void menu_build_debug_code(char debug_code[4], BYTE last_key, BYTE last_s
 }
 
 static void menu_draw_index(int entry_count, int selected) {
-    char index_text[20];
+    char index_text[32];
+    int current = (entry_count > 0) ? selected + 1 : 0;
+    int total = (entry_count > 0) ? entry_count : 0;
     int index_w;
     int index_x;
 
-    snprintf(index_text, sizeof(index_text), "%d/%d", selected + 1, entry_count);
+    snprintf(index_text, sizeof(index_text), "%d/%d", current, total);
     index_w = menu_measure_text_width(index_text, CHAR_ADVANCE, FONT_W, FONT_SCALE);
     index_x = 312 - index_w;
     if (index_x < 220) {
@@ -458,6 +460,7 @@ static void menu_render_screenshot_viewer_list(const screenshot_viewer_entry_t *
     menu_draw_title_bar();
 
     menu_draw_text_span(8, 28, 160, "SCREENSHOT VIEW", MENU_DIM, MENU_BG);
+    menu_draw_index(entry_count, selected);
     menu_fill_rect(8, 42, 220, FONT_H, MENU_BG);
     menu_draw_text_span(8, 42, 220, effective_status, MENU_DIM, MENU_BG);
     menu_fill_rect(8, 56, 304, 2, MENU_ACCENT);

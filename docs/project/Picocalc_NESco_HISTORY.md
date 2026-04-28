@@ -10693,6 +10693,22 @@ Xevious 背景崩れについては、かなり重要なので詳細を残す。
   header parser
   と表示処理を追加する
 
+## 1.48 `1.0.6` screenshot viewer に index 表示を追加 (2026-04-28)
+
+- system version を
+  `1.0.6`
+  へ更新した
+- screenshot viewer
+  の header
+  に ROM menu
+  と同じ
+  `x/n`
+  表示を追加した
+- BMP
+  が 0 件の場合は
+  `0/0`
+  と表示するようにした
+
 ## 1.11 `0.3.21` BokosukaWars trace 領域を uf2loader 保護域から退避 (2026-04-25)
 
 - system version を
