@@ -30,13 +30,16 @@
 
 ## 現在必要な計画
 
-- Core1 活用
-  - 計画: `docs/design/CORE1_PARALLELIZATION_WORK_PLAN_20260428.md`
-  - Pico の core1 を使った UX 改善と LCD worker 化の進め方。
-  - 初回実装候補は `core1 keyboard polling`。
+- 現時点で、実装中の長期計画はありません。
+  - core1 活用計画は Phase 5 の採用判断まで完了済みです。
 
 ## 完了済み計画 / 結果
 
+- Core1 活用
+  - 計画: `docs/design/CORE1_PARALLELIZATION_WORK_PLAN_20260428.md`
+  - Pico の core1 を使った keyboard polling と LCD worker 化。
+  - 結果: `docs/project/Picocalc_NESco_HISTORY.md`
+  - 2026-04-29 に Phase 5 の採用判断まで完了。
 - ROM menu screenshot BMP viewer
   - 計画: `docs/design/SCREENSHOT_VIEWER_WORK_PLAN_20260427.md`
   - ROM menu から `0:/screenshots/*.BMP` を選択して表示する機能。

@@ -10,6 +10,37 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.0.15 core1 LCD worker 採用判断 (2026-04-29)
+
+- `feature/core1-lcd-worker` の Phase 2 / Phase 3 / Phase 4 実装を採用する判断を行った
+- 採用する内容:
+  - game 中は core1 keyboard polling を維持する
+  - normal 表示では core0 が scanline を queue へ copy し、core1 が RGB565 pack と LCD DMA kick を行う
+  - stretch 表示では core1 側で 320px pack と縦 repeat を行う
+  - fullscreen UI、screenshot、mode 切替、ROM menu return の入口では LCD worker を drain する
+- 実機確認:
+  - DART、LodeRunner、Xevious、Xevious stretch で計測を行った
+  - normal / stretch とも表示は正常
+  - Shift+W による normal / stretch 切替は正常
+  - F5 screenshot は normal / stretch の両方で保存できる
+  - ESC で ROM menu へ戻れる
+  - 音と入力の悪化は確認されなかった
+- 計測結果:
+  - DART normal: 平均 `39.32 fps`
+  - LodeRunner normal: 平均 `42.73 fps`
+  - Xevious normal: 平均 `48.47 fps`
+  - Xevious stretch: 平均 `36.34 fps`
+- 静的 RAM 確認:
+  - `main` / `0289e7d`: `.bss = 94904`
+  - `feature/core1-lcd-worker` / `1.0.15` / `NESCO_CORE1_BASELINE_LOG=OFF`: `.bss = 97096`
+  - 差分は `.bss +2192 bytes`
+  - 主因は `s_lcd_worker_queue` の `2160 bytes`
+  - `core1_stack` は main 側にも存在するため、今回の LCD worker 追加による増加分ではない
+  - `__end__ = 0x20022228`、`__HeapLimit = 0x20040000` で、静的領域末尾から heap limit までは計算上 `122328 bytes` 残る
+- 通常 build:
+  - `NESCO_CORE1_BASELINE_LOG=OFF`
+  - banner: `PicoCalc NESco Ver. 1.0.15 Build Apr 29 2026 01:16:00`
+
 ## 1.0.15 core1 LCD worker stretch 表示実験 (2026-04-29)
 
 - `docs/design/CORE1_PARALLELIZATION_WORK_PLAN_20260428.md` の Phase 4 に従い、core1 LCD worker を stretch 表示にも拡張した
