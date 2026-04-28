@@ -61,6 +61,10 @@ static int s_strip_line = 0;   /* Source lines written into the current strip. *
 static WORD s_line_buffer[256];
 static uint64_t s_perf_lcd_wait_us = 0;
 static uint64_t s_perf_lcd_flush_us = 0;
+static uint64_t s_perf_lcd_queue_wait_us = 0;
+static uint32_t s_perf_lcd_queue_wait_count = 0;
+static uint64_t s_perf_frame_pacing_sleep_us = 0;
+static uint32_t s_perf_frame_pacing_sleep_count = 0;
 
 #ifdef PICO_BUILD
 static uint64_t s_last_frame_us = 0;
@@ -482,6 +486,10 @@ nes_view_scale_mode_t display_get_nes_view_scale(void) {
 void display_perf_reset(void) {
     s_perf_lcd_wait_us = 0;
     s_perf_lcd_flush_us = 0;
+    s_perf_lcd_queue_wait_us = 0;
+    s_perf_lcd_queue_wait_count = 0;
+    s_perf_frame_pacing_sleep_us = 0;
+    s_perf_frame_pacing_sleep_count = 0;
 }
 
 void display_reset_frame_pacing(void) {
@@ -493,12 +501,29 @@ void display_reset_frame_pacing(void) {
     FrameSkip = 0;
 }
 
-void display_perf_snapshot(uint64_t *wait_us, uint64_t *flush_us) {
+void display_perf_snapshot(uint64_t *wait_us,
+                           uint64_t *flush_us,
+                           uint64_t *queue_wait_us,
+                           uint32_t *queue_wait_count,
+                           uint64_t *frame_pacing_sleep_us,
+                           uint32_t *frame_pacing_sleep_count) {
     if (wait_us) {
         *wait_us = s_perf_lcd_wait_us;
     }
     if (flush_us) {
         *flush_us = s_perf_lcd_flush_us;
+    }
+    if (queue_wait_us) {
+        *queue_wait_us = s_perf_lcd_queue_wait_us;
+    }
+    if (queue_wait_count) {
+        *queue_wait_count = s_perf_lcd_queue_wait_count;
+    }
+    if (frame_pacing_sleep_us) {
+        *frame_pacing_sleep_us = s_perf_frame_pacing_sleep_us;
+    }
+    if (frame_pacing_sleep_count) {
+        *frame_pacing_sleep_count = s_perf_frame_pacing_sleep_count;
     }
 }
 
@@ -655,20 +680,49 @@ static bool display_lcd_worker_submit_line(int scanline, const WORD *src) {
     item.scale_mode = s_nes_view_scale;
     memcpy(item.pixels, src, sizeof(item.pixels));
 
+    bool queue_waited = false;
+#ifdef PICO_BUILD
+    uint64_t queue_wait_start_us = 0;
+#endif
+
     while (!display_lcd_worker_push_item(&item)) {
 #ifdef PICO_BUILD
+        if (!queue_waited) {
+            queue_wait_start_us = time_us_64();
+            queue_waited = true;
+        }
+        s_perf_lcd_queue_wait_count++;
         sleep_us(100);
 #endif
     }
+#ifdef PICO_BUILD
+    if (queue_waited) {
+        s_perf_lcd_queue_wait_us += time_us_64() - queue_wait_start_us;
+    }
+#endif
 
     if (scanline == 239) {
         memset(&item, 0, sizeof(item));
         item.type = DISPLAY_LCD_WORKER_ITEM_FRAME_END;
+        queue_waited = false;
+#ifdef PICO_BUILD
+        queue_wait_start_us = 0;
+#endif
         while (!display_lcd_worker_push_item(&item)) {
 #ifdef PICO_BUILD
+            if (!queue_waited) {
+                queue_wait_start_us = time_us_64();
+                queue_waited = true;
+            }
+            s_perf_lcd_queue_wait_count++;
             sleep_us(100);
 #endif
         }
+#ifdef PICO_BUILD
+        if (queue_waited) {
+            s_perf_lcd_queue_wait_us += time_us_64() - queue_wait_start_us;
+        }
+#endif
     }
 
     return true;
@@ -877,7 +931,10 @@ int InfoNES_LoadFrame(void) {
     }
 
     if (now_us < s_next_frame_deadline_us) {
-        sleep_us((uint32_t)(s_next_frame_deadline_us - now_us));
+        const uint32_t sleep_for_us = (uint32_t)(s_next_frame_deadline_us - now_us);
+        sleep_us(sleep_for_us);
+        s_perf_frame_pacing_sleep_us += sleep_for_us;
+        s_perf_frame_pacing_sleep_count++;
     } else {
         late_us = now_us - s_next_frame_deadline_us;
     }

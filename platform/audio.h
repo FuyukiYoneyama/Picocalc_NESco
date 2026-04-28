@@ -10,6 +10,7 @@
  */
 #pragma once
 #include "InfoNES_Types.h"
+#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -32,6 +33,8 @@ void audio_play_ui_tone(unsigned freq_hz, unsigned duration_ms, BYTE amplitude);
 void audio_play_ui_silence(unsigned duration_ms);
 void audio_start_ui_busy_indicator(void);
 void audio_stop_ui_busy_indicator(void);
+void audio_perf_reset(void);
+void audio_perf_snapshot(uint64_t *wait_us, uint32_t *wait_count);
 
 #ifdef __cplusplus
 }

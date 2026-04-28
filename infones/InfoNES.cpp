@@ -45,7 +45,12 @@
 extern "C" void display_toggle_nes_view_scale(void);
 extern "C" int display_get_nes_view_scale(void);
 extern "C" void display_perf_reset(void);
-extern "C" void display_perf_snapshot(uint64_t *wait_us, uint64_t *flush_us);
+extern "C" void display_perf_snapshot(uint64_t *wait_us,
+                                      uint64_t *flush_us,
+                                      uint64_t *queue_wait_us,
+                                      uint32_t *queue_wait_count,
+                                      uint64_t *frame_pacing_sleep_us,
+                                      uint32_t *frame_pacing_sleep_count);
 #include "input.h"
 #include "InfoNES_Mapper.h"
 #include "InfoNES_StructuredLog.h"
@@ -224,6 +229,12 @@ uint64_t g_perf_draw_us = 0;
 uint64_t g_perf_tail_us = 0;
 uint64_t g_perf_lcd_wait_us = 0;
 uint64_t g_perf_lcd_flush_us = 0;
+uint64_t g_perf_lcd_queue_wait_us = 0;
+uint32_t g_perf_lcd_queue_wait_count = 0;
+uint64_t g_perf_frame_pacing_sleep_us = 0;
+uint32_t g_perf_frame_pacing_sleep_count = 0;
+uint64_t g_perf_audio_wait_us = 0;
+uint32_t g_perf_audio_wait_count = 0;
 
 inline void perf_reset()
 {
@@ -244,8 +255,15 @@ inline void perf_reset()
   g_perf_tail_us = 0;
   g_perf_lcd_wait_us = 0;
   g_perf_lcd_flush_us = 0;
+  g_perf_lcd_queue_wait_us = 0;
+  g_perf_lcd_queue_wait_count = 0;
+  g_perf_frame_pacing_sleep_us = 0;
+  g_perf_frame_pacing_sleep_count = 0;
+  g_perf_audio_wait_us = 0;
+  g_perf_audio_wait_count = 0;
   (void)input_consume_event_count();
   display_perf_reset();
+  audio_perf_reset();
 }
 
 inline void perf_note_frame(uint64_t now_us)
@@ -293,7 +311,13 @@ inline void perf_log_if_due(uint64_t now_us)
   if (elapsed_us < kPerfWindowUs)
     return;
 
-  display_perf_snapshot(&g_perf_lcd_wait_us, &g_perf_lcd_flush_us);
+  display_perf_snapshot(&g_perf_lcd_wait_us,
+                        &g_perf_lcd_flush_us,
+                        &g_perf_lcd_queue_wait_us,
+                        &g_perf_lcd_queue_wait_count,
+                        &g_perf_frame_pacing_sleep_us,
+                        &g_perf_frame_pacing_sleep_count);
+  audio_perf_snapshot(&g_perf_audio_wait_us, &g_perf_audio_wait_count);
   const uint64_t fps_x100 =
       elapsed_us != 0
           ? (static_cast<uint64_t>(g_perf_frames) * 100ull * 1000000ull) / elapsed_us
@@ -312,7 +336,7 @@ inline void perf_log_if_due(uint64_t now_us)
           ? "stretch"
           : "normal";
 
-  printf("[CORE1_BASE] t_us=%llu frames=%lu fps_x100=%llu frame_us_avg=%llu frame_us_max=%llu lcd_wait_us=%llu lcd_flush_us=%llu pad_interval_us_avg=%llu pad_interval_us_max=%llu input_events=%u view_mode=%s\n",
+  printf("[CORE1_BASE] t_us=%llu frames=%lu fps_x100=%llu frame_us_avg=%llu frame_us_max=%llu lcd_wait_us=%llu lcd_flush_us=%llu lcd_queue_wait_us=%llu lcd_queue_wait_count=%lu frame_pacing_sleep_us=%llu frame_pacing_sleep_count=%lu audio_wait_us=%llu audio_wait_count=%lu pad_interval_us_avg=%llu pad_interval_us_max=%llu input_events=%u view_mode=%s\n",
          static_cast<unsigned long long>(now_us),
          static_cast<unsigned long>(g_perf_frames),
          static_cast<unsigned long long>(fps_x100),
@@ -320,6 +344,12 @@ inline void perf_log_if_due(uint64_t now_us)
          static_cast<unsigned long long>(g_perf_frame_us_max),
          static_cast<unsigned long long>(g_perf_lcd_wait_us),
          static_cast<unsigned long long>(g_perf_lcd_flush_us),
+         static_cast<unsigned long long>(g_perf_lcd_queue_wait_us),
+         static_cast<unsigned long>(g_perf_lcd_queue_wait_count),
+         static_cast<unsigned long long>(g_perf_frame_pacing_sleep_us),
+         static_cast<unsigned long>(g_perf_frame_pacing_sleep_count),
+         static_cast<unsigned long long>(g_perf_audio_wait_us),
+         static_cast<unsigned long>(g_perf_audio_wait_count),
          static_cast<unsigned long long>(pad_interval_us_avg),
          static_cast<unsigned long long>(g_perf_pad_interval_us_max),
          input_events,

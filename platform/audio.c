@@ -50,6 +50,8 @@ static volatile bool s_audio_paused = false;
 static BYTE s_mix_peak = 0;
 static BYTE s_noise_peak = 0;
 static BYTE s_dpcm_peak = 0;
+static uint64_t s_perf_audio_wait_us = 0;
+static uint32_t s_perf_audio_wait_count = 0;
 #ifdef PICO_BUILD
 static uint64_t s_audio_debug_last_us = 0;
 #endif
@@ -254,6 +256,20 @@ void audio_resume_after_capture(void) {
     s_audio_paused = false;
 }
 
+void audio_perf_reset(void) {
+    s_perf_audio_wait_us = 0;
+    s_perf_audio_wait_count = 0;
+}
+
+void audio_perf_snapshot(uint64_t *wait_us, uint32_t *wait_count) {
+    if (wait_us) {
+        *wait_us = s_perf_audio_wait_us;
+    }
+    if (wait_count) {
+        *wait_count = s_perf_audio_wait_count;
+    }
+}
+
 int InfoNES_GetSoundBufferSize(void) {
     return (AUDIO_RING_SIZE - 1) - audio_ring_available();
 }
@@ -287,14 +303,23 @@ void InfoNES_SoundOutput(int nch,
 
 #ifdef PICO_BUILD
     int wait_loops = 0;
+    uint64_t wait_start_us = 0;
     while (audio_ring_writable() < nch) {
+        if (wait_loops == 0) {
+            wait_start_us = time_us_64();
+        }
         ++wait_loops;
+        s_perf_audio_wait_count++;
         sleep_us(AUDIO_WAIT_SLEEP_US);
         if (wait_loops >= AUDIO_WAIT_LOOPS_MAX) {
+            s_perf_audio_wait_us += time_us_64() - wait_start_us;
             s_ring_overrun_count++;
             s_prod_drop_samples += (uint32_t)nch;
             return;
         }
+    }
+    if (wait_loops > 0) {
+        s_perf_audio_wait_us += time_us_64() - wait_start_us;
     }
 #endif
 

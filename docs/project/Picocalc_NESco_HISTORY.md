@@ -10,6 +10,27 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.1 frame wait metrics 計測ブランチ (2026-04-29)
+
+- `feature/frame-wait-metrics` を作成し、frame rate 改善調査用の待ち時間メトリクスを追加した
+- 目的は、無駄に待っている箇所があるかを実機ログで切り分けること
+- `NESCO_CORE1_BASELINE_LOG=ON` の `[CORE1_BASE]` に次の項目を追加した
+  - `lcd_queue_wait_us`
+  - `lcd_queue_wait_count`
+  - `frame_pacing_sleep_us`
+  - `frame_pacing_sleep_count`
+  - `audio_wait_us`
+  - `audio_wait_count`
+- `display_perf_snapshot()` を拡張し、LCD worker queue full 待ちと frame pacing sleep を取得できるようにした
+- `audio_perf_reset()` / `audio_perf_snapshot()` を追加し、audio ring full 待ちを取得できるようにした
+- system version を `1.1.1` に更新した
+- build 確認:
+  - `NESCO_CORE1_BASELINE_LOG=ON`
+  - banner: `PicoCalc NESco Ver. 1.1.1 Build Apr 29 2026 02:07:16`
+  - UF2 SHA-256: `b6c72449baa4bffb581bf2b65e2f3aa9ac376dac73e6c461a04adff35b56ed77`
+  - ELF SHA-256: `0aa89ceb48693ea85e68472078059b399d19bb94be2159939bf1de6571261f2b`
+  - `.bss = 97192`
+
 ## 1.1.0 screenshot viewer / core1 LCD worker 採用版 (2026-04-29)
 
 - BMP screenshot viewer と core1 LCD worker 採用をまとめた節目として、system version を `1.1.0` に更新した

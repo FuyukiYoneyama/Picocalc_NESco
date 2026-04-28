@@ -88,10 +88,16 @@ void display_perf_reset(void);
 void display_reset_frame_pacing(void);
 
 /**
- * display_perf_snapshot(wait_us, flush_us) — Read current LCD-side timing
+ * display_perf_snapshot(wait_us, flush_us, queue_wait_us, queue_wait_count,
+ * frame_pacing_sleep_us, frame_pacing_sleep_count) — Read current LCD-side timing
  * accumulators without resetting them.
  */
-void display_perf_snapshot(uint64_t *wait_us, uint64_t *flush_us);
+void display_perf_snapshot(uint64_t *wait_us,
+                           uint64_t *flush_us,
+                           uint64_t *queue_wait_us,
+                           uint32_t *queue_wait_count,
+                           uint64_t *frame_pacing_sleep_us,
+                           uint32_t *frame_pacing_sleep_count);
 
 #ifdef __cplusplus
 }
