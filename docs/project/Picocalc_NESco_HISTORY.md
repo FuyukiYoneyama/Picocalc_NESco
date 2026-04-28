@@ -10,6 +10,23 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.0 screenshot viewer / core1 LCD worker 採用版 (2026-04-29)
+
+- BMP screenshot viewer と core1 LCD worker 採用をまとめた節目として、system version を `1.1.0` に更新した
+- `1.1.0` は機能追加版として扱う
+- 含める主な内容:
+  - ROM menu から `0:/screenshots/*.BMP` を選択して表示する screenshot viewer
+  - core1 keyboard polling
+  - core1 LCD worker normal 表示
+  - core1 LCD worker stretch 表示
+- `1.0.15` で確認した core1 LCD worker 採用判断を `1.1.0` の根拠にする
+- README の現在 version と特徴欄を `1.1.0` に合わせて更新した
+- build 確認:
+  - banner: `PicoCalc NESco Ver. 1.1.0 Build Apr 29 2026 01:28:53`
+  - UF2 SHA-256: `2d5cdf93fd64c2cc729ed445c804daa3330a21aa174f10c51e223ae7ef5395fc`
+  - ELF SHA-256: `de1aca323d91e7af22a54c5c62c3e75fcfa362f0810b0f5195d762162f3be515`
+  - `.bss = 97096`
+
 ## 1.0.15 core1 LCD worker 採用判断 (2026-04-29)
 
 - `feature/core1-lcd-worker` の Phase 2 / Phase 3 / Phase 4 実装を採用する判断を行った
