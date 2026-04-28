@@ -226,6 +226,11 @@ uint32_t g_perf_scanlines = 0;
 uint64_t g_perf_cpu_us = 0;
 uint64_t g_perf_apu_us = 0;
 uint64_t g_perf_draw_us = 0;
+uint64_t g_perf_ppu_bg_us = 0;
+uint64_t g_perf_ppu_sprite_us = 0;
+uint64_t g_perf_mapper_hsync_us = 0;
+uint64_t g_perf_mapper_vsync_us = 0;
+uint64_t g_perf_load_frame_us = 0;
 uint64_t g_perf_tail_us = 0;
 uint64_t g_perf_lcd_wait_us = 0;
 uint64_t g_perf_lcd_flush_us = 0;
@@ -252,6 +257,11 @@ inline void perf_reset()
   g_perf_cpu_us = 0;
   g_perf_apu_us = 0;
   g_perf_draw_us = 0;
+  g_perf_ppu_bg_us = 0;
+  g_perf_ppu_sprite_us = 0;
+  g_perf_mapper_hsync_us = 0;
+  g_perf_mapper_vsync_us = 0;
+  g_perf_load_frame_us = 0;
   g_perf_tail_us = 0;
   g_perf_lcd_wait_us = 0;
   g_perf_lcd_flush_us = 0;
@@ -336,12 +346,21 @@ inline void perf_log_if_due(uint64_t now_us)
           ? "stretch"
           : "normal";
 
-  printf("[CORE1_BASE] t_us=%llu frames=%lu fps_x100=%llu frame_us_avg=%llu frame_us_max=%llu lcd_wait_us=%llu lcd_flush_us=%llu lcd_queue_wait_us=%llu lcd_queue_wait_count=%lu frame_pacing_sleep_us=%llu frame_pacing_sleep_count=%lu audio_wait_us=%llu audio_wait_count=%lu pad_interval_us_avg=%llu pad_interval_us_max=%llu input_events=%u view_mode=%s\n",
+  printf("[CORE1_BASE] t_us=%llu frames=%lu fps_x100=%llu frame_us_avg=%llu frame_us_max=%llu cpu_us=%llu apu_us=%llu draw_us=%llu ppu_bg_us=%llu ppu_sprite_us=%llu mapper_hsync_us=%llu mapper_vsync_us=%llu load_frame_us=%llu tail_us=%llu lcd_wait_us=%llu lcd_flush_us=%llu lcd_queue_wait_us=%llu lcd_queue_wait_count=%lu frame_pacing_sleep_us=%llu frame_pacing_sleep_count=%lu audio_wait_us=%llu audio_wait_count=%lu pad_interval_us_avg=%llu pad_interval_us_max=%llu input_events=%u view_mode=%s\n",
          static_cast<unsigned long long>(now_us),
          static_cast<unsigned long>(g_perf_frames),
          static_cast<unsigned long long>(fps_x100),
          static_cast<unsigned long long>(frame_us_avg),
          static_cast<unsigned long long>(g_perf_frame_us_max),
+         static_cast<unsigned long long>(g_perf_cpu_us),
+         static_cast<unsigned long long>(g_perf_apu_us),
+         static_cast<unsigned long long>(g_perf_draw_us),
+         static_cast<unsigned long long>(g_perf_ppu_bg_us),
+         static_cast<unsigned long long>(g_perf_ppu_sprite_us),
+         static_cast<unsigned long long>(g_perf_mapper_hsync_us),
+         static_cast<unsigned long long>(g_perf_mapper_vsync_us),
+         static_cast<unsigned long long>(g_perf_load_frame_us),
+         static_cast<unsigned long long>(g_perf_tail_us),
          static_cast<unsigned long long>(g_perf_lcd_wait_us),
          static_cast<unsigned long long>(g_perf_lcd_flush_us),
          static_cast<unsigned long long>(g_perf_lcd_queue_wait_us),
@@ -1007,7 +1026,9 @@ void __not_in_flash_func(InfoNES_Cycle)()
           //util::WorkMeterMark(MARKER_CPU);
       }
     // A mapper function in H-Sync
+    const uint64_t mapper_hsync_start_us = time_us_64();
     MapperHSync();
+    g_perf_mapper_hsync_us += time_us_64() - mapper_hsync_start_us;
 
     // A function in H-Sync
     if (InfoNES_HSync() == -1) //quit was called
@@ -1143,7 +1164,9 @@ int __not_in_flash_func(InfoNES_HSync)()
     if (FrameCnt == 0)
     {
       // Transfer the contents of work frame on the screen
+      const uint64_t load_frame_start_us = time_us_64();
       InfoNES_LoadFrame();
+      g_perf_load_frame_us += time_us_64() - load_frame_start_us;
       perf_note_frame(time_us_64());
       ++g_perf_frames;
 
@@ -1171,7 +1194,9 @@ int __not_in_flash_func(InfoNES_HSync)()
     InfoNES_pAPUVsync();
 
     // A mapper function in V-Sync
+    const uint64_t mapper_vsync_start_us = time_us_64();
     MapperVSync();
+    g_perf_mapper_vsync_us += time_us_64() - mapper_vsync_start_us;
 
     // Get the condition of the joypad
     perf_note_pad_poll(time_us_64());
@@ -1386,10 +1411,17 @@ void __not_in_flash_func(InfoNES_DrawLine)()
   int nSprData;
   BYTE bySprCol;
   BYTE pSprBuf[NES_DISP_WIDTH + 7];
+  uint64_t bg_start_us = 0;
+  uint64_t sprite_start_us = 0;
 
   /*-------------------------------------------------------------------*/
   /*  Render Background                                                */
   /*-------------------------------------------------------------------*/
+
+  if constexpr (kPerfLogToSerial)
+  {
+    bg_start_us = time_us_64();
+  }
 
   /* MMC5 VROM switch */
   MapperRenderScreen(1);
@@ -1608,6 +1640,11 @@ void __not_in_flash_func(InfoNES_DrawLine)()
   }
 
   //util::WorkMeterMark(MARKER_BG);
+  if constexpr (kPerfLogToSerial)
+  {
+    g_perf_ppu_bg_us += time_us_64() - bg_start_us;
+    sprite_start_us = time_us_64();
+  }
 
   /*-------------------------------------------------------------------*/
   /*  Render a sprite                                                  */
@@ -1871,6 +1908,11 @@ void __not_in_flash_func(InfoNES_DrawLine)()
       PPU_R2 |= R2_MAX_SP; // Set a flag of maximum sprites on scanline
 
     //util::WorkMeterMark(MARKER_SPRITE);
+  }
+
+  if constexpr (kPerfLogToSerial)
+  {
+    g_perf_ppu_sprite_us += time_us_64() - sprite_start_us;
   }
 }
 

@@ -10,6 +10,28 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.2 hot path metrics 計測ブランチ (2026-04-29)
+
+- `feature/hot-path-metrics` を作成し、frame rate 改善調査用の hot path メトリクスを追加した
+- `1.1.1` の待ち時間メトリクスに加え、`NESCO_CORE1_BASELINE_LOG=ON` の `[CORE1_BASE]` に次の項目を追加した
+  - `cpu_us`
+  - `apu_us`
+  - `draw_us`
+  - `ppu_bg_us`
+  - `ppu_sprite_us`
+  - `mapper_hsync_us`
+  - `mapper_vsync_us`
+  - `load_frame_us`
+  - `tail_us`
+- 目的は、FPS 低下の主因が CPU emulation、PPU background / sprite rendering、mapper hook、frame submit 周辺のどこにあるかを実機ログで切り分けること
+- system version を `1.1.2` に更新した
+- build 確認:
+  - `NESCO_CORE1_BASELINE_LOG=ON`
+  - banner: `PicoCalc NESco Ver. 1.1.2 Build Apr 29 2026 07:58:08`
+  - UF2 SHA-256: `96579841092fd61fc55228b4d4543fee652b1ada6b4324de04f0e9f4e6317e75`
+  - ELF SHA-256: `51374db69cef796961afcb9ce5c694f1e9b0e14750373e06c1a4cd84e866db2c`
+  - `.bss = 97232`
+
 ## 1.1.1 frame wait metrics 計測ブランチ (2026-04-29)
 
 - `feature/frame-wait-metrics` を作成し、frame rate 改善調査用の待ち時間メトリクスを追加した

@@ -3,7 +3,7 @@
 `Picocalc_NESco` は、PicoCalc 向けに調整している NES エミュレーター firmware です。
 現在の実装は `infones` ベースで、PicoCalc の LCD、I2C keyboard、PWM audio、SD / flash ROM 選択 menu に接続しています。
 
-現在の埋め込み version は `1.1.1` です。
+現在の埋め込み version は `1.1.2` です。
 このプロジェクトは PicoCalc 専用 firmware を対象にしています。
 PicoCalc 向け以外の build は未検証なので、現在は明示的に無効化しています。
 `infones` 側にある他環境向け build は、このプロジェクトの対象外です。
