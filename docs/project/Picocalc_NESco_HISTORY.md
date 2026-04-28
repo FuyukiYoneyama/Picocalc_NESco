@@ -10,6 +10,25 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.6 `renderBgTile()` full tile path 小改善ブランチ (2026-04-29)
+
+- `feature/hot-path-metrics` で、`renderBgTile()` の full tile path を小さく分離した
+- 目的は、`1.1.5` の詳細計測で重かった background tile render 部分を、画面意味を変えずに少し軽くできるか確認すること
+- 変更内容:
+  - `renderBgTileFull()` を追加した
+  - `renderBgTileFull()` は `__not_in_flash_func` 付き、`always_inline` 指定
+  - full tile path だけ `renderBgTileFull()` に分離した
+  - `renderBgTileFull()` 内で `desc.pal` を local `pal` pointer に保持するようにした
+  - partial tile path と `MapperPPU()` 呼び出し順は変更していない
+- system version を `1.1.6` に更新した
+- build 確認:
+  - `NESCO_CORE1_BASELINE_LOG=ON`
+  - banner: `PicoCalc NESco Ver. 1.1.6 Build Apr 29 2026 08:47:06`
+  - UF2 SHA-256: `6791ffdb710f5a123c13f7ee7ba994b1b30ec1e6ab85079d8ea7f749f5cf180f`
+  - ELF SHA-256: `721b5076d53ae758c18787fe89616e26e8cf81582a66d1eaf488fe0f1b00eee8`
+  - `.bss = 97308`
+  - `1.1.5` から `.bss` は変化なし
+
 ## 1.1.5 PPU background tile 内訳計測ブランチ (2026-04-29)
 
 - `feature/hot-path-metrics` の `[CORE1_BASE]` に、`ppu_bg_tile_us` の内訳メトリクスを追加した

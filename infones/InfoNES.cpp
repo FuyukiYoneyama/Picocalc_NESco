@@ -1322,6 +1322,41 @@ namespace
     }
   }
 
+  static inline void __not_in_flash_func(renderBgTileFull)(const BgTileDescriptor &desc,
+                                                           BYTE packed_hi,
+                                                           BYTE packed_lo,
+                                                           BYTE opaque_hi,
+                                                           BYTE opaque_lo) __attribute__((always_inline));
+
+  static inline void __not_in_flash_func(renderBgTileFull)(const BgTileDescriptor &desc,
+                                                           BYTE packed_hi,
+                                                           BYTE packed_lo,
+                                                           BYTE opaque_hi,
+                                                           BYTE opaque_lo)
+  {
+    const WORD *pal = desc.pal;
+    WORD *dst = desc.dst;
+    BYTE *dst_opaque = desc.dst_opaque;
+
+    dst[0] = pal[(packed_hi >> 6) & 0x03u];
+    dst[1] = pal[(packed_hi >> 4) & 0x03u];
+    dst[2] = pal[(packed_hi >> 2) & 0x03u];
+    dst[3] = pal[packed_hi & 0x03u];
+    dst[4] = pal[(packed_lo >> 6) & 0x03u];
+    dst[5] = pal[(packed_lo >> 4) & 0x03u];
+    dst[6] = pal[(packed_lo >> 2) & 0x03u];
+    dst[7] = pal[packed_lo & 0x03u];
+
+    dst_opaque[0] = (BYTE)((opaque_hi >> 3) & 0x01u);
+    dst_opaque[1] = (BYTE)((opaque_hi >> 2) & 0x01u);
+    dst_opaque[2] = (BYTE)((opaque_hi >> 1) & 0x01u);
+    dst_opaque[3] = (BYTE)(opaque_hi & 0x01u);
+    dst_opaque[4] = (BYTE)((opaque_lo >> 3) & 0x01u);
+    dst_opaque[5] = (BYTE)((opaque_lo >> 2) & 0x01u);
+    dst_opaque[6] = (BYTE)((opaque_lo >> 1) & 0x01u);
+    dst_opaque[7] = (BYTE)(opaque_lo & 0x01u);
+  }
+
   static inline void __not_in_flash_func(renderBgTile)(const BgTileDescriptor &desc)
   {
     const BYTE pl0 = desc.pattern_row[0];
@@ -1335,23 +1370,7 @@ namespace
 
     if (desc.clip_left == 0 && desc.clip_right == 8)
     {
-      dst[0] = desc.pal[(packed_hi >> 6) & 0x03u];
-      dst[1] = desc.pal[(packed_hi >> 4) & 0x03u];
-      dst[2] = desc.pal[(packed_hi >> 2) & 0x03u];
-      dst[3] = desc.pal[packed_hi & 0x03u];
-      dst[4] = desc.pal[(packed_lo >> 6) & 0x03u];
-      dst[5] = desc.pal[(packed_lo >> 4) & 0x03u];
-      dst[6] = desc.pal[(packed_lo >> 2) & 0x03u];
-      dst[7] = desc.pal[packed_lo & 0x03u];
-
-      dst_opaque[0] = (BYTE)((opaque_hi >> 3) & 0x01u);
-      dst_opaque[1] = (BYTE)((opaque_hi >> 2) & 0x01u);
-      dst_opaque[2] = (BYTE)((opaque_hi >> 1) & 0x01u);
-      dst_opaque[3] = (BYTE)(opaque_hi & 0x01u);
-      dst_opaque[4] = (BYTE)((opaque_lo >> 3) & 0x01u);
-      dst_opaque[5] = (BYTE)((opaque_lo >> 2) & 0x01u);
-      dst_opaque[6] = (BYTE)((opaque_lo >> 1) & 0x01u);
-      dst_opaque[7] = (BYTE)(opaque_lo & 0x01u);
+      renderBgTileFull(desc, packed_hi, packed_lo, opaque_hi, opaque_lo);
       return;
     }
 
