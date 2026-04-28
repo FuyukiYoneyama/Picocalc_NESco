@@ -30,8 +30,10 @@
 
 ## 現在必要な計画
 
-- 現時点で、実装中の長期計画はありません。
-  - core1 活用計画は Phase 5 の採用判断まで完了済みです。
+- Background tile hot path optimization
+  - 計画: `docs/design/BG_TILE_HOTPATH_OPTIMIZATION_PLAN_20260429.md`
+  - `1.1.5` の詳細計測結果をもとに、`renderBgTile()` full tile path から小さく改善する。
+  - まず `1.1.6` で full tile path の小改善を行い、`LodeRunner` / `Xevious` / `DART` で再計測する。
 
 ## 完了済み計画 / 結果
 

@@ -29,6 +29,21 @@
   - ELF SHA-256: `dfb1fa1354fd390a7731a23e0d58ea532ba8a65984850792865cbc7c2a4ee880`
   - `.bss = 97308`
   - `1.1.4` から `.bss` は 36 bytes 増加した
+- 実機計測 baseline:
+  - log: `/home/fuyuki/pico_dvl/codex/log/pico20260429_082720.log`
+  - user 操作: `LodeRunner`、`Xevious`、`Project_DART_V1.0` を順に play
+  - `[ROM_START]` で確認した ROM:
+    - `LodeRunner.nes`: mapper 0
+    - `Xevious.nes`: mapper 0
+    - `Project_DART_V1.0.nes`: mapper 30
+  - ROM 別平均:
+    - `LodeRunner.nes`: fps 21.0、`draw_us/frame` 27.5ms、`ppu_bg_tile_us/frame` 19.7ms、`ppu_bg_tile_render_us/frame` 5.8ms、`ppu_bg_tile_pal_us/frame` 2.5ms、`ppu_bg_tile_build_us/frame` 1.9ms、`ppu_bg_mapperppu_us/frame` 1.4ms
+    - `Xevious.nes`: fps 24.9、`draw_us/frame` 27.8ms、`ppu_bg_tile_us/frame` 19.6ms、`ppu_bg_tile_render_us/frame` 5.7ms、`ppu_bg_tile_pal_us/frame` 2.5ms、`ppu_bg_tile_build_us/frame` 1.9ms、`ppu_bg_mapperppu_us/frame` 1.4ms
+    - `Project_DART_V1.0.nes`: fps 20.3、`draw_us/frame` 27.1ms、`ppu_bg_tile_us/frame` 18.9ms、`ppu_bg_tile_render_us/frame` 5.7ms、`ppu_bg_tile_pal_us/frame` 2.3ms、`ppu_bg_tile_build_us/frame` 1.8ms、`ppu_bg_mapperppu_us/frame` 1.3ms
+  - 判断:
+    - `MapperPPU()` は約 1.3ms から 1.4ms / frame で、最初の改善対象にはしない
+    - 最初の改善対象は `renderBgTile()` full tile path とする
+    - `1.1.5` は tile ごとの `time_us_64()` 呼び出しが多いため、fps は通常性能ではなく内訳確認用として扱う
 
 ## 1.1.4 PPU background breakdown 計測ブランチ (2026-04-29)
 
