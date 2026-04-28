@@ -10835,6 +10835,13 @@ Xevious 背景崩れについては、かなり重要なので詳細を残す。
   は
   `5e0cba43c49d184531a42bc48a9ef4875171818f9449346564e6bae48802a0cb`
   だった
+- 実機最終確認で、F4
+  から screenshot viewer
+  に入り、BMP
+  一覧と表示が動作することを確認した
+- F4
+  化後の screenshot viewer
+  初期機能は完了扱いにした
 
 ## 1.11 `0.3.21` BokosukaWars trace 領域を uf2loader 保護域から退避 (2026-04-25)
 
