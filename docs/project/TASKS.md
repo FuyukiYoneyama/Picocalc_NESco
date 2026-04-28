@@ -21,7 +21,7 @@
 - `[active]` ROM menu から過去に撮った screenshot BMP を選択して表示できる機能を設計・実装する
   - 作業 branch: `feature/screenshot-viewer`
   - Phase 1: viewer 入口は実装済み
-  - Phase 2: BMP 一覧表示は実装済み、実機確認待ち
+  - Phase 2: BMP 一覧表示は実装済み、実機確認済み
   - Phase 3: BMP 表示処理は未実装
   - BMP 読み込み用 buffer は必要時に動的確保し、表示終了後に解放する
   - 実機未確認のまま `main` へ merge / push しない
