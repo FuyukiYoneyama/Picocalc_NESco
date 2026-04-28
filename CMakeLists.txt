@@ -42,6 +42,7 @@ endif()
 # -------------------------------------------------------------------------
 set(PLATFORM_SOURCES
     platform/main.c
+    platform/core1_worker.c
     platform/infones_session.cpp
     platform/display.c
     platform/audio.c
@@ -138,6 +139,7 @@ if(PICO_BUILD)
         hardware_pwm
         hardware_flash
         hardware_irq
+        pico_multicore
         pico_sync
     )
 

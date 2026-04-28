@@ -16,6 +16,7 @@
 
 #include "display.h"
 #include "audio.h"
+#include "core1_worker.h"
 #include "infones_bridge.h"
 #include "input.h"
 #include "rom_menu.h"
@@ -66,6 +67,10 @@ int main(void) {
                (unsigned long)__malloc_top_pad);
 #endif
     boot_log_stage("stdio ready");
+#endif
+    core1_worker_init();
+#ifdef PICO_BUILD
+    boot_log_stage("core1 worker ready");
 #endif
 
     /* Hardware / peripheral init */
