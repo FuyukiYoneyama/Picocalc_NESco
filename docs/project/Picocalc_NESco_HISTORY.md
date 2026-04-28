@@ -10,6 +10,19 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.0.10 core1 keyboard polling / flash staging 安定化 (2026-04-28)
+
+- core1 keyboard polling 導入後、DART / TOWER の SD ファイル起動時にキー入力が効かない問題を調査した
+- 実機確認により、同じ ROM でも `SYSTEM FLASH` から起動した場合はキー入力が効き、SD ファイルから選んだ場合だけ問題が出ることを確認した
+- 原因は Mapper30 固有処理ではなく、SD から大きな ROM を flash staging する経路で、flash erase / program 中に core1 が動作し続けることだった可能性が高い
+- `pico_multicore` の `multicore_lockout` を使い、flash erase / program 中は core1 を lockout するようにした
+- core1 worker 側では `multicore_lockout_victim_init()` を呼ぶようにした
+- 既に flash に staging 済みの ROM と、選択された SD ファイルの `source_path` / size / mapper が一致する場合は、再 staging せず既存 flash ROM を再利用するようにした
+- 一時的に core1 keyboard polling を `4ms` 周期 / 最大 4 events に抑える案も試したが、flash lockout 後は元の `1ms` 周期 / FIFO 全 drain でも DART と TOWER が動くことを実機確認したため、polling cadence 変更は採用しなかった
+- 実機確認:
+  - DART: SD ファイル起動 / SYSTEM FLASH 起動の両方でキー入力が効く
+  - TOWER: SD ファイル起動 / SYSTEM FLASH 起動の両方でキー入力が効く
+
 ## 0.5 文書整理メモ (2026-04-19)
 
 - `docs/project/PROGRESS_TODO.md`

@@ -48,12 +48,6 @@ enum {
     PAD_SYS_SCREENSHOT_LOCAL = 0x200,
 };
 
-enum {
-    CORE1_KEYBOARD_MAX_EVENTS_PER_TICK = 4,
-    CORE1_KEYBOARD_POLL_INTERVAL_MS = 4,
-    CORE1_IDLE_POLL_INTERVAL_MS = 1,
-};
-
 static bool s_core1_worker_started = false;
 static volatile unsigned s_core1_requested_services = 0;
 static volatile unsigned s_core1_status = 0;
@@ -92,12 +86,7 @@ static void core1_reset_keyboard_snapshot(void) {
 static void core1_keyboard_poll_once(void) {
     BYTE key;
 
-    for (unsigned drained = 0; drained < CORE1_KEYBOARD_MAX_EVENTS_PER_TICK; drained++) {
-        key = i2c_kbd_read_key();
-        if (key == 0) {
-            break;
-        }
-
+    while ((key = i2c_kbd_read_key()) != 0) {
         const BYTE state = i2c_kbd_last_state();
         const DWORD mask = core1_map_key(key);
         DWORD system_bits = 0;
@@ -147,9 +136,7 @@ static void core1_worker_main(void) {
         } else {
             s_core1_status &= ~CORE1_STATUS_IDLE_ACK;
         }
-        sleep_ms((services & CORE1_SERVICE_KEYBOARD) != 0 ?
-                 CORE1_KEYBOARD_POLL_INTERVAL_MS :
-                 CORE1_IDLE_POLL_INTERVAL_MS);
+        sleep_ms(1);
     }
 }
 
