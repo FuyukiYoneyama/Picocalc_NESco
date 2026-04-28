@@ -6,6 +6,7 @@ build/
 *.hex
 *.map
 *.dis
+local_uf2_archive/
 
 # CMake
 CMakeCache.txt

@@ -78,6 +78,24 @@ cp build/Picocalc_NESco.uf2 Picocalc_NESco-1.0.0.uf2
 sha256sum Picocalc_NESco-1.0.0.uf2
 ```
 
+## local UF2 archive
+
+Release 作業や特別な実機試験で使い終わった UF2 は、
+project root 直下や各所に残さず `local_uf2_archive/` に集約する。
+
+`local_uf2_archive/` は `.gitignore` 対象であり、GitHub Release や source archive には含めない。
+
+現在進行中の build / 実機試験で使っている UF2 は、従来どおり `build/` に置いてよい。
+使い終わった時点で、必要なら `local_uf2_archive/` へ移動する。
+
+例:
+
+```sh
+mkdir -p local_uf2_archive
+mv Picocalc_NESco-<old-version>.uf2 local_uf2_archive/
+mv Picocalc_NESco-test-*.uf2 local_uf2_archive/
+```
+
 ## source archive
 
 基本は GitHub が release tag から自動生成する source archive を使う。
@@ -116,6 +134,7 @@ git ls-files docs/images
 手動 source archive を作る場合は、次を含めない:
 
 - `build/`
+- `local_uf2_archive/`
 - `*.nes`
 - `*.fds`
 - `*.srm`
