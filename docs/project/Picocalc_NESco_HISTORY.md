@@ -10719,6 +10719,69 @@ Xevious 背景崩れについては、かなり重要なので詳細を残す。
   一覧表示経路では viewer entry
   確保に成功していると扱う
 
+## 1.49 `1.0.7` screenshot viewer Phase 3: BMP 表示処理を追加 (2026-04-28)
+
+- system version を
+  `1.0.7`
+  へ更新した
+- screenshot viewer
+  の一覧で
+  `Enter`
+  または
+  `-`
+  を押すと、選択中 BMP
+  を fullscreen
+  で表示する処理を追加した
+- 初期対応 BMP
+  は
+  `320x320`
+  `24bit`
+  `BI_RGB`
+  で、
+  top-down
+  と bottom-up
+  の両方を扱う
+- BMP
+  header
+  と file size
+  を検証し、対応外または破損が疑われる場合は
+  `UNSUPPORTED BMP`
+  または
+  `READ FAILED`
+  を status
+  に出して一覧へ戻る
+- 表示は row buffer
+  方式で行い、full image buffer
+  は確保しない
+- LCD DMA
+  は非同期転送なので、各 row
+  送信後に
+  `lcd_dma_wait()`
+  してから line buffer
+  を再利用する
+- BMP
+  表示中は debug code
+  などの text
+  を画像上に描かない
+- clean build
+  は
+  `cmake --build build --target clean && cmake --build build -j8`
+  で成功した
+- build
+  は
+  `PicoCalc NESco Ver. 1.0.7 Build Apr 28 2026 20:36:25`
+  だった
+- build size
+  は
+  `text=273388`
+  `data=0`
+  `bss=92772`
+  だった
+- UF2 SHA-256
+  は
+  `a94e962e962171937dfb108e37b3c3842aca04db033d41feab9ea1d5090f549b`
+  だった
+
 ## 1.11 `0.3.21` BokosukaWars trace 領域を uf2loader 保護域から退避 (2026-04-25)
 
 - system version を

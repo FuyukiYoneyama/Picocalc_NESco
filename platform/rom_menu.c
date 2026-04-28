@@ -655,6 +655,7 @@ const char *picocalc_rom_menu(void) {
     BYTE last_state = 0;
     int show_help = 0;
     int show_screenshot_viewer = 0;
+    int show_screenshot_image = 0;
     int help_page = HELP_PAGE_HELP;
     const char *status_text = NULL;
 
@@ -725,12 +726,28 @@ const char *picocalc_rom_menu(void) {
 
         if (state == KEY_STATE_PRESSED) {
             if (show_screenshot_viewer) {
+                if (show_screenshot_image) {
+                    if (key == KEY_ESC || key == KEY_ENTER || key == KEY_MINUS) {
+                        show_screenshot_image = 0;
+                        status_text = "ESC BACK";
+                        menu_discard_pending_keys();
+                        menu_render_screenshot_viewer_list(screenshot_entries,
+                                                           screenshot_entry_count,
+                                                           screenshot_selected,
+                                                           screenshot_first_visible,
+                                                           last_key,
+                                                           last_state,
+                                                           status_text);
+                    }
+                    continue;
+                }
                 if (key == KEY_ESC) {
                     free(screenshot_entries);
                     screenshot_entries = NULL;
                     screenshot_entry_count = 0;
                     screenshot_selected = 0;
                     screenshot_first_visible = 0;
+                    show_screenshot_image = 0;
                     show_screenshot_viewer = 0;
                     status_text = NULL;
                     menu_discard_pending_keys();
@@ -777,10 +794,13 @@ const char *picocalc_rom_menu(void) {
                     }
                     status_text = "ESC BACK";
                 } else if ((key == KEY_ENTER || key == KEY_MINUS) && screenshot_entry_count > 0) {
-                    snprintf(status_buf,
-                             sizeof(status_buf),
-                             "%s",
-                             screenshot_entries[screenshot_selected].path);
+                    if (screenshot_viewer_show_bmp(screenshot_entries[screenshot_selected].path,
+                                                   status_buf,
+                                                   sizeof(status_buf))) {
+                        show_screenshot_image = 1;
+                        menu_discard_pending_keys();
+                        continue;
+                    }
                     status_text = status_buf;
                 } else if (key == KEY_H_LOWER || key == KEY_H_UPPER || key == KEY_QUESTION) {
                     status_text = "HELP DISABLED IN VIEW";
@@ -821,6 +841,7 @@ const char *picocalc_rom_menu(void) {
                 screenshot_entry_count = 0;
                 screenshot_selected = 0;
                 screenshot_first_visible = 0;
+                show_screenshot_image = 0;
                 show_screenshot_viewer = 1;
                 if (screenshot_entries) {
                     screenshot_entry_count = screenshot_viewer_load_entries(screenshot_entries,
@@ -998,6 +1019,9 @@ const char *picocalc_rom_menu(void) {
                 status_text = "SELECTABLE *.NES FILE NOT AVAILABLE";
             }
         } else {
+            if (show_screenshot_image) {
+                continue;
+            }
             if (!show_help) {
                 menu_draw_debug_code(last_key, last_state);
             }
