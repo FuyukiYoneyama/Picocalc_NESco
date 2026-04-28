@@ -24,6 +24,7 @@ set(CMAKE_CXX_STANDARD 17)
 option(NESCO_RUNTIME_LOGS "Enable verbose runtime logging on device" OFF)
 option(NESCO_INPUT_IO_LOGS "Enable focused $4016/$4017 input I/O logging" OFF)
 option(NESCO_BOKOSUKA_STATE_LOGS "Enable focused Bokosuka state logging" OFF)
+option(NESCO_CORE1_BASELINE_LOG "Enable one-second baseline performance logs for core1 planning" OFF)
 
 # Probe slightly larger linker-reserved heap without modifying the Pico SDK.
 # Disable malloc panic so heap diagnostics can measure allocation ceilings safely.
@@ -109,6 +110,12 @@ if(PICO_BUILD)
     if(NESCO_RUNTIME_LOGS)
         target_compile_definitions(Picocalc_NESco PRIVATE
             NESCO_RUNTIME_LOGS=1
+        )
+    endif()
+
+    if(NESCO_CORE1_BASELINE_LOG)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_CORE1_BASELINE_LOG=1
         )
     endif()
 

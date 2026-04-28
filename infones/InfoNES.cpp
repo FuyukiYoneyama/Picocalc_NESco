@@ -40,7 +40,13 @@
 #include "InfoNES_System.h"
 #include "runtime_log.h"
 
+#include <cstdint>
+
 extern "C" void display_toggle_nes_view_scale(void);
+extern "C" int display_get_nes_view_scale(void);
+extern "C" void display_perf_reset(void);
+extern "C" void display_perf_snapshot(uint64_t *wait_us, uint64_t *flush_us);
+#include "input.h"
 #include "InfoNES_Mapper.h"
 #include "InfoNES_StructuredLog.h"
 #include "screenshot.h"
@@ -61,9 +67,6 @@ constexpr uint16_t makeTag(int r, int g, int b)
 {
   return (r << 10) | (g << 5) | (b);
 }
-
-extern "C" void display_perf_reset(void);
-extern "C" void display_perf_snapshot(uint64_t *wait_us, uint64_t *flush_us);
 
 #if INFONES_ENABLE_BOKOSUKA_STATE_LOG
 static unsigned long g_bokosuka_heartbeat_seq = 0;
@@ -195,11 +198,24 @@ inline void initBgTileRenderLut()
   }
 }
 
-constexpr bool kPerfLogToSerial = true;
+constexpr bool kPerfLogToSerial =
+#if defined(NESCO_CORE1_BASELINE_LOG)
+    true;
+#else
+    false;
+#endif
 constexpr uint64_t kPerfWindowUs = 1000000;
-constexpr uint64_t kNesCpuHz = 1789773;
+constexpr int kNesViewScaleStretch320x300 = 1;
 
 uint64_t g_perf_window_start_us = 0;
+uint64_t g_perf_last_frame_us = 0;
+uint64_t g_perf_frame_us_total = 0;
+uint64_t g_perf_frame_us_max = 0;
+uint32_t g_perf_frame_samples = 0;
+uint64_t g_perf_last_pad_us = 0;
+uint64_t g_perf_pad_interval_us_total = 0;
+uint64_t g_perf_pad_interval_us_max = 0;
+uint32_t g_perf_pad_interval_samples = 0;
 uint32_t g_perf_frames = 0;
 uint32_t g_perf_scanlines = 0;
 uint64_t g_perf_cpu_us = 0;
@@ -212,6 +228,14 @@ uint64_t g_perf_lcd_flush_us = 0;
 inline void perf_reset()
 {
   g_perf_window_start_us = time_us_64();
+  g_perf_last_frame_us = 0;
+  g_perf_frame_us_total = 0;
+  g_perf_frame_us_max = 0;
+  g_perf_frame_samples = 0;
+  g_perf_last_pad_us = 0;
+  g_perf_pad_interval_us_total = 0;
+  g_perf_pad_interval_us_max = 0;
+  g_perf_pad_interval_samples = 0;
   g_perf_frames = 0;
   g_perf_scanlines = 0;
   g_perf_cpu_us = 0;
@@ -220,7 +244,38 @@ inline void perf_reset()
   g_perf_tail_us = 0;
   g_perf_lcd_wait_us = 0;
   g_perf_lcd_flush_us = 0;
+  (void)input_consume_event_count();
   display_perf_reset();
+}
+
+inline void perf_note_frame(uint64_t now_us)
+{
+  if (g_perf_last_frame_us != 0)
+  {
+    const uint64_t frame_us = now_us - g_perf_last_frame_us;
+    g_perf_frame_us_total += frame_us;
+    if (frame_us > g_perf_frame_us_max)
+    {
+      g_perf_frame_us_max = frame_us;
+    }
+    ++g_perf_frame_samples;
+  }
+  g_perf_last_frame_us = now_us;
+}
+
+inline void perf_note_pad_poll(uint64_t now_us)
+{
+  if (g_perf_last_pad_us != 0)
+  {
+    const uint64_t interval_us = now_us - g_perf_last_pad_us;
+    g_perf_pad_interval_us_total += interval_us;
+    if (interval_us > g_perf_pad_interval_us_max)
+    {
+      g_perf_pad_interval_us_max = interval_us;
+    }
+    ++g_perf_pad_interval_samples;
+  }
+  g_perf_last_pad_us = now_us;
 }
 
 inline void perf_log_if_due(uint64_t now_us)
@@ -239,22 +294,37 @@ inline void perf_log_if_due(uint64_t now_us)
     return;
 
   display_perf_snapshot(&g_perf_lcd_wait_us, &g_perf_lcd_flush_us);
-  const uint64_t cpu_hz =
-      (static_cast<uint64_t>(g_perf_scanlines) * STEP_PER_SCANLINE * 1000000ull) /
-      elapsed_us;
-  const uint64_t cpu_pct = (cpu_hz * 100ull) / kNesCpuHz;
+  const uint64_t fps_x100 =
+      elapsed_us != 0
+          ? (static_cast<uint64_t>(g_perf_frames) * 100ull * 1000000ull) / elapsed_us
+          : 0;
+  const uint64_t frame_us_avg =
+      g_perf_frame_samples != 0
+          ? g_perf_frame_us_total / g_perf_frame_samples
+          : 0;
+  const uint64_t pad_interval_us_avg =
+      g_perf_pad_interval_samples != 0
+          ? g_perf_pad_interval_us_total / g_perf_pad_interval_samples
+          : 0;
+  const unsigned input_events = input_consume_event_count();
+  const char *view_mode =
+      display_get_nes_view_scale() == kNesViewScaleStretch320x300
+          ? "stretch"
+          : "normal";
 
-  NESCO_LOGF("[PERF] frames=%lu scan=%lu cpu_hz=%llu cpu_pct=%llu%% cpu_us=%llu apu_us=%llu draw_us=%llu tail_us=%llu lcd_wait_us=%llu lcd_flush_us=%llu\n",
-             static_cast<unsigned long>(g_perf_frames),
-             static_cast<unsigned long>(g_perf_scanlines),
-             static_cast<unsigned long long>(cpu_hz),
-             static_cast<unsigned long long>(cpu_pct),
-             static_cast<unsigned long long>(g_perf_cpu_us),
-             static_cast<unsigned long long>(g_perf_apu_us),
-             static_cast<unsigned long long>(g_perf_draw_us),
-             static_cast<unsigned long long>(g_perf_tail_us),
-             static_cast<unsigned long long>(g_perf_lcd_wait_us),
-             static_cast<unsigned long long>(g_perf_lcd_flush_us));
+  printf("[CORE1_BASE] t_us=%llu frames=%lu fps_x100=%llu frame_us_avg=%llu frame_us_max=%llu lcd_wait_us=%llu lcd_flush_us=%llu pad_interval_us_avg=%llu pad_interval_us_max=%llu input_events=%u view_mode=%s\n",
+         static_cast<unsigned long long>(now_us),
+         static_cast<unsigned long>(g_perf_frames),
+         static_cast<unsigned long long>(fps_x100),
+         static_cast<unsigned long long>(frame_us_avg),
+         static_cast<unsigned long long>(g_perf_frame_us_max),
+         static_cast<unsigned long long>(g_perf_lcd_wait_us),
+         static_cast<unsigned long long>(g_perf_lcd_flush_us),
+         static_cast<unsigned long long>(pad_interval_us_avg),
+         static_cast<unsigned long long>(g_perf_pad_interval_us_max),
+         input_events,
+         view_mode);
+  fflush(stdout);
 
   perf_reset();
 }
@@ -1044,6 +1114,7 @@ int __not_in_flash_func(InfoNES_HSync)()
     {
       // Transfer the contents of work frame on the screen
       InfoNES_LoadFrame();
+      perf_note_frame(time_us_64());
       ++g_perf_frames;
 
 #if 0
@@ -1073,6 +1144,7 @@ int __not_in_flash_func(InfoNES_HSync)()
     MapperVSync();
 
     // Get the condition of the joypad
+    perf_note_pad_poll(time_us_64());
     InfoNES_PadState(&PAD1_Latch, &PAD2_Latch, &PAD_System);
 #if INFONES_ENABLE_BOKOSUKA_STATE_LOG
     InfoNES_BokosukaHeartbeat();

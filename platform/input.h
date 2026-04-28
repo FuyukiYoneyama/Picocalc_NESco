@@ -16,6 +16,7 @@ extern "C" {
 
 void input_init(void);
 void input_poll(DWORD *pad1, DWORD *pad2, DWORD *system);
+unsigned input_consume_event_count(void);
 
 #ifdef __cplusplus
 }

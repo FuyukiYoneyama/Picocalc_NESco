@@ -62,6 +62,7 @@ enum {
 #define NES_RIGHT   (1u << 7)
 
 static DWORD s_pad1_state = 0;
+static unsigned s_input_event_count = 0;
 
 #if defined(NESCO_RUNTIME_LOGS)
 static unsigned long s_input_poll_seq = 0;
@@ -136,6 +137,7 @@ static DWORD input_map_key(BYTE key) {
 void input_init(void) {
     i2c_kbd_init();
     s_pad1_state = 0;
+    s_input_event_count = 0;
 #if defined(NESCO_RUNTIME_LOGS)
     s_input_poll_seq = 0;
     s_input_nonzero_polls = 0;
@@ -159,6 +161,7 @@ void input_poll(DWORD *pad1, DWORD *pad2, DWORD *system) {
     while ((key = i2c_kbd_read_key()) != 0) {
         BYTE state = i2c_kbd_last_state();
         DWORD mask = input_map_key(key);
+        s_input_event_count++;
 #if defined(NESCO_RUNTIME_LOGS)
         if (events == 0) {
             first_key = key;
@@ -209,6 +212,12 @@ void input_poll(DWORD *pad1, DWORD *pad2, DWORD *system) {
                       s_pad1_state,
                       sys_bits);
 #endif
+}
+
+unsigned input_consume_event_count(void) {
+    const unsigned count = s_input_event_count;
+    s_input_event_count = 0;
+    return count;
 }
 
 /* =====================================================================

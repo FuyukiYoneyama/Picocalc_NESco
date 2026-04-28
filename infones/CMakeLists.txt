@@ -29,3 +29,15 @@ if(NESCO_BOKOSUKA_STATE_LOGS)
         INFONES_ENABLE_BOKOSUKA_STATE_LOG=1
     )
 endif()
+
+if(NESCO_RUNTIME_LOGS)
+    target_compile_definitions(infones PUBLIC
+        NESCO_RUNTIME_LOGS=1
+    )
+endif()
+
+if(NESCO_CORE1_BASELINE_LOG)
+    target_compile_definitions(infones PUBLIC
+        NESCO_CORE1_BASELINE_LOG=1
+    )
+endif()

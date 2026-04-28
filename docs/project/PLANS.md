@@ -30,13 +30,17 @@
 
 ## 現在必要な計画
 
-- ROM menu screenshot BMP viewer
-  - 計画: `docs/design/SCREENSHOT_VIEWER_WORK_PLAN_20260427.md`
-  - 作業 branch: `feature/screenshot-viewer`
-  - ROM menu から `0:/screenshots/*.BMP` を選択して表示する機能。
+- Core1 活用
+  - 計画: `docs/design/CORE1_PARALLELIZATION_WORK_PLAN_20260428.md`
+  - Pico の core1 を使った UX 改善と LCD worker 化の進め方。
+  - 初回実装候補は `core1 keyboard polling`。
 
 ## 完了済み計画 / 結果
 
+- ROM menu screenshot BMP viewer
+  - 計画: `docs/design/SCREENSHOT_VIEWER_WORK_PLAN_20260427.md`
+  - ROM menu から `0:/screenshots/*.BMP` を選択して表示する機能。
+  - 2026-04-28 に `main` へ取り込み済み。
 - GitHub Actions 最小 build CI 導入
   - 設計: `docs/design/GITHUB_ACTIONS_BUILD_CI_PLAN_20260426.md`
   - 実装: `.github/workflows/build.yml`
