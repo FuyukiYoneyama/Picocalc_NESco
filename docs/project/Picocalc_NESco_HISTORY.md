@@ -10802,6 +10802,40 @@ Xevious 背景崩れについては、かなり重要なので詳細を残す。
   の青は ROM menu
   と同じ意味を保つため変更していない
 
+## 1.51 `1.0.9` screenshot viewer 入口を F4 に変更 (2026-04-28)
+
+- system version を
+  `1.0.9`
+  へ更新した
+- ROM menu
+  から screenshot viewer
+  へ入る key
+  を
+  `S`
+  から
+  `F4`
+  に変更した
+- ROM menu
+  footer
+  と help
+  の表示も
+  `F4`
+  に合わせた
+- build
+  は
+  `PicoCalc NESco Ver. 1.0.9 Build Apr 28 2026 20:53:22`
+  で成功した
+- build size
+  は
+  `text=273652`
+  `data=0`
+  `bss=92772`
+  だった
+- UF2 SHA-256
+  は
+  `5e0cba43c49d184531a42bc48a9ef4875171818f9449346564e6bae48802a0cb`
+  だった
+
 ## 1.11 `0.3.21` BokosukaWars trace 領域を uf2loader 保護域から退避 (2026-04-25)
 
 - system version を

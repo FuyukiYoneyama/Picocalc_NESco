@@ -64,10 +64,9 @@ enum {
     KEY_B_UPPER  = 'B',
     KEY_H_LOWER  = 'h',
     KEY_H_UPPER  = 'H',
-    KEY_S_LOWER  = 's',
-    KEY_S_UPPER  = 'S',
     KEY_QUESTION = '?',
     KEY_ESC      = 0xB1,
+    KEY_F4       = 0x84,
     KEY_F5       = 0x85,
     MENU_LIST_Y  = 68,
     MENU_ROW_H   = 24,
@@ -443,7 +442,7 @@ static void menu_render(const rom_menu_entry_info_t *entries,
     }
 
     menu_fill_rect(8, 280, 304, 2, MENU_ACCENT);
-    menu_draw_text_span(8, 304, 280, "UP/DOWN MOVE ENTER/- OPEN S VIEW H HELP", MENU_DIM, MENU_BG);
+    menu_draw_text_span(8, 304, 280, "UP/DOWN MOVE ENTER/- OPEN F4 VIEW H HELP", MENU_DIM, MENU_BG);
     menu_draw_debug_code(last_key, last_state);
 }
 
@@ -524,15 +523,16 @@ static void menu_render_help(int help_page, BYTE last_key, BYTE last_state, cons
         menu_draw_text_span(12, 72, 296, "ROM MENU KEYS", MENU_FG, MENU_BG);
         menu_draw_text_span(12, 92, 296, "UP/DOWN : MOVE CURSOR", MENU_DIM, MENU_BG);
         menu_draw_text_span(12, 106, 296, "ENTER/- : OPEN OR START", MENU_DIM, MENU_BG);
-        menu_draw_text_span(12, 120, 296, "F5 : SAVE SCREENSHOT", MENU_DIM, MENU_BG);
-        menu_draw_text_span(12, 134, 296, "LEFT/RIGHT : CHANGE PAGE", MENU_DIM, MENU_BG);
-        menu_draw_text_span(12, 148, 296, "ESC OR H/? : CLOSE HELP", MENU_DIM, MENU_BG);
+        menu_draw_text_span(12, 120, 296, "F4 : SCREENSHOT VIEW", MENU_DIM, MENU_BG);
+        menu_draw_text_span(12, 134, 296, "F5 : SAVE SCREENSHOT", MENU_DIM, MENU_BG);
+        menu_draw_text_span(12, 148, 296, "LEFT/RIGHT : CHANGE PAGE", MENU_DIM, MENU_BG);
+        menu_draw_text_span(12, 162, 296, "ESC OR H/? : CLOSE HELP", MENU_DIM, MENU_BG);
 
-        menu_draw_text_span(12, 162, 296, "IN GAME", MENU_FG, MENU_BG);
-        menu_draw_text_span(12, 182, 296, "ESC : RETURN TO ROM MENU", MENU_DIM, MENU_BG);
-        menu_draw_text_span(12, 196, 296, "F1 : RESET   F5 : SCREENSHOT", MENU_DIM, MENU_BG);
-        menu_draw_text_span(12, 210, 296, "` : SELECT   - : START", MENU_DIM, MENU_BG);
-        menu_draw_text_span(12, 224, 296, "[ : B BUTTON   ] : A BUTTON", MENU_DIM, MENU_BG);
+        menu_draw_text_span(12, 184, 296, "IN GAME", MENU_FG, MENU_BG);
+        menu_draw_text_span(12, 204, 296, "ESC : RETURN TO ROM MENU", MENU_DIM, MENU_BG);
+        menu_draw_text_span(12, 218, 296, "F1 : RESET   F5 : SCREENSHOT", MENU_DIM, MENU_BG);
+        menu_draw_text_span(12, 232, 296, "` : SELECT   - : START", MENU_DIM, MENU_BG);
+        menu_draw_text_span(12, 246, 296, "[ : B BUTTON   ] : A BUTTON", MENU_DIM, MENU_BG);
     } else if (help_page == HELP_PAGE_VERSION) {
         snprintf(version_line, sizeof(version_line), "Ver. %s", PICOCALC_NESCO_VERSION);
         menu_draw_text_span_scaled(32, 90, 256, "PicoCalc NESco", MENU_ACCENT, MENU_BG, 2, 10);
@@ -836,7 +836,7 @@ const char *picocalc_rom_menu(void) {
                          "%s",
                          (ss_result == NESCO_SCREENSHOT_OK) ? "SCREENSHOT SAVED" : "SCREENSHOT FAILED");
                 status_text = status_buf;
-            } else if (!show_help && (key == KEY_S_LOWER || key == KEY_S_UPPER)) {
+            } else if (!show_help && key == KEY_F4) {
                 free(screenshot_entries);
                 screenshot_entries = malloc(sizeof(*screenshot_entries) * MENU_MAX_ENTRIES);
                 screenshot_entry_count = 0;
