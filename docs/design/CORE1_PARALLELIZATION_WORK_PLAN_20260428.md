@@ -681,6 +681,38 @@ stretch 表示の 256x240 から 320x300 への変換を core1 側へ移し、st
 - mode 切替直後に古い viewport や古い DMA が残らない。
 - baseline より stretch 時の frame time が改善する、または同等で UX が悪化しない。
 
+### Phase 4 実施結果
+
+Phase 4 は 2026-04-29 に実装した。
+
+実装した内容:
+
+- Phase 3 の LCD worker queue を stretch 表示にも拡張した。
+- queue entry に `scale_mode` を持たせ、core1 側で normal / stretch の pack を分岐する。
+- stretch 表示では core1 側で 320px pack と縦 repeat を行う。
+- Shift+W による mode 切替前には worker drain を行う。
+
+実機で確認した内容:
+
+- normal 表示は正常である。
+- Shift+W で stretch 表示へ切り替わる。
+- stretch 表示で画面崩れはない。
+- もう一度 Shift+W で normal 表示へ戻れる。
+- F5 screenshot は normal / stretch の両方で撮れる。
+- ESC で ROM menu へ戻れる。
+- 音切れや入力遅延は悪化していない。
+
+build 結果:
+
+- version: `1.0.15`
+- build id: `Apr 29 2026 00:54:58`
+- UF2 SHA-256: `9b4e6d6cac7efae4707ad87967580f5bef3f13a7a11dae6dcc2df82a7c67dc47`
+
+次の再開位置:
+
+- Phase 5 として、keyboard worker と LCD worker を採用するか判断する。
+- 採用する場合は `feature/core1-lcd-worker` を `main` へ取り込む。
+
 ## Phase 5: 採用判断
 
 ### 判断基準

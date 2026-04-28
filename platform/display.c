@@ -106,6 +106,7 @@ typedef struct {
     int viewport_y;
     int viewport_w;
     int viewport_h;
+    nes_view_scale_mode_t scale_mode;
     WORD pixels[256];
 } display_lcd_worker_item_t;
 
@@ -140,6 +141,7 @@ static void display_draw_text_span_scaled_cropped(int x,
                                                   int crop_top_rows);
 static int display_measure_text_width(const char *text, int char_advance, int glyph_w, int scale);
 static void display_apply_nes_viewport(void);
+static void display_pack_line_stretch_320(BYTE *dst, const WORD *src);
 extern "C" void lcd_dma_wait(void);
 extern "C" void lcd_set_window(int x, int y, int w, int h);
 extern "C" BYTE *lcd_dma_acquire_buffer(void);
@@ -190,11 +192,7 @@ static bool display_lcd_worker_queue_empty(void) {
 
 void display_lcd_worker_prepare_nes_view(void) {
     display_lcd_worker_reset_queue();
-    if (s_nes_view_scale == NES_VIEW_SCALE_NORMAL) {
-        s_lcd_worker_state = DISPLAY_LCD_WORKER_RUNNING;
-    } else {
-        s_lcd_worker_state = DISPLAY_LCD_WORKER_STOPPED;
-    }
+    s_lcd_worker_state = DISPLAY_LCD_WORKER_RUNNING;
 }
 
 void display_lcd_worker_stop_and_drain(void) {
@@ -640,11 +638,10 @@ static bool display_lcd_worker_pop_item(display_lcd_worker_item_t *item) {
     return popped;
 }
 
-static bool display_lcd_worker_submit_normal_line(int scanline, const WORD *src) {
+static bool display_lcd_worker_submit_line(int scanline, const WORD *src) {
     display_lcd_worker_item_t item;
 
     if (s_lcd_worker_state != DISPLAY_LCD_WORKER_RUNNING ||
-        s_nes_view_scale != NES_VIEW_SCALE_NORMAL ||
         s_display_mode != DISPLAY_MODE_NES_VIEW) {
         return false;
     }
@@ -655,6 +652,7 @@ static bool display_lcd_worker_submit_normal_line(int scanline, const WORD *src)
     item.viewport_y = s_lcd_y0;
     item.viewport_w = s_lcd_w;
     item.viewport_h = s_lcd_h;
+    item.scale_mode = s_nes_view_scale;
     memcpy(item.pixels, src, sizeof(item.pixels));
 
     while (!display_lcd_worker_push_item(&item)) {
@@ -697,6 +695,42 @@ static void display_lcd_worker_flush_normal_strip(const display_lcd_worker_item_
     s_lcd_worker_strip_line = 0;
 }
 
+static void display_lcd_worker_pack_stretch_line(BYTE *strip,
+                                                 int src_strip_line,
+                                                 const WORD *src) {
+    const int dst_strip_line = src_strip_line + (src_strip_line / 4);
+    const int repeat_count = ((src_strip_line & 3) == 3) ? 2 : 1;
+
+    for (int rep = 0; rep < repeat_count; ++rep) {
+        BYTE *dst = strip + (dst_strip_line + rep) * NES_VIEW_STRETCH_W * 2;
+        display_pack_line_stretch_320(dst, src);
+    }
+}
+
+static void display_lcd_worker_flush_stretch_strip(const display_lcd_worker_item_t *last_item) {
+    if (s_lcd_worker_strip_line <= 0) {
+        return;
+    }
+    if (!s_lcd_worker_strip) {
+        s_lcd_worker_strip_line = 0;
+        return;
+    }
+
+    const int strip_y = last_item->scanline - (s_lcd_worker_strip_line - 1);
+    const int stretch_y = strip_y + (strip_y / 4);
+    const int lcd_lines = s_lcd_worker_strip_line + (s_lcd_worker_strip_line / 4);
+
+    lcd_dma_wait();
+    lcd_set_window(last_item->viewport_x,
+                   last_item->viewport_y + stretch_y,
+                   NES_VIEW_STRETCH_W,
+                   lcd_lines);
+    lcd_dma_write_bytes_async(s_lcd_worker_strip,
+                              NES_VIEW_STRETCH_W * lcd_lines * 2);
+    s_lcd_worker_strip = NULL;
+    s_lcd_worker_strip_line = 0;
+}
+
 bool display_lcd_worker_poll_once(void) {
     display_lcd_worker_item_t item;
 
@@ -721,11 +755,21 @@ bool display_lcd_worker_poll_once(void) {
         }
     }
 
-    display_pack_line_normal(&s_lcd_worker_strip[s_lcd_worker_strip_line * NES_VIEW_NORMAL_W * 2],
-                             item.pixels);
-    s_lcd_worker_strip_line++;
-    if (s_lcd_worker_strip_line >= STRIP_HEIGHT) {
-        display_lcd_worker_flush_normal_strip(&item);
+    if (item.scale_mode == NES_VIEW_SCALE_STRETCH_320X300) {
+        display_lcd_worker_pack_stretch_line(s_lcd_worker_strip,
+                                             s_lcd_worker_strip_line,
+                                             item.pixels);
+        s_lcd_worker_strip_line++;
+        if (s_lcd_worker_strip_line >= STRIP_HEIGHT) {
+            display_lcd_worker_flush_stretch_strip(&item);
+        }
+    } else {
+        display_pack_line_normal(&s_lcd_worker_strip[s_lcd_worker_strip_line * NES_VIEW_NORMAL_W * 2],
+                                 item.pixels);
+        s_lcd_worker_strip_line++;
+        if (s_lcd_worker_strip_line >= STRIP_HEIGHT) {
+            display_lcd_worker_flush_normal_strip(&item);
+        }
     }
     return true;
 }
@@ -754,7 +798,7 @@ void InfoNES_PostDrawLine(int scanline, bool frommenu) {
     const WORD *src = s_line_buffer;
     BYTE *strip = lcd_dma_acquire_buffer();
 
-    if (!frommenu && display_lcd_worker_submit_normal_line(scanline, src)) {
+    if (!frommenu && display_lcd_worker_submit_line(scanline, src)) {
         return;
     }
 

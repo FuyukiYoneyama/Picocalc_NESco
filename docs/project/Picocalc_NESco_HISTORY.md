@@ -10,6 +10,24 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.0.15 core1 LCD worker stretch 表示実験 (2026-04-29)
+
+- `docs/design/CORE1_PARALLELIZATION_WORK_PLAN_20260428.md` の Phase 4 に従い、core1 LCD worker を stretch 表示にも拡張した
+- queue entry に `scale_mode` を持たせ、core1 側で normal / stretch の pack を分岐するようにした
+- stretch 表示では core1 側で 320px pack と縦 repeat を行う
+- Shift+W による mode 切替前には worker drain を行う
+- 実機確認:
+  - normal 表示は正常
+  - Shift+W で stretch 表示へ切り替わる
+  - stretch 表示で画面崩れはない
+  - もう一度 Shift+W で normal 表示へ戻れる
+  - F5 screenshot は normal / stretch の両方で撮れる
+  - ESC で ROM menu へ戻れる
+  - 音切れや入力遅延は悪化していない
+- build 確認:
+  - banner: `PicoCalc NESco Ver. 1.0.15 Build Apr 29 2026 00:54:58`
+  - UF2 SHA-256: `9b4e6d6cac7efae4707ad87967580f5bef3f13a7a11dae6dcc2df82a7c67dc47`
+
 ## 1.0.14 core1 LCD worker normal 表示実験 (2026-04-29)
 
 - `docs/design/CORE1_PARALLELIZATION_WORK_PLAN_20260428.md` の Phase 3 に従い、normal 表示だけを core1 LCD worker 経由にした
