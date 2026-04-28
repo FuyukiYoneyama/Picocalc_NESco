@@ -10645,6 +10645,54 @@ Xevious 背景崩れについては、かなり重要なので詳細を残す。
   上の先行 bug fix
   として扱う
 
+## 1.47 `1.0.5` screenshot viewer Phase 2: BMP 一覧表示を追加 (2026-04-28)
+
+- system version を
+  `1.0.5`
+  へ更新した
+- ROM menu
+  から
+  `S VIEW`
+  で入る screenshot viewer
+  に、
+  `0:/screenshots/*.BMP`
+  の一覧表示を追加した
+- screenshot viewer
+  の entry
+  は viewer mode
+  開始時に動的確保し、
+  `ESC`
+  で ROM menu
+  へ戻るときに解放する
+- entry
+  ごとに
+  `name`
+  と
+  `path`
+  を固定長 buffer
+  に保持し、
+  FatFs
+  の一時 file name pointer
+  は保持しない
+- screenshot viewer
+  内の上下移動は ROM menu
+  と同じ page
+  移動 helper
+  を使う
+- `Enter`
+  または
+  `-`
+  は Phase 2
+  の確認用として選択中 BMP
+  の path
+  を status line
+  に表示する
+- Phase 3
+  では、この Phase 2
+  を戻り先として BMP
+  header parser
+  と表示処理を追加する
+
 ## 1.11 `0.3.21` BokosukaWars trace 領域を uf2loader 保護域から退避 (2026-04-25)
 
 - system version を

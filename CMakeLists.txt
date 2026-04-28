@@ -50,6 +50,7 @@ set(PLATFORM_SOURCES
     platform/rom_image.c
     platform/screenshot.c
     platform/screenshot_storage.c
+    platform/screenshot_viewer.c
     platform/sram_store.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fatfs/ff.c
     ${CMAKE_CURRENT_SOURCE_DIR}/fatfs/ffunicode.c

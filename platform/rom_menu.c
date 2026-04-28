@@ -15,6 +15,7 @@
 #include "audio.h"
 #include "rom_image.h"
 #include "screenshot.h"
+#include "screenshot_viewer.h"
 #include "version.h"
 
 #include <stdio.h>
@@ -372,6 +373,30 @@ static void menu_draw_entry_row(const rom_menu_entry_info_t *entries,
     menu_draw_text_span(24, y + 12, 280, entries[index].detail, MENU_DIM, row_bg);
 }
 
+static void menu_draw_screenshot_entry_row(const screenshot_viewer_entry_t *entries,
+                                           int entry_count,
+                                           int index,
+                                           int first_visible,
+                                           int selected) {
+    int row = menu_row_visible_index(index, first_visible);
+    int y;
+    WORD row_bg;
+
+    if (!entries || row < 0 || index < 0 || index >= entry_count) {
+        return;
+    }
+
+    y = MENU_LIST_Y + row * MENU_ROW_H;
+    row_bg = (index == selected) ? MENU_HILITE : MENU_BG;
+
+    menu_fill_rect(8, y - 2, 304, 25, row_bg);
+    if (index == selected) {
+        menu_draw_text_span(12, y + 2, 12, ">", MENU_FG, row_bg);
+    }
+    menu_draw_text_span(24, y + 2, 280, entries[index].name, MENU_FG, row_bg);
+    menu_draw_text_span(24, y + 12, 280, entries[index].path, MENU_DIM, row_bg);
+}
+
 static void menu_update_selection_rows(const rom_menu_entry_info_t *entries,
                                        int entry_count,
                                        int old_selected,
@@ -419,7 +444,13 @@ static void menu_render(const rom_menu_entry_info_t *entries,
     menu_draw_debug_code(last_key, last_state);
 }
 
-static void menu_render_screenshot_viewer(BYTE last_key, BYTE last_state, const char *status_text) {
+static void menu_render_screenshot_viewer_list(const screenshot_viewer_entry_t *entries,
+                                               int entry_count,
+                                               int selected,
+                                               int first_visible,
+                                               BYTE last_key,
+                                               BYTE last_state,
+                                               const char *status_text) {
     const char *effective_status = (status_text && *status_text) ? status_text : "ESC BACK";
 
     display_set_mode(DISPLAY_MODE_FULLSCREEN);
@@ -431,12 +462,23 @@ static void menu_render_screenshot_viewer(BYTE last_key, BYTE last_state, const 
     menu_draw_text_span(8, 42, 220, effective_status, MENU_DIM, MENU_BG);
     menu_fill_rect(8, 56, 304, 2, MENU_ACCENT);
 
-    menu_fill_rect(8, MENU_LIST_Y - 2, 304, 25, MENU_BG);
-    menu_draw_text_span(24, MENU_LIST_Y + 2, 280, "NO SCREENSHOTS", MENU_FG, MENU_BG);
-    menu_draw_text_span(24, MENU_LIST_Y + 12, 280, "PHASE 1 PLACEHOLDER", MENU_DIM, MENU_BG);
+    if (!entries || entry_count <= 0) {
+        menu_fill_rect(8, MENU_LIST_Y - 2, 304, 25, MENU_BG);
+        menu_draw_text_span(24, MENU_LIST_Y + 2, 280, "NO SCREENSHOTS", MENU_FG, MENU_BG);
+        menu_draw_text_span(24, MENU_LIST_Y + 12, 280, "0:/screenshots/*.BMP", MENU_DIM, MENU_BG);
+    } else {
+        for (int row = 0; row < MENU_LIST_MAX_VISIBLE; row++) {
+            int i = first_visible + row;
+
+            if (i >= entry_count) {
+                break;
+            }
+            menu_draw_screenshot_entry_row(entries, entry_count, i, first_visible, selected);
+        }
+    }
 
     menu_fill_rect(8, 280, 304, 2, MENU_ACCENT);
-    menu_draw_text_span(8, 304, 280, "ESC BACK", MENU_DIM, MENU_BG);
+    menu_draw_text_span(8, 304, 280, "UP/DOWN MOVE ENTER PATH ESC BACK", MENU_DIM, MENU_BG);
     menu_draw_debug_code(last_key, last_state);
 }
 
@@ -598,10 +640,14 @@ static void menu_log_key(BYTE key, BYTE state) {
 
 const char *picocalc_rom_menu(void) {
     rom_menu_entry_info_t entries[MENU_MAX_ENTRIES];
-    char status_buf[64];
+    screenshot_viewer_entry_t *screenshot_entries = NULL;
+    char status_buf[160];
     int entry_count = 0;
     int selected = 0;
     int first_visible = 0;
+    int screenshot_entry_count = 0;
+    int screenshot_selected = 0;
+    int screenshot_first_visible = 0;
     BYTE last_key = 0;
     BYTE last_state = 0;
     int show_help = 0;
@@ -676,19 +722,77 @@ const char *picocalc_rom_menu(void) {
 
         if (state == KEY_STATE_PRESSED) {
             if (show_screenshot_viewer) {
-                if (key == KEY_ESC || key == KEY_ENTER || key == KEY_MINUS) {
+                if (key == KEY_ESC) {
+                    free(screenshot_entries);
+                    screenshot_entries = NULL;
+                    screenshot_entry_count = 0;
+                    screenshot_selected = 0;
+                    screenshot_first_visible = 0;
                     show_screenshot_viewer = 0;
                     status_text = NULL;
                     menu_discard_pending_keys();
                     menu_render(entries, entry_count, selected, first_visible, last_key, last_state, status_text);
                     continue;
                 }
-                if (key == KEY_H_LOWER || key == KEY_H_UPPER || key == KEY_QUESTION) {
+                if (key == KEY_UP && screenshot_entry_count > 0) {
+                    int old_row = screenshot_selected - screenshot_first_visible;
+                    int page_scroll_up = (old_row == 0 && screenshot_selected > 0);
+
+                    screenshot_selected--;
+                    if (screenshot_selected < 0) {
+                        screenshot_selected = screenshot_entry_count - 1;
+                        screenshot_first_visible = menu_page_first_for_index(screenshot_selected);
+                    } else if (page_scroll_up) {
+                        screenshot_first_visible = menu_page_first_for_index(screenshot_selected);
+                    } else {
+                        screenshot_first_visible = menu_keep_visible_or_clamp(screenshot_entry_count,
+                                                                              screenshot_selected,
+                                                                              screenshot_first_visible);
+                    }
+                    status_text = "ESC BACK";
+                } else if (key == KEY_DOWN && screenshot_entry_count > 0) {
+                    int old_row = screenshot_selected - screenshot_first_visible;
+                    int old_visible_count = screenshot_entry_count - screenshot_first_visible;
+                    int page_scroll_down;
+
+                    if (old_visible_count > MENU_LIST_MAX_VISIBLE) {
+                        old_visible_count = MENU_LIST_MAX_VISIBLE;
+                    }
+                    page_scroll_down =
+                        (old_row == old_visible_count - 1 && screenshot_selected + 1 < screenshot_entry_count);
+
+                    screenshot_selected++;
+                    if (screenshot_selected >= screenshot_entry_count) {
+                        screenshot_selected = 0;
+                        screenshot_first_visible = 0;
+                    } else if (page_scroll_down) {
+                        screenshot_first_visible = menu_page_first_for_index(screenshot_selected);
+                    } else {
+                        screenshot_first_visible = menu_keep_visible_or_clamp(screenshot_entry_count,
+                                                                              screenshot_selected,
+                                                                              screenshot_first_visible);
+                    }
+                    status_text = "ESC BACK";
+                } else if ((key == KEY_ENTER || key == KEY_MINUS) && screenshot_entry_count > 0) {
+                    snprintf(status_buf,
+                             sizeof(status_buf),
+                             "%s",
+                             screenshot_entries[screenshot_selected].path);
+                    status_text = status_buf;
+                } else if (key == KEY_H_LOWER || key == KEY_H_UPPER || key == KEY_QUESTION) {
                     status_text = "HELP DISABLED IN VIEW";
+                } else if (key == KEY_ENTER || key == KEY_MINUS) {
+                    status_text = "NO SCREENSHOTS";
                 } else {
                     status_text = "ESC BACK";
                 }
-                menu_render_screenshot_viewer(last_key, last_state, status_text);
+                menu_render_screenshot_viewer_list(screenshot_entries,
+                                                   screenshot_entry_count,
+                                                   screenshot_selected,
+                                                   screenshot_first_visible,
+                                                   last_key,
+                                                   last_state,
+                                                   status_text);
                 continue;
             }
 
@@ -709,10 +813,30 @@ const char *picocalc_rom_menu(void) {
                          (ss_result == NESCO_SCREENSHOT_OK) ? "SCREENSHOT SAVED" : "SCREENSHOT FAILED");
                 status_text = status_buf;
             } else if (!show_help && (key == KEY_S_LOWER || key == KEY_S_UPPER)) {
+                free(screenshot_entries);
+                screenshot_entries = malloc(sizeof(*screenshot_entries) * MENU_MAX_ENTRIES);
+                screenshot_entry_count = 0;
+                screenshot_selected = 0;
+                screenshot_first_visible = 0;
                 show_screenshot_viewer = 1;
-                status_text = "ESC BACK";
+                if (screenshot_entries) {
+                    screenshot_entry_count = screenshot_viewer_load_entries(screenshot_entries,
+                                                                            MENU_MAX_ENTRIES,
+                                                                            status_buf,
+                                                                            sizeof(status_buf));
+                    status_text = status_buf;
+                } else {
+                    snprintf(status_buf, sizeof(status_buf), "NO MEMORY");
+                    status_text = status_buf;
+                }
                 menu_discard_pending_keys();
-                menu_render_screenshot_viewer(last_key, last_state, status_text);
+                menu_render_screenshot_viewer_list(screenshot_entries,
+                                                   screenshot_entry_count,
+                                                   screenshot_selected,
+                                                   screenshot_first_visible,
+                                                   last_key,
+                                                   last_state,
+                                                   status_text);
                 continue;
             } else if (key == KEY_H_LOWER || key == KEY_H_UPPER || key == KEY_QUESTION) {
                 show_help = !show_help;
@@ -857,6 +981,7 @@ const char *picocalc_rom_menu(void) {
                         {
                             const char *launch_path = rom_image_get_selected_path();
                             rom_image_menu_end();
+                            free(screenshot_entries);
                             menu_text_buffer_end();
                             return launch_path;
                         }
@@ -888,6 +1013,7 @@ const char *picocalc_rom_menu(void) {
     {
         const char *launch_path = rom_image_get_selected_path();
         rom_image_menu_end();
+        free(screenshot_entries);
         menu_text_buffer_end();
         return launch_path;
     }
