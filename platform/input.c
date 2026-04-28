@@ -17,6 +17,7 @@
  */
 
 #include "input.h"
+#include "core1_worker.h"
 #include "InfoNES.h"
 
 #if defined(NESCO_RUNTIME_LOGS)
@@ -146,6 +147,11 @@ void input_init(void) {
 }
 
 void input_poll(DWORD *pad1, DWORD *pad2, DWORD *system) {
+    if (core1_keyboard_snapshot_active()) {
+        core1_keyboard_read_snapshot(pad1, pad2, system);
+        return;
+    }
+
     DWORD sys_bits = 0;
 #if defined(NESCO_RUNTIME_LOGS)
     const DWORD before = s_pad1_state;
@@ -215,7 +221,7 @@ void input_poll(DWORD *pad1, DWORD *pad2, DWORD *system) {
 }
 
 unsigned input_consume_event_count(void) {
-    const unsigned count = s_input_event_count;
+    const unsigned count = s_input_event_count + core1_keyboard_consume_event_count();
     s_input_event_count = 0;
     return count;
 }
