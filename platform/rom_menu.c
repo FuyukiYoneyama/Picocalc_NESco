@@ -15,6 +15,7 @@
 #include "audio.h"
 #include "rom_image.h"
 #include "screenshot.h"
+#include "screenshot_viewer.h"
 #include "version.h"
 
 #include <stdio.h>
@@ -42,6 +43,7 @@ enum {
     MENU_BG       = 0x0000,
     MENU_FG       = 0xFFFF,
     MENU_ACCENT   = 0x07E0,
+    MENU_VIEW_ACCENT = 0x07FF,
     MENU_DIM      = 0x7BEF,
     MENU_STATUS   = 0xFBE0,
     MENU_HILITE   = 0x001F,
@@ -64,6 +66,7 @@ enum {
     KEY_H_UPPER  = 'H',
     KEY_QUESTION = '?',
     KEY_ESC      = 0xB1,
+    KEY_F4       = 0x84,
     KEY_F5       = 0x85,
     MENU_LIST_Y  = 68,
     MENU_ROW_H   = 24,
@@ -300,11 +303,13 @@ static void menu_build_debug_code(char debug_code[4], BYTE last_key, BYTE last_s
 }
 
 static void menu_draw_index(int entry_count, int selected) {
-    char index_text[20];
+    char index_text[32];
+    int current = (entry_count > 0) ? selected + 1 : 0;
+    int total = (entry_count > 0) ? entry_count : 0;
     int index_w;
     int index_x;
 
-    snprintf(index_text, sizeof(index_text), "%d/%d", selected + 1, entry_count);
+    snprintf(index_text, sizeof(index_text), "%d/%d", current, total);
     index_w = menu_measure_text_width(index_text, CHAR_ADVANCE, FONT_W, FONT_SCALE);
     index_x = 312 - index_w;
     if (index_x < 220) {
@@ -370,6 +375,30 @@ static void menu_draw_entry_row(const rom_menu_entry_info_t *entries,
     menu_draw_text_span(24, y + 12, 280, entries[index].detail, MENU_DIM, row_bg);
 }
 
+static void menu_draw_screenshot_entry_row(const screenshot_viewer_entry_t *entries,
+                                           int entry_count,
+                                           int index,
+                                           int first_visible,
+                                           int selected) {
+    int row = menu_row_visible_index(index, first_visible);
+    int y;
+    WORD row_bg;
+
+    if (!entries || row < 0 || index < 0 || index >= entry_count) {
+        return;
+    }
+
+    y = MENU_LIST_Y + row * MENU_ROW_H;
+    row_bg = (index == selected) ? MENU_HILITE : MENU_BG;
+
+    menu_fill_rect(8, y - 2, 304, 25, row_bg);
+    if (index == selected) {
+        menu_draw_text_span(12, y + 2, 12, ">", MENU_FG, row_bg);
+    }
+    menu_draw_text_span(24, y + 2, 280, entries[index].name, MENU_FG, row_bg);
+    menu_draw_text_span(24, y + 12, 280, entries[index].path, MENU_DIM, row_bg);
+}
+
 static void menu_update_selection_rows(const rom_menu_entry_info_t *entries,
                                        int entry_count,
                                        int old_selected,
@@ -413,7 +442,46 @@ static void menu_render(const rom_menu_entry_info_t *entries,
     }
 
     menu_fill_rect(8, 280, 304, 2, MENU_ACCENT);
-    menu_draw_text_span(8, 304, 280, "UP/DOWN MOVE  ENTER/- OPEN  H/? HELP", MENU_DIM, MENU_BG);
+    menu_draw_text_span(8, 304, 280, "UP/DOWN MOVE ENTER/- OPEN F4 VIEW H HELP", MENU_DIM, MENU_BG);
+    menu_draw_debug_code(last_key, last_state);
+}
+
+static void menu_render_screenshot_viewer_list(const screenshot_viewer_entry_t *entries,
+                                               int entry_count,
+                                               int selected,
+                                               int first_visible,
+                                               BYTE last_key,
+                                               BYTE last_state,
+                                               const char *status_text) {
+    const char *effective_status = (status_text && *status_text) ? status_text : "ESC BACK";
+
+    display_set_mode(DISPLAY_MODE_FULLSCREEN);
+    menu_fill_rect(0, 0, 320, 320, MENU_BG);
+    menu_draw_title_bar();
+
+    menu_draw_text_span(8, 28, 160, "SCREENSHOT VIEW", MENU_VIEW_ACCENT, MENU_BG);
+    menu_draw_index(entry_count, selected);
+    menu_fill_rect(8, 42, 220, FONT_H, MENU_BG);
+    menu_draw_text_span(8, 42, 220, effective_status, MENU_DIM, MENU_BG);
+    menu_fill_rect(8, 56, 304, 2, MENU_VIEW_ACCENT);
+
+    if (!entries || entry_count <= 0) {
+        menu_fill_rect(8, MENU_LIST_Y - 2, 304, 25, MENU_BG);
+        menu_draw_text_span(24, MENU_LIST_Y + 2, 280, "NO SCREENSHOTS", MENU_FG, MENU_BG);
+        menu_draw_text_span(24, MENU_LIST_Y + 12, 280, "0:/screenshots/*.BMP", MENU_DIM, MENU_BG);
+    } else {
+        for (int row = 0; row < MENU_LIST_MAX_VISIBLE; row++) {
+            int i = first_visible + row;
+
+            if (i >= entry_count) {
+                break;
+            }
+            menu_draw_screenshot_entry_row(entries, entry_count, i, first_visible, selected);
+        }
+    }
+
+    menu_fill_rect(8, 280, 304, 2, MENU_VIEW_ACCENT);
+    menu_draw_text_span(8, 304, 280, "UP/DOWN MOVE ENTER PATH ESC BACK", MENU_DIM, MENU_BG);
     menu_draw_debug_code(last_key, last_state);
 }
 
@@ -455,15 +523,16 @@ static void menu_render_help(int help_page, BYTE last_key, BYTE last_state, cons
         menu_draw_text_span(12, 72, 296, "ROM MENU KEYS", MENU_FG, MENU_BG);
         menu_draw_text_span(12, 92, 296, "UP/DOWN : MOVE CURSOR", MENU_DIM, MENU_BG);
         menu_draw_text_span(12, 106, 296, "ENTER/- : OPEN OR START", MENU_DIM, MENU_BG);
-        menu_draw_text_span(12, 120, 296, "F5 : SAVE SCREENSHOT", MENU_DIM, MENU_BG);
-        menu_draw_text_span(12, 134, 296, "LEFT/RIGHT : CHANGE PAGE", MENU_DIM, MENU_BG);
-        menu_draw_text_span(12, 148, 296, "ESC OR H/? : CLOSE HELP", MENU_DIM, MENU_BG);
+        menu_draw_text_span(12, 120, 296, "F4 : SCREENSHOT VIEW", MENU_DIM, MENU_BG);
+        menu_draw_text_span(12, 134, 296, "F5 : SAVE SCREENSHOT", MENU_DIM, MENU_BG);
+        menu_draw_text_span(12, 148, 296, "LEFT/RIGHT : CHANGE PAGE", MENU_DIM, MENU_BG);
+        menu_draw_text_span(12, 162, 296, "ESC OR H/? : CLOSE HELP", MENU_DIM, MENU_BG);
 
-        menu_draw_text_span(12, 162, 296, "IN GAME", MENU_FG, MENU_BG);
-        menu_draw_text_span(12, 182, 296, "ESC : RETURN TO ROM MENU", MENU_DIM, MENU_BG);
-        menu_draw_text_span(12, 196, 296, "F1 : RESET   F5 : SCREENSHOT", MENU_DIM, MENU_BG);
-        menu_draw_text_span(12, 210, 296, "` : SELECT   - : START", MENU_DIM, MENU_BG);
-        menu_draw_text_span(12, 224, 296, "[ : B BUTTON   ] : A BUTTON", MENU_DIM, MENU_BG);
+        menu_draw_text_span(12, 184, 296, "IN GAME", MENU_FG, MENU_BG);
+        menu_draw_text_span(12, 204, 296, "ESC : RETURN TO ROM MENU", MENU_DIM, MENU_BG);
+        menu_draw_text_span(12, 218, 296, "F1 : RESET   F5 : SCREENSHOT", MENU_DIM, MENU_BG);
+        menu_draw_text_span(12, 232, 296, "` : SELECT   - : START", MENU_DIM, MENU_BG);
+        menu_draw_text_span(12, 246, 296, "[ : B BUTTON   ] : A BUTTON", MENU_DIM, MENU_BG);
     } else if (help_page == HELP_PAGE_VERSION) {
         snprintf(version_line, sizeof(version_line), "Ver. %s", PICOCALC_NESCO_VERSION);
         menu_draw_text_span_scaled(32, 90, 256, "PicoCalc NESco", MENU_ACCENT, MENU_BG, 2, 10);
@@ -522,6 +591,20 @@ static int menu_clamp_first_visible(int entry_count, int selected, int first_vis
     return first_visible;
 }
 
+static int menu_keep_visible_or_clamp(int entry_count, int selected, int first_visible) {
+    if (selected >= first_visible && selected < first_visible + MENU_LIST_MAX_VISIBLE) {
+        return first_visible;
+    }
+    return menu_clamp_first_visible(entry_count, selected, first_visible);
+}
+
+static int menu_page_first_for_index(int index) {
+    if (index < 0) {
+        return 0;
+    }
+    return (index / MENU_LIST_MAX_VISIBLE) * MENU_LIST_MAX_VISIBLE;
+}
+
 static void menu_discard_pending_keys(void) {
 #ifdef PICO_BUILD
     absolute_time_t until = make_timeout_time_ms(120);
@@ -561,13 +644,19 @@ static void menu_log_key(BYTE key, BYTE state) {
 
 const char *picocalc_rom_menu(void) {
     rom_menu_entry_info_t entries[MENU_MAX_ENTRIES];
-    char status_buf[64];
+    screenshot_viewer_entry_t *screenshot_entries = NULL;
+    char status_buf[160];
     int entry_count = 0;
     int selected = 0;
     int first_visible = 0;
+    int screenshot_entry_count = 0;
+    int screenshot_selected = 0;
+    int screenshot_first_visible = 0;
     BYTE last_key = 0;
     BYTE last_state = 0;
     int show_help = 0;
+    int show_screenshot_viewer = 0;
+    int show_screenshot_image = 0;
     int help_page = HELP_PAGE_HELP;
     const char *status_text = NULL;
 
@@ -637,6 +726,100 @@ const char *picocalc_rom_menu(void) {
         menu_log_key(key, state);
 
         if (state == KEY_STATE_PRESSED) {
+            if (show_screenshot_viewer) {
+                if (show_screenshot_image) {
+                    if (key == KEY_ESC || key == KEY_ENTER || key == KEY_MINUS) {
+                        show_screenshot_image = 0;
+                        status_text = "ESC BACK";
+                        menu_discard_pending_keys();
+                        menu_render_screenshot_viewer_list(screenshot_entries,
+                                                           screenshot_entry_count,
+                                                           screenshot_selected,
+                                                           screenshot_first_visible,
+                                                           last_key,
+                                                           last_state,
+                                                           status_text);
+                    }
+                    continue;
+                }
+                if (key == KEY_ESC) {
+                    free(screenshot_entries);
+                    screenshot_entries = NULL;
+                    screenshot_entry_count = 0;
+                    screenshot_selected = 0;
+                    screenshot_first_visible = 0;
+                    show_screenshot_image = 0;
+                    show_screenshot_viewer = 0;
+                    status_text = NULL;
+                    menu_discard_pending_keys();
+                    menu_render(entries, entry_count, selected, first_visible, last_key, last_state, status_text);
+                    continue;
+                }
+                if (key == KEY_UP && screenshot_entry_count > 0) {
+                    int old_row = screenshot_selected - screenshot_first_visible;
+                    int page_scroll_up = (old_row == 0 && screenshot_selected > 0);
+
+                    screenshot_selected--;
+                    if (screenshot_selected < 0) {
+                        screenshot_selected = screenshot_entry_count - 1;
+                        screenshot_first_visible = menu_page_first_for_index(screenshot_selected);
+                    } else if (page_scroll_up) {
+                        screenshot_first_visible = menu_page_first_for_index(screenshot_selected);
+                    } else {
+                        screenshot_first_visible = menu_keep_visible_or_clamp(screenshot_entry_count,
+                                                                              screenshot_selected,
+                                                                              screenshot_first_visible);
+                    }
+                    status_text = "ESC BACK";
+                } else if (key == KEY_DOWN && screenshot_entry_count > 0) {
+                    int old_row = screenshot_selected - screenshot_first_visible;
+                    int old_visible_count = screenshot_entry_count - screenshot_first_visible;
+                    int page_scroll_down;
+
+                    if (old_visible_count > MENU_LIST_MAX_VISIBLE) {
+                        old_visible_count = MENU_LIST_MAX_VISIBLE;
+                    }
+                    page_scroll_down =
+                        (old_row == old_visible_count - 1 && screenshot_selected + 1 < screenshot_entry_count);
+
+                    screenshot_selected++;
+                    if (screenshot_selected >= screenshot_entry_count) {
+                        screenshot_selected = 0;
+                        screenshot_first_visible = 0;
+                    } else if (page_scroll_down) {
+                        screenshot_first_visible = menu_page_first_for_index(screenshot_selected);
+                    } else {
+                        screenshot_first_visible = menu_keep_visible_or_clamp(screenshot_entry_count,
+                                                                              screenshot_selected,
+                                                                              screenshot_first_visible);
+                    }
+                    status_text = "ESC BACK";
+                } else if ((key == KEY_ENTER || key == KEY_MINUS) && screenshot_entry_count > 0) {
+                    if (screenshot_viewer_show_bmp(screenshot_entries[screenshot_selected].path,
+                                                   status_buf,
+                                                   sizeof(status_buf))) {
+                        show_screenshot_image = 1;
+                        menu_discard_pending_keys();
+                        continue;
+                    }
+                    status_text = status_buf;
+                } else if (key == KEY_H_LOWER || key == KEY_H_UPPER || key == KEY_QUESTION) {
+                    status_text = "HELP DISABLED IN VIEW";
+                } else if (key == KEY_ENTER || key == KEY_MINUS) {
+                    status_text = "NO SCREENSHOTS";
+                } else {
+                    status_text = "ESC BACK";
+                }
+                menu_render_screenshot_viewer_list(screenshot_entries,
+                                                   screenshot_entry_count,
+                                                   screenshot_selected,
+                                                   screenshot_first_visible,
+                                                   last_key,
+                                                   last_state,
+                                                   status_text);
+                continue;
+            }
+
             if (key == KEY_F5) {
                 nesco_screenshot_result_t ss_result;
 
@@ -653,6 +836,33 @@ const char *picocalc_rom_menu(void) {
                          "%s",
                          (ss_result == NESCO_SCREENSHOT_OK) ? "SCREENSHOT SAVED" : "SCREENSHOT FAILED");
                 status_text = status_buf;
+            } else if (!show_help && key == KEY_F4) {
+                free(screenshot_entries);
+                screenshot_entries = malloc(sizeof(*screenshot_entries) * MENU_MAX_ENTRIES);
+                screenshot_entry_count = 0;
+                screenshot_selected = 0;
+                screenshot_first_visible = 0;
+                show_screenshot_image = 0;
+                show_screenshot_viewer = 1;
+                if (screenshot_entries) {
+                    screenshot_entry_count = screenshot_viewer_load_entries(screenshot_entries,
+                                                                            MENU_MAX_ENTRIES,
+                                                                            status_buf,
+                                                                            sizeof(status_buf));
+                    status_text = status_buf;
+                } else {
+                    snprintf(status_buf, sizeof(status_buf), "NO MEMORY");
+                    status_text = status_buf;
+                }
+                menu_discard_pending_keys();
+                menu_render_screenshot_viewer_list(screenshot_entries,
+                                                   screenshot_entry_count,
+                                                   screenshot_selected,
+                                                   screenshot_first_visible,
+                                                   last_key,
+                                                   last_state,
+                                                   status_text);
+                continue;
             } else if (key == KEY_H_LOWER || key == KEY_H_UPPER || key == KEY_QUESTION) {
                 show_help = !show_help;
                 status_text = NULL;
@@ -699,17 +909,25 @@ const char *picocalc_rom_menu(void) {
             } else if (key == KEY_UP) {
                 int old_selected = selected;
                 int old_first_visible = first_visible;
+                int old_row = selected - first_visible;
+                int page_scroll_up = (old_row == 0 && selected > 0);
+                int wrap_up = 0;
 
                 selected--;
                 if (selected < 0) {
                     selected = entry_count - 1;
+                    first_visible = menu_page_first_for_index(selected);
+                    wrap_up = 1;
+                } else if (page_scroll_up) {
+                    first_visible = menu_page_first_for_index(selected);
+                } else {
+                    first_visible = menu_keep_visible_or_clamp(entry_count, selected, first_visible);
                 }
-                first_visible = menu_clamp_first_visible(entry_count, selected, first_visible);
-                status_text = entries[selected].enabled
-                                                        ? ((entries[selected].kind == ROM_ENTRY_FILE)
-                                                            ? "PRESS ENTER/- TO START"
-                                                            : "PRESS ENTER/- TO OPEN")
-                                                        : "ENTRY NOT AVAILABLE YET";
+                status_text = menu_default_status(entries, entry_count, selected);
+                if (page_scroll_up || wrap_up) {
+                    menu_render(entries, entry_count, selected, first_visible, last_key, last_state, status_text);
+                    continue;
+                }
                 if (first_visible == old_first_visible) {
                     menu_update_selection_rows(entries,
                                                entry_count,
@@ -724,17 +942,31 @@ const char *picocalc_rom_menu(void) {
             } else if (key == KEY_DOWN) {
                 int old_selected = selected;
                 int old_first_visible = first_visible;
+                int old_row = selected - first_visible;
+                int old_visible_count = entry_count - first_visible;
+                int page_scroll_down;
+                int wrap_down = 0;
+
+                if (old_visible_count > MENU_LIST_MAX_VISIBLE) {
+                    old_visible_count = MENU_LIST_MAX_VISIBLE;
+                }
+                page_scroll_down = (old_row == old_visible_count - 1 && selected + 1 < entry_count);
 
                 selected++;
                 if (selected >= entry_count) {
                     selected = 0;
+                    first_visible = 0;
+                    wrap_down = 1;
+                } else if (page_scroll_down) {
+                    first_visible = menu_page_first_for_index(selected);
+                } else {
+                    first_visible = menu_keep_visible_or_clamp(entry_count, selected, first_visible);
                 }
-                first_visible = menu_clamp_first_visible(entry_count, selected, first_visible);
-                status_text = entries[selected].enabled
-                                                        ? ((entries[selected].kind == ROM_ENTRY_FILE)
-                                                            ? "PRESS ENTER/- TO START"
-                                                            : "PRESS ENTER/- TO OPEN")
-                                                        : "ENTRY NOT AVAILABLE YET";
+                status_text = menu_default_status(entries, entry_count, selected);
+                if (page_scroll_down || wrap_down) {
+                    menu_render(entries, entry_count, selected, first_visible, last_key, last_state, status_text);
+                    continue;
+                }
                 if (first_visible == old_first_visible) {
                     menu_update_selection_rows(entries,
                                                entry_count,
@@ -774,6 +1006,7 @@ const char *picocalc_rom_menu(void) {
                         {
                             const char *launch_path = rom_image_get_selected_path();
                             rom_image_menu_end();
+                            free(screenshot_entries);
                             menu_text_buffer_end();
                             return launch_path;
                         }
@@ -787,6 +1020,9 @@ const char *picocalc_rom_menu(void) {
                 status_text = "SELECTABLE *.NES FILE NOT AVAILABLE";
             }
         } else {
+            if (show_screenshot_image) {
+                continue;
+            }
             if (!show_help) {
                 menu_draw_debug_code(last_key, last_state);
             }
@@ -805,6 +1041,7 @@ const char *picocalc_rom_menu(void) {
     {
         const char *launch_path = rom_image_get_selected_path();
         rom_image_menu_end();
+        free(screenshot_entries);
         menu_text_buffer_end();
         return launch_path;
     }

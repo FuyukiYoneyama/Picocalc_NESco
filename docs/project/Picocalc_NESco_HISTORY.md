@@ -10597,6 +10597,252 @@ Xevious 背景崩れについては、かなり重要なので詳細を残す。
 - 実機検証で ROM menu
   の上下移動時のチラつき低減を確認した
 
+## 1.46 `1.0.4` ROM menu 上下端移動をページ送り型に変更 (2026-04-27)
+
+- system version を
+  `1.0.4`
+  へ更新した
+- ROM menu
+  の選択カーソルが表示中 list
+  の最下行にある状態で下矢印を押したとき、
+  1 行ずつ scroll
+  するのではなく、
+  次の項目を新しい表示ページの先頭に出すようにした
+- 表示中 list
+  の最上行にある状態で上矢印を押したときも、
+  前の項目を新しい表示ページの最下行に出すようにした
+- 先頭項目
+  `SYSTEM FLASH`
+  から上矢印で末尾へ wrap
+  する場合も、
+  最終ページを表示してカーソルが見えるようにした
+- 上下端から先頭 / 末尾へ wrap
+  する場合は共通の
+  `menu_clamp_first_visible()`
+  を通さず、ページ境界を維持して full render
+  するようにした
+- 最終ページの項目数が
+  `MENU_LIST_MAX_VISIBLE`
+  未満の場合は、
+  ページ送り後の空行あり layout
+  を通常移動中も維持するようにした
+- page
+  境界を
+  `MENU_LIST_MAX_VISIBLE`
+  件単位に固定し、
+  上下どちらから page
+  をまたいでも同じ表示範囲になるようにした
+- 通常の上下移動は部分再描画を維持し、
+  page scroll
+  が必要な場合だけ full render
+  する
+- 目的は ROM menu
+  の 1 行 scroll
+  連発によるチラつき低減
+- この変更は
+  `feature/screenshot-viewer`
+  branch
+  上の先行 bug fix
+  として扱う
+
+## 1.47 `1.0.5` screenshot viewer Phase 2: BMP 一覧表示を追加 (2026-04-28)
+
+- system version を
+  `1.0.5`
+  へ更新した
+- ROM menu
+  から
+  `S VIEW`
+  で入る screenshot viewer
+  に、
+  `0:/screenshots/*.BMP`
+  の一覧表示を追加した
+- screenshot viewer
+  の entry
+  は viewer mode
+  開始時に動的確保し、
+  `ESC`
+  で ROM menu
+  へ戻るときに解放する
+- entry
+  ごとに
+  `name`
+  と
+  `path`
+  を固定長 buffer
+  に保持し、
+  FatFs
+  の一時 file name pointer
+  は保持しない
+- screenshot viewer
+  内の上下移動は ROM menu
+  と同じ page
+  移動 helper
+  を使う
+- `Enter`
+  または
+  `-`
+  は Phase 2
+  の確認用として選択中 BMP
+  の path
+  を status line
+  に表示する
+- Phase 3
+  では、この Phase 2
+  を戻り先として BMP
+  header parser
+  と表示処理を追加する
+
+## 1.48 `1.0.6` screenshot viewer に index 表示を追加 (2026-04-28)
+
+- system version を
+  `1.0.6`
+  へ更新した
+- screenshot viewer
+  の header
+  に ROM menu
+  と同じ
+  `x/n`
+  表示を追加した
+- BMP
+  が 0 件の場合は
+  `0/0`
+  と表示するようにした
+- 実機確認で BMP menu
+  は設計どおり表示されていることを確認した
+- malloc
+  成功を示す UART
+  ログは出していないが、失敗時は画面 status
+  に
+  `NO MEMORY`
+  を出す設計であるため、
+  一覧表示経路では viewer entry
+  確保に成功していると扱う
+
+## 1.49 `1.0.7` screenshot viewer Phase 3: BMP 表示処理を追加 (2026-04-28)
+
+- system version を
+  `1.0.7`
+  へ更新した
+- screenshot viewer
+  の一覧で
+  `Enter`
+  または
+  `-`
+  を押すと、選択中 BMP
+  を fullscreen
+  で表示する処理を追加した
+- 初期対応 BMP
+  は
+  `320x320`
+  `24bit`
+  `BI_RGB`
+  で、
+  top-down
+  と bottom-up
+  の両方を扱う
+- BMP
+  header
+  と file size
+  を検証し、対応外または破損が疑われる場合は
+  `UNSUPPORTED BMP`
+  または
+  `READ FAILED`
+  を status
+  に出して一覧へ戻る
+- 表示は row buffer
+  方式で行い、full image buffer
+  は確保しない
+- LCD DMA
+  は非同期転送なので、各 row
+  送信後に
+  `lcd_dma_wait()`
+  してから line buffer
+  を再利用する
+- BMP
+  表示中は debug code
+  などの text
+  を画像上に描かない
+- clean build
+  は
+  `cmake --build build --target clean && cmake --build build -j8`
+  で成功した
+- build
+  は
+  `PicoCalc NESco Ver. 1.0.7 Build Apr 28 2026 20:36:25`
+  だった
+- build size
+  は
+  `text=273388`
+  `data=0`
+  `bss=92772`
+  だった
+- UF2 SHA-256
+  は
+  `a94e962e962171937dfb108e37b3c3842aca04db033d41feab9ea1d5090f549b`
+  だった
+- 実機確認で screenshot BMP
+  を表示できた
+- これにより、ROM menu
+  から過去に撮った screenshot BMP
+  を選択して PicoCalc
+  本体で確認する初期機能は完了扱いにした
+
+## 1.50 `1.0.8` screenshot viewer の mode 識別色を追加 (2026-04-28)
+
+- system version を
+  `1.0.8`
+  へ更新した
+- screenshot viewer
+  の header
+  文字と上下区切り線を cyan
+  系の専用 accent
+  に変更した
+- 選択 cursor
+  の青は ROM menu
+  と同じ意味を保つため変更していない
+
+## 1.51 `1.0.9` screenshot viewer 入口を F4 に変更 (2026-04-28)
+
+- system version を
+  `1.0.9`
+  へ更新した
+- ROM menu
+  から screenshot viewer
+  へ入る key
+  を
+  `S`
+  から
+  `F4`
+  に変更した
+- ROM menu
+  footer
+  と help
+  の表示も
+  `F4`
+  に合わせた
+- build
+  は
+  `PicoCalc NESco Ver. 1.0.9 Build Apr 28 2026 20:53:22`
+  で成功した
+- build size
+  は
+  `text=273652`
+  `data=0`
+  `bss=92772`
+  だった
+- UF2 SHA-256
+  は
+  `5e0cba43c49d184531a42bc48a9ef4875171818f9449346564e6bae48802a0cb`
+  だった
+- 実機最終確認で、F4
+  から screenshot viewer
+  に入り、BMP
+  一覧と表示が動作することを確認した
+- F4
+  化後の screenshot viewer
+  初期機能は完了扱いにした
+
 ## 1.11 `0.3.21` BokosukaWars trace 領域を uf2loader 保護域から退避 (2026-04-25)
 
 - system version を
