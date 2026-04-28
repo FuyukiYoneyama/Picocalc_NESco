@@ -310,6 +310,7 @@ nesco_screenshot_result_t nesco_take_screenshot_now_with_stem(const char *stem)
 
     s_screenshot_busy = true;
     SCREENSHOT_LOGF("SS_NOW_DMA_WAIT_BEGIN\r\n");
+    display_lcd_worker_stop_and_drain();
     lcd_dma_wait();
     SCREENSHOT_LOGF("SS_NOW_DMA_WAIT_DONE\r\n");
 
@@ -331,6 +332,7 @@ void nesco_maybe_start_screenshot_on_vblank(void)
     s_screenshot_busy = true;
 
     SCREENSHOT_LOGF("SS_DMA_WAIT_BEGIN\r\n");
+    display_lcd_worker_stop_and_drain();
     lcd_dma_wait();
     SCREENSHOT_LOGF("SS_DMA_WAIT_DONE\r\n");
 

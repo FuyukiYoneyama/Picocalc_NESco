@@ -13,6 +13,7 @@
  */
 #pragma once
 #include "InfoNES_Types.h"
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -35,6 +36,12 @@ typedef enum {
     NES_VIEW_SCALE_STRETCH_320X300 = 1,
 } nes_view_scale_mode_t;
 
+typedef enum {
+    DISPLAY_LCD_WORKER_STOPPED = 0,
+    DISPLAY_LCD_WORKER_RUNNING = 1,
+    DISPLAY_LCD_WORKER_DRAINING = 2,
+} display_lcd_worker_state_t;
+
 /**
  * display_init() — Initialise LCD hardware and precompute LUT.
  * Called once from main() before emulation starts.
@@ -53,6 +60,10 @@ void display_get_viewport(int *x, int *y, int *w, int *h);
 void display_set_mode(display_mode_t mode);
 void display_toggle_nes_view_scale(void);
 nes_view_scale_mode_t display_get_nes_view_scale(void);
+display_lcd_worker_state_t display_lcd_worker_get_state(void);
+void display_lcd_worker_prepare_nes_view(void);
+void display_lcd_worker_stop_and_drain(void);
+bool display_lcd_worker_is_running(void);
 
 /**
  * display_clear_rgb565(color) — Fill the current active display mode region.

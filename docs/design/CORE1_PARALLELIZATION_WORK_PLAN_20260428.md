@@ -498,6 +498,30 @@ LCD worker が動作中の場合は、fullscreen UI に入る前に worker を s
 Phase 1 の確認で表示系に不安がある場合のみ 1 回。
 問題がなければ実機確認は Phase 3 へまとめる。
 
+### Phase 2 実施結果
+
+Phase 2 は 2026-04-29 に実装した。
+
+実装した内容:
+
+- `display_lcd_worker_state_t` を追加した。
+- `display_lcd_worker_stop_and_drain()` を追加し、現時点では no-op の LCD worker stop と `lcd_dma_wait()` を行う。
+- `display_lcd_worker_prepare_nes_view()` を追加し、将来の NES view worker 開始位置を固定した。
+- fullscreen UI へ入る `display_set_mode(DISPLAY_MODE_FULLSCREEN)` で worker drain を行う。
+- Shift+W の表示切替前に worker drain を行う。
+- screenshot capture 前に worker drain を行う。
+- この phase では `CORE1_SERVICE_LCD` は有効化していない。
+
+build 結果:
+
+- version: `1.0.11`
+- build id: `Apr 29 2026 00:13:13`
+- UF2 SHA-256: `480b8ef5f44246c0d08bacdc258a45390fab4ba4a4d419c26de7ad34b1d7c9c1`
+
+次の再開位置:
+
+- Phase 3 は、この Phase 2 の drain / ownership 接続点を使って normal 表示だけの LCD worker queue を実装する。
+
 ## Phase 3: core1 LCD worker normal 表示
 
 ### 目的

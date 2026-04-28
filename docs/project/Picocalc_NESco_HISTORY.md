@@ -10,6 +10,17 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.0.11 core1 LCD worker Phase 2 ownership 整理 (2026-04-29)
+
+- `docs/design/CORE1_PARALLELIZATION_WORK_PLAN_20260428.md` の Phase 2 に従い、LCD worker 実験前の所有権整理を行った
+- `display_lcd_worker_state_t`、`display_lcd_worker_stop_and_drain()`、`display_lcd_worker_prepare_nes_view()` を追加した
+- fullscreen UI、Shift+W 表示切替、screenshot capture の入口で LCD worker drain を通す接続点を追加した
+- この段階では実際の core1 LCD 転送は行わず、`CORE1_SERVICE_LCD` も有効化していない
+- build 確認:
+  - banner: `PicoCalc NESco Ver. 1.0.11 Build Apr 29 2026 00:13:13`
+  - UF2 SHA-256: `480b8ef5f44246c0d08bacdc258a45390fab4ba4a4d419c26de7ad34b1d7c9c1`
+- 実機確認は Phase 3 の normal LCD worker 実験時へまとめる
+
 ## 1.0.10 core1 keyboard polling / flash staging 安定化 (2026-04-28)
 
 - core1 keyboard polling 導入後、DART / TOWER の SD ファイル起動時にキー入力が効かない問題を調査した

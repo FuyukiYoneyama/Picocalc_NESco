@@ -69,6 +69,7 @@ static WORD s_active_frame_skip = 0;
 
 static display_mode_t s_display_mode = DISPLAY_MODE_NES_VIEW;
 static nes_view_scale_mode_t s_nes_view_scale = NES_VIEW_SCALE_NORMAL;
+static volatile display_lcd_worker_state_t s_lcd_worker_state = DISPLAY_LCD_WORKER_STOPPED;
 
 /* Active LCD rectangle for NES output or full-screen UI operations. */
 static int s_lcd_x0 = 32;
@@ -107,6 +108,28 @@ static void display_draw_text_span_scaled_cropped(int x,
                                                   int crop_top_rows);
 static int display_measure_text_width(const char *text, int char_advance, int glyph_w, int scale);
 static void display_apply_nes_viewport(void);
+extern "C" void lcd_dma_wait(void);
+
+display_lcd_worker_state_t display_lcd_worker_get_state(void) {
+    return s_lcd_worker_state;
+}
+
+bool display_lcd_worker_is_running(void) {
+    return s_lcd_worker_state == DISPLAY_LCD_WORKER_RUNNING;
+}
+
+void display_lcd_worker_prepare_nes_view(void) {
+    /* Phase 2 only defines ownership points. Actual core1 LCD transfer starts later. */
+    s_lcd_worker_state = DISPLAY_LCD_WORKER_STOPPED;
+}
+
+void display_lcd_worker_stop_and_drain(void) {
+    if (s_lcd_worker_state == DISPLAY_LCD_WORKER_RUNNING) {
+        s_lcd_worker_state = DISPLAY_LCD_WORKER_DRAINING;
+    }
+    lcd_dma_wait();
+    s_lcd_worker_state = DISPLAY_LCD_WORKER_STOPPED;
+}
 
 static void display_prepare_nes_view_surface(void) {
     static const WORD bg = 0x0000;
@@ -327,11 +350,16 @@ static void display_apply_nes_viewport(void) {
 }
 
 void display_set_mode(display_mode_t mode) {
+    if (mode == DISPLAY_MODE_FULLSCREEN) {
+        display_lcd_worker_stop_and_drain();
+    }
+
     s_display_mode = mode;
     if (mode == DISPLAY_MODE_FULLSCREEN) {
         display_set_viewport(0, 0, 320, 320);
     } else {
         display_prepare_nes_view_surface();
+        display_lcd_worker_prepare_nes_view();
     }
 
     s_strip_line = 0;
@@ -343,6 +371,8 @@ void display_set_mode(display_mode_t mode) {
 }
 
 void display_toggle_nes_view_scale(void) {
+    display_lcd_worker_stop_and_drain();
+
     s_nes_view_scale =
         (s_nes_view_scale == NES_VIEW_SCALE_NORMAL)
             ? NES_VIEW_SCALE_STRETCH_320X300
