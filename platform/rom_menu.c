@@ -43,6 +43,7 @@ enum {
     MENU_BG       = 0x0000,
     MENU_FG       = 0xFFFF,
     MENU_ACCENT   = 0x07E0,
+    MENU_VIEW_ACCENT = 0x07FF,
     MENU_DIM      = 0x7BEF,
     MENU_STATUS   = 0xFBE0,
     MENU_HILITE   = 0x001F,
@@ -459,11 +460,11 @@ static void menu_render_screenshot_viewer_list(const screenshot_viewer_entry_t *
     menu_fill_rect(0, 0, 320, 320, MENU_BG);
     menu_draw_title_bar();
 
-    menu_draw_text_span(8, 28, 160, "SCREENSHOT VIEW", MENU_DIM, MENU_BG);
+    menu_draw_text_span(8, 28, 160, "SCREENSHOT VIEW", MENU_VIEW_ACCENT, MENU_BG);
     menu_draw_index(entry_count, selected);
     menu_fill_rect(8, 42, 220, FONT_H, MENU_BG);
     menu_draw_text_span(8, 42, 220, effective_status, MENU_DIM, MENU_BG);
-    menu_fill_rect(8, 56, 304, 2, MENU_ACCENT);
+    menu_fill_rect(8, 56, 304, 2, MENU_VIEW_ACCENT);
 
     if (!entries || entry_count <= 0) {
         menu_fill_rect(8, MENU_LIST_Y - 2, 304, 25, MENU_BG);
@@ -480,7 +481,7 @@ static void menu_render_screenshot_viewer_list(const screenshot_viewer_entry_t *
         }
     }
 
-    menu_fill_rect(8, 280, 304, 2, MENU_ACCENT);
+    menu_fill_rect(8, 280, 304, 2, MENU_VIEW_ACCENT);
     menu_draw_text_span(8, 304, 280, "UP/DOWN MOVE ENTER PATH ESC BACK", MENU_DIM, MENU_BG);
     menu_draw_debug_code(last_key, last_state);
 }

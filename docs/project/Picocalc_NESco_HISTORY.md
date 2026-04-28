@@ -10788,6 +10788,20 @@ Xevious 背景崩れについては、かなり重要なので詳細を残す。
   を選択して PicoCalc
   本体で確認する初期機能は完了扱いにした
 
+## 1.50 `1.0.8` screenshot viewer の mode 識別色を追加 (2026-04-28)
+
+- system version を
+  `1.0.8`
+  へ更新した
+- screenshot viewer
+  の header
+  文字と上下区切り線を cyan
+  系の専用 accent
+  に変更した
+- 選択 cursor
+  の青は ROM menu
+  と同じ意味を保つため変更していない
+
 ## 1.11 `0.3.21` BokosukaWars trace 領域を uf2loader 保護域から退避 (2026-04-25)
 
 - system version を
