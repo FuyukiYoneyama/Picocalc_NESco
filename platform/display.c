@@ -28,6 +28,7 @@
 #include <string.h>
 
 #ifdef PICO_BUILD
+#include "pico/sync.h"
 #include "pico/time.h"
 #endif
 
@@ -89,6 +90,37 @@ enum {
     NES_STRETCH_STRIP_HEIGHT = STRIP_HEIGHT + (STRIP_HEIGHT / 4),
 };
 
+enum {
+    DISPLAY_LCD_WORKER_QUEUE_DEPTH = 4,
+};
+
+typedef enum {
+    DISPLAY_LCD_WORKER_ITEM_LINE = 0,
+    DISPLAY_LCD_WORKER_ITEM_FRAME_END = 1,
+} display_lcd_worker_item_type_t;
+
+typedef struct {
+    display_lcd_worker_item_type_t type;
+    int scanline;
+    int viewport_x;
+    int viewport_y;
+    int viewport_w;
+    int viewport_h;
+    WORD pixels[256];
+} display_lcd_worker_item_t;
+
+static display_lcd_worker_item_t s_lcd_worker_queue[DISPLAY_LCD_WORKER_QUEUE_DEPTH];
+static unsigned s_lcd_worker_queue_head = 0;
+static unsigned s_lcd_worker_queue_tail = 0;
+static unsigned s_lcd_worker_queue_count = 0;
+static int s_lcd_worker_strip_line = 0;
+static BYTE *s_lcd_worker_strip = NULL;
+
+#ifdef PICO_BUILD
+static critical_section_t s_lcd_worker_lock;
+static bool s_lcd_worker_lock_ready = false;
+#endif
+
 static void display_draw_text_span_scaled(int x,
                                           int y,
                                           int span_w,
@@ -109,6 +141,9 @@ static void display_draw_text_span_scaled_cropped(int x,
 static int display_measure_text_width(const char *text, int char_advance, int glyph_w, int scale);
 static void display_apply_nes_viewport(void);
 extern "C" void lcd_dma_wait(void);
+extern "C" void lcd_set_window(int x, int y, int w, int h);
+extern "C" BYTE *lcd_dma_acquire_buffer(void);
+extern "C" void lcd_dma_write_bytes_async(const BYTE *buf, int n_bytes);
 
 display_lcd_worker_state_t display_lcd_worker_get_state(void) {
     return s_lcd_worker_state;
@@ -118,16 +153,62 @@ bool display_lcd_worker_is_running(void) {
     return s_lcd_worker_state == DISPLAY_LCD_WORKER_RUNNING;
 }
 
+static void display_lcd_worker_lock(void) {
+#ifdef PICO_BUILD
+    if (s_lcd_worker_lock_ready) {
+        critical_section_enter_blocking(&s_lcd_worker_lock);
+    }
+#endif
+}
+
+static void display_lcd_worker_unlock(void) {
+#ifdef PICO_BUILD
+    if (s_lcd_worker_lock_ready) {
+        critical_section_exit(&s_lcd_worker_lock);
+    }
+#endif
+}
+
+static void display_lcd_worker_reset_queue(void) {
+    display_lcd_worker_lock();
+    s_lcd_worker_queue_head = 0;
+    s_lcd_worker_queue_tail = 0;
+    s_lcd_worker_queue_count = 0;
+    s_lcd_worker_strip_line = 0;
+    s_lcd_worker_strip = NULL;
+    display_lcd_worker_unlock();
+}
+
+static bool display_lcd_worker_queue_empty(void) {
+    bool empty;
+
+    display_lcd_worker_lock();
+    empty = (s_lcd_worker_queue_count == 0 && s_lcd_worker_strip_line == 0);
+    display_lcd_worker_unlock();
+    return empty;
+}
+
 void display_lcd_worker_prepare_nes_view(void) {
-    /* Phase 2 only defines ownership points. Actual core1 LCD transfer starts later. */
-    s_lcd_worker_state = DISPLAY_LCD_WORKER_STOPPED;
+    display_lcd_worker_reset_queue();
+    if (s_nes_view_scale == NES_VIEW_SCALE_NORMAL) {
+        s_lcd_worker_state = DISPLAY_LCD_WORKER_RUNNING;
+    } else {
+        s_lcd_worker_state = DISPLAY_LCD_WORKER_STOPPED;
+    }
 }
 
 void display_lcd_worker_stop_and_drain(void) {
     if (s_lcd_worker_state == DISPLAY_LCD_WORKER_RUNNING) {
         s_lcd_worker_state = DISPLAY_LCD_WORKER_DRAINING;
     }
+
+    for (int i = 0; i < 1000 && !display_lcd_worker_queue_empty(); ++i) {
+#ifdef PICO_BUILD
+        sleep_us(100);
+#endif
+    }
     lcd_dma_wait();
+    display_lcd_worker_reset_queue();
     s_lcd_worker_state = DISPLAY_LCD_WORKER_STOPPED;
 }
 
@@ -302,6 +383,11 @@ void display_init(void) {
         s_rgb4_to_rgb565_b[i] = (WORD)b5;
     }
 
+#ifdef PICO_BUILD
+    critical_section_init(&s_lcd_worker_lock);
+    s_lcd_worker_lock_ready = true;
+#endif
+
     lcd_init();
     display_set_mode(DISPLAY_MODE_NES_VIEW);
 
@@ -380,6 +466,7 @@ void display_toggle_nes_view_scale(void) {
 
     if (s_display_mode == DISPLAY_MODE_NES_VIEW) {
         display_prepare_nes_view_surface();
+        display_lcd_worker_prepare_nes_view();
     }
 
     s_strip_line = 0;
@@ -525,6 +612,124 @@ static void display_pack_line_normal(BYTE *dst, const WORD *src) {
     }
 }
 
+static bool display_lcd_worker_push_item(const display_lcd_worker_item_t *item) {
+    bool queued = false;
+
+    display_lcd_worker_lock();
+    if (s_lcd_worker_queue_count < DISPLAY_LCD_WORKER_QUEUE_DEPTH) {
+        s_lcd_worker_queue[s_lcd_worker_queue_tail] = *item;
+        s_lcd_worker_queue_tail = (s_lcd_worker_queue_tail + 1u) % DISPLAY_LCD_WORKER_QUEUE_DEPTH;
+        s_lcd_worker_queue_count++;
+        queued = true;
+    }
+    display_lcd_worker_unlock();
+    return queued;
+}
+
+static bool display_lcd_worker_pop_item(display_lcd_worker_item_t *item) {
+    bool popped = false;
+
+    display_lcd_worker_lock();
+    if (s_lcd_worker_queue_count > 0) {
+        *item = s_lcd_worker_queue[s_lcd_worker_queue_head];
+        s_lcd_worker_queue_head = (s_lcd_worker_queue_head + 1u) % DISPLAY_LCD_WORKER_QUEUE_DEPTH;
+        s_lcd_worker_queue_count--;
+        popped = true;
+    }
+    display_lcd_worker_unlock();
+    return popped;
+}
+
+static bool display_lcd_worker_submit_normal_line(int scanline, const WORD *src) {
+    display_lcd_worker_item_t item;
+
+    if (s_lcd_worker_state != DISPLAY_LCD_WORKER_RUNNING ||
+        s_nes_view_scale != NES_VIEW_SCALE_NORMAL ||
+        s_display_mode != DISPLAY_MODE_NES_VIEW) {
+        return false;
+    }
+
+    item.type = DISPLAY_LCD_WORKER_ITEM_LINE;
+    item.scanline = scanline;
+    item.viewport_x = s_lcd_x0;
+    item.viewport_y = s_lcd_y0;
+    item.viewport_w = s_lcd_w;
+    item.viewport_h = s_lcd_h;
+    memcpy(item.pixels, src, sizeof(item.pixels));
+
+    while (!display_lcd_worker_push_item(&item)) {
+#ifdef PICO_BUILD
+        sleep_us(100);
+#endif
+    }
+
+    if (scanline == 239) {
+        memset(&item, 0, sizeof(item));
+        item.type = DISPLAY_LCD_WORKER_ITEM_FRAME_END;
+        while (!display_lcd_worker_push_item(&item)) {
+#ifdef PICO_BUILD
+            sleep_us(100);
+#endif
+        }
+    }
+
+    return true;
+}
+
+static void display_lcd_worker_flush_normal_strip(const display_lcd_worker_item_t *last_item) {
+    if (s_lcd_worker_strip_line <= 0) {
+        return;
+    }
+    if (!s_lcd_worker_strip) {
+        s_lcd_worker_strip_line = 0;
+        return;
+    }
+
+    const int strip_y = last_item->scanline - (s_lcd_worker_strip_line - 1);
+    lcd_dma_wait();
+    lcd_set_window(last_item->viewport_x,
+                   last_item->viewport_y + strip_y,
+                   NES_VIEW_NORMAL_W,
+                   s_lcd_worker_strip_line);
+    lcd_dma_write_bytes_async(s_lcd_worker_strip,
+                              NES_VIEW_NORMAL_W * s_lcd_worker_strip_line * 2);
+    s_lcd_worker_strip = NULL;
+    s_lcd_worker_strip_line = 0;
+}
+
+bool display_lcd_worker_poll_once(void) {
+    display_lcd_worker_item_t item;
+
+    if (s_lcd_worker_state != DISPLAY_LCD_WORKER_RUNNING &&
+        s_lcd_worker_state != DISPLAY_LCD_WORKER_DRAINING) {
+        return false;
+    }
+
+    if (!display_lcd_worker_pop_item(&item)) {
+        return false;
+    }
+
+    if (item.type == DISPLAY_LCD_WORKER_ITEM_FRAME_END) {
+        lcd_dma_wait();
+        return true;
+    }
+
+    if (s_lcd_worker_strip_line == 0) {
+        s_lcd_worker_strip = lcd_dma_acquire_buffer();
+        if (!s_lcd_worker_strip) {
+            return true;
+        }
+    }
+
+    display_pack_line_normal(&s_lcd_worker_strip[s_lcd_worker_strip_line * NES_VIEW_NORMAL_W * 2],
+                             item.pixels);
+    s_lcd_worker_strip_line++;
+    if (s_lcd_worker_strip_line >= STRIP_HEIGHT) {
+        display_lcd_worker_flush_normal_strip(&item);
+    }
+    return true;
+}
+
 static void display_pack_line_stretch_320(BYTE *dst, const WORD *src) {
     for (int block = 0; block < 64; ++block) {
         const WORD s0 = src[block * 4 + 0];
@@ -548,6 +753,10 @@ static void display_pack_line_stretch_320(BYTE *dst, const WORD *src) {
 void InfoNES_PostDrawLine(int scanline, bool frommenu) {
     const WORD *src = s_line_buffer;
     BYTE *strip = lcd_dma_acquire_buffer();
+
+    if (!frommenu && display_lcd_worker_submit_normal_line(scanline, src)) {
+        return;
+    }
 
     if (s_nes_view_scale == NES_VIEW_SCALE_STRETCH_320X300) {
         const int src_strip_line = s_strip_line;

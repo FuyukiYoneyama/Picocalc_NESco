@@ -10,6 +10,24 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.0.14 core1 LCD worker normal 表示実験 (2026-04-29)
+
+- `docs/design/CORE1_PARALLELIZATION_WORK_PLAN_20260428.md` の Phase 3 に従い、normal 表示だけを core1 LCD worker 経由にした
+- core0 は scanline を queue に copy し、core1 が RGB565 pack と LCD DMA kick を行う
+- stretch 表示は従来の core0 表示経路のまま残した
+- 初期実装では起動直後の表示が不安定だったため、LCD driver の DMA buffer を `lcd_dma_acquire_buffer()` で取得して使うよう修正した
+- 初期実装では遅かったため、LCD queue に処理がある間は core1 が連続処理し、queue が空のときだけ短く待つよう調整した
+- keyboard polling は 1ms 周期を維持した
+- 実機確認:
+  - 起動直後の画面は正常
+  - normal 表示は初期版より改善
+  - screenshot は保存できる
+  - ESC で ROM menu へ戻れる
+  - 音は正常
+- build 確認:
+  - banner: `PicoCalc NESco Ver. 1.0.14 Build Apr 29 2026 00:48:55`
+  - UF2 SHA-256: `67007f33bc0dada14ed2beec9fb432c54a84342b1fb7c146ecc5e5a224fee774`
+
 ## 1.0.11 core1 LCD worker Phase 2 ownership 整理 (2026-04-29)
 
 - `docs/design/CORE1_PARALLELIZATION_WORK_PLAN_20260428.md` の Phase 2 に従い、LCD worker 実験前の所有権整理を行った

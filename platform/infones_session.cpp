@@ -44,7 +44,7 @@ int InfoNES_Menu()
     }
 
     display_set_mode(DISPLAY_MODE_NES_VIEW);
-    core1_set_services(CORE1_SERVICE_KEYBOARD);
+    core1_set_services(CORE1_SERVICE_KEYBOARD | CORE1_SERVICE_LCD);
 
     return load_result;
 }

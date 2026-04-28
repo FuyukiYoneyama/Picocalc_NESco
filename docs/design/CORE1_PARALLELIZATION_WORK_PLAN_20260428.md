@@ -609,6 +609,39 @@ drain 完了後だけ、core0 は LCD を fullscreen UI 用に直接操作して
 - core0 の LCD wait が減る。
 - queue stall が frame time を悪化させない。
 
+### Phase 3 実施結果
+
+Phase 3 は 2026-04-29 に normal 表示のみ実装した。
+
+実装した内容:
+
+- normal 表示時だけ core0 が scanline を queue に copy し、core1 が RGB565 pack と LCD DMA kick を行う。
+- stretch 表示は従来の core0 表示経路のまま残した。
+- queue entry は scanline、viewport snapshot、line pixels を持つ。
+- `s_line_buffer[256]` の pointer は core1 へ渡さない。
+- core1 側の strip buffer は LCD driver の DMA buffer を `lcd_dma_acquire_buffer()` で取得して使う。
+- queue が空でない間は core1 が LCD worker を連続処理し、空のときだけ短く待つ。
+- keyboard polling は 1ms 周期を維持する。
+
+実機で確認した内容:
+
+- 起動直後の画面は正常である。
+- normal 表示は初期版より改善した。
+- screenshot は保存できる。
+- ESC で ROM menu へ戻れる。
+- 音は正常である。
+
+build 結果:
+
+- version: `1.0.14`
+- build id: `Apr 29 2026 00:48:55`
+- UF2 SHA-256: `67007f33bc0dada14ed2beec9fb432c54a84342b1fb7c146ecc5e5a224fee774`
+
+次の再開位置:
+
+- Phase 4 へ進む場合は、この normal LCD worker を基準に stretch 表示だけを追加実験する。
+- 速度や安定性に問題が出る場合は、Phase 2 commit へ戻せる。
+
 ## Phase 4: core1 LCD worker stretch 表示
 
 ### 目的

@@ -1,5 +1,7 @@
 #include "core1_worker.h"
 
+#include "display.h"
+
 #include "pico/multicore.h"
 #include "pico/stdlib.h"
 #include "pico/sync.h"
@@ -124,19 +126,42 @@ static void core1_keyboard_poll_once(void) {
 }
 
 static void core1_worker_main(void) {
+    uint64_t last_keyboard_poll_us = 0;
+
     multicore_lockout_victim_init();
 
     for (;;) {
         const unsigned services = s_core1_requested_services;
+        const bool lcd_active = (services & CORE1_SERVICE_LCD) != 0;
+        bool lcd_work_done = false;
+
         if ((services & CORE1_SERVICE_KEYBOARD) != 0) {
-            s_core1_status &= ~CORE1_STATUS_IDLE_ACK;
-            core1_keyboard_poll_once();
-        } else if (services == 0) {
-            s_core1_status |= CORE1_STATUS_IDLE_ACK;
-        } else {
-            s_core1_status &= ~CORE1_STATUS_IDLE_ACK;
+            const uint64_t now_us = time_us_64();
+            if (last_keyboard_poll_us == 0 || now_us - last_keyboard_poll_us >= 1000u) {
+                s_core1_status &= ~CORE1_STATUS_IDLE_ACK;
+                core1_keyboard_poll_once();
+                last_keyboard_poll_us = now_us;
+            }
         }
-        sleep_ms(1);
+        if (lcd_active) {
+            s_core1_status &= ~CORE1_STATUS_IDLE_ACK;
+            for (int i = 0; i < 128; ++i) {
+                if (!display_lcd_worker_poll_once()) {
+                    break;
+                }
+                lcd_work_done = true;
+            }
+        }
+        if (services == 0) {
+            s_core1_status |= CORE1_STATUS_IDLE_ACK;
+        }
+        if (lcd_active) {
+            if (!lcd_work_done) {
+                sleep_us(50);
+            }
+        } else {
+            sleep_ms(1);
+        }
     }
 }
 

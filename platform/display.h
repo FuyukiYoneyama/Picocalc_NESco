@@ -64,6 +64,7 @@ display_lcd_worker_state_t display_lcd_worker_get_state(void);
 void display_lcd_worker_prepare_nes_view(void);
 void display_lcd_worker_stop_and_drain(void);
 bool display_lcd_worker_is_running(void);
+bool display_lcd_worker_poll_once(void);
 
 /**
  * display_clear_rgb565(color) — Fill the current active display mode region.
