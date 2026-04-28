@@ -231,6 +231,11 @@ uint64_t g_perf_ppu_bg_mapper_us = 0;
 uint64_t g_perf_ppu_bg_clear_us = 0;
 uint64_t g_perf_ppu_bg_setup_us = 0;
 uint64_t g_perf_ppu_bg_tile_us = 0;
+uint64_t g_perf_ppu_bg_tile_pal_us = 0;
+uint64_t g_perf_ppu_bg_tile_build_us = 0;
+uint64_t g_perf_ppu_bg_tile_render_us = 0;
+uint64_t g_perf_ppu_bg_mapperppu_us = 0;
+uint32_t g_perf_ppu_bg_tile_count = 0;
 uint64_t g_perf_ppu_bg_clip_us = 0;
 uint64_t g_perf_ppu_sprite_us = 0;
 uint64_t g_perf_mapper_hsync_us = 0;
@@ -267,6 +272,11 @@ inline void perf_reset()
   g_perf_ppu_bg_clear_us = 0;
   g_perf_ppu_bg_setup_us = 0;
   g_perf_ppu_bg_tile_us = 0;
+  g_perf_ppu_bg_tile_pal_us = 0;
+  g_perf_ppu_bg_tile_build_us = 0;
+  g_perf_ppu_bg_tile_render_us = 0;
+  g_perf_ppu_bg_mapperppu_us = 0;
+  g_perf_ppu_bg_tile_count = 0;
   g_perf_ppu_bg_clip_us = 0;
   g_perf_ppu_sprite_us = 0;
   g_perf_mapper_hsync_us = 0;
@@ -356,7 +366,7 @@ inline void perf_log_if_due(uint64_t now_us)
           ? "stretch"
           : "normal";
 
-  printf("[CORE1_BASE] t_us=%llu frames=%lu fps_x100=%llu frame_us_avg=%llu frame_us_max=%llu cpu_us=%llu apu_us=%llu draw_us=%llu ppu_bg_us=%llu ppu_bg_mapper_us=%llu ppu_bg_clear_us=%llu ppu_bg_setup_us=%llu ppu_bg_tile_us=%llu ppu_bg_clip_us=%llu ppu_sprite_us=%llu mapper_hsync_us=%llu mapper_vsync_us=%llu load_frame_us=%llu tail_us=%llu lcd_wait_us=%llu lcd_flush_us=%llu lcd_queue_wait_us=%llu lcd_queue_wait_count=%lu frame_pacing_sleep_us=%llu frame_pacing_sleep_count=%lu audio_wait_us=%llu audio_wait_count=%lu pad_interval_us_avg=%llu pad_interval_us_max=%llu input_events=%u view_mode=%s\n",
+  printf("[CORE1_BASE] t_us=%llu frames=%lu fps_x100=%llu frame_us_avg=%llu frame_us_max=%llu cpu_us=%llu apu_us=%llu draw_us=%llu ppu_bg_us=%llu ppu_bg_mapper_us=%llu ppu_bg_clear_us=%llu ppu_bg_setup_us=%llu ppu_bg_tile_us=%llu ppu_bg_tile_pal_us=%llu ppu_bg_tile_build_us=%llu ppu_bg_tile_render_us=%llu ppu_bg_mapperppu_us=%llu ppu_bg_tile_count=%lu ppu_bg_clip_us=%llu ppu_sprite_us=%llu mapper_hsync_us=%llu mapper_vsync_us=%llu load_frame_us=%llu tail_us=%llu lcd_wait_us=%llu lcd_flush_us=%llu lcd_queue_wait_us=%llu lcd_queue_wait_count=%lu frame_pacing_sleep_us=%llu frame_pacing_sleep_count=%lu audio_wait_us=%llu audio_wait_count=%lu pad_interval_us_avg=%llu pad_interval_us_max=%llu input_events=%u view_mode=%s\n",
          static_cast<unsigned long long>(now_us),
          static_cast<unsigned long>(g_perf_frames),
          static_cast<unsigned long long>(fps_x100),
@@ -370,6 +380,11 @@ inline void perf_log_if_due(uint64_t now_us)
          static_cast<unsigned long long>(g_perf_ppu_bg_clear_us),
          static_cast<unsigned long long>(g_perf_ppu_bg_setup_us),
          static_cast<unsigned long long>(g_perf_ppu_bg_tile_us),
+         static_cast<unsigned long long>(g_perf_ppu_bg_tile_pal_us),
+         static_cast<unsigned long long>(g_perf_ppu_bg_tile_build_us),
+         static_cast<unsigned long long>(g_perf_ppu_bg_tile_render_us),
+         static_cast<unsigned long long>(g_perf_ppu_bg_mapperppu_us),
+         static_cast<unsigned long>(g_perf_ppu_bg_tile_count),
          static_cast<unsigned long long>(g_perf_ppu_bg_clip_us),
          static_cast<unsigned long long>(g_perf_ppu_sprite_us),
          static_cast<unsigned long long>(g_perf_mapper_hsync_us),
@@ -1572,12 +1587,53 @@ void __not_in_flash_func(InfoNES_DrawLine)()
                           int clipLeft,
                           int clipRight)
     {
-      WORD *pal = resolveBgPal(attrBase, tileX);
-      BgTileDescriptor desc =
-          buildBgTile(nameTablePtr, pal, dst, dstOpaque, clipLeft, clipRight);
-      renderBgTile(desc);
+      WORD *pal;
+      if constexpr (kPerfLogToSerial)
+      {
+        const uint64_t tile_pal_start_us = time_us_64();
+        pal = resolveBgPal(attrBase, tileX);
+        g_perf_ppu_bg_tile_pal_us += time_us_64() - tile_pal_start_us;
+      }
+      else
+      {
+        pal = resolveBgPal(attrBase, tileX);
+      }
+
+      BgTileDescriptor desc;
+      if constexpr (kPerfLogToSerial)
+      {
+        const uint64_t tile_build_start_us = time_us_64();
+        desc = buildBgTile(nameTablePtr, pal, dst, dstOpaque, clipLeft, clipRight);
+        g_perf_ppu_bg_tile_build_us += time_us_64() - tile_build_start_us;
+      }
+      else
+      {
+        desc = buildBgTile(nameTablePtr, pal, dst, dstOpaque, clipLeft, clipRight);
+      }
+
+      if constexpr (kPerfLogToSerial)
+      {
+        const uint64_t tile_render_start_us = time_us_64();
+        renderBgTile(desc);
+        g_perf_ppu_bg_tile_render_us += time_us_64() - tile_render_start_us;
+      }
+      else
+      {
+        renderBgTile(desc);
+      }
+
       pbyChrData = const_cast<BYTE *>(desc.pattern_row);
-      MapperPPU(PATTBL(pbyChrData));
+      if constexpr (kPerfLogToSerial)
+      {
+        const uint64_t mapper_ppu_start_us = time_us_64();
+        MapperPPU(PATTBL(pbyChrData));
+        g_perf_ppu_bg_mapperppu_us += time_us_64() - mapper_ppu_start_us;
+        ++g_perf_ppu_bg_tile_count;
+      }
+      else
+      {
+        MapperPPU(PATTBL(pbyChrData));
+      }
     };
 
     /*-------------------------------------------------------------------*/

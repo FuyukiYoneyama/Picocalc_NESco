@@ -10,6 +10,26 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.5 PPU background tile 内訳計測ブランチ (2026-04-29)
+
+- `feature/hot-path-metrics` の `[CORE1_BASE]` に、`ppu_bg_tile_us` の内訳メトリクスを追加した
+- 目的は、背景 tile hot path のうち、palette 解決、tile descriptor 構築、tile render、`MapperPPU()` のどこが主な時間を使っているかを実機ログで切り分けること
+- 追加した項目:
+  - `ppu_bg_tile_pal_us`
+  - `ppu_bg_tile_build_us`
+  - `ppu_bg_tile_render_us`
+  - `ppu_bg_mapperppu_us`
+  - `ppu_bg_tile_count`
+- この計測は `emitBgTile()` 内で tile ごとに `time_us_64()` を呼ぶため、通常実行より計測 overhead が増える
+- system version を `1.1.5` に更新した
+- build 確認:
+  - `NESCO_CORE1_BASELINE_LOG=ON`
+  - banner: `PicoCalc NESco Ver. 1.1.5 Build Apr 29 2026 08:25:16`
+  - UF2 SHA-256: `2ad7c44fe35d5a76ccf710861c893b197706268fc7ede1b10c42caeaeb445f3a`
+  - ELF SHA-256: `dfb1fa1354fd390a7731a23e0d58ea532ba8a65984850792865cbc7c2a4ee880`
+  - `.bss = 97308`
+  - `1.1.4` から `.bss` は 36 bytes 増加した
+
 ## 1.1.4 PPU background breakdown 計測ブランチ (2026-04-29)
 
 - `feature/hot-path-metrics` の `[CORE1_BASE]` に、`ppu_bg_us` の内訳メトリクスを追加した
