@@ -34,6 +34,7 @@
 #ifdef PICO_BUILD
 #  include "pico/stdlib.h"
 #  include "hardware/sync.h"
+#  include "pico/multicore.h"
 #endif
 
 #if !defined(NESCO_RUNTIME_LOGS)
@@ -789,6 +790,9 @@ static int rom_verify_flash_against_file(FIL *file, FSIZE_t file_size) {
     return 0;
 }
 
+static void rom_flash_range_erase_locked(uint32_t flash_offs, size_t count);
+static void rom_flash_range_program_locked(uint32_t flash_offs, const BYTE *data, size_t count);
+
 static int rom_write_flash_metadata(const char *source_path, FSIZE_t file_size, int mapper_no) {
     xip_rom_metadata_t meta;
     BYTE page_buf[FLASH_PAGE_SIZE];
@@ -816,11 +820,7 @@ static int rom_write_flash_metadata(const char *source_path, FSIZE_t file_size, 
             memcpy(page_buf, meta_bytes + offset, chunk);
         }
 
-        {
-            uint32_t irq = save_and_disable_interrupts();
-            flash_range_program(XIP_ROM_OFFSET + written, page_buf, FLASH_PAGE_SIZE);
-            restore_interrupts(irq);
-        }
+        rom_flash_range_program_locked(XIP_ROM_OFFSET + written, page_buf, FLASH_PAGE_SIZE);
 
         written += FLASH_PAGE_SIZE;
     }
@@ -842,6 +842,22 @@ static int rom_write_flash_metadata(const char *source_path, FSIZE_t file_size, 
     return 0;
 }
 
+static void rom_flash_range_erase_locked(uint32_t flash_offs, size_t count) {
+    multicore_lockout_start_blocking();
+    uint32_t irq = save_and_disable_interrupts();
+    flash_range_erase(flash_offs, count);
+    restore_interrupts(irq);
+    multicore_lockout_end_blocking();
+}
+
+static void rom_flash_range_program_locked(uint32_t flash_offs, const BYTE *data, size_t count) {
+    multicore_lockout_start_blocking();
+    uint32_t irq = save_and_disable_interrupts();
+    flash_range_program(flash_offs, data, count);
+    restore_interrupts(irq);
+    multicore_lockout_end_blocking();
+}
+
 const char *rom_image_get_flash_source_path(void) {
 #ifdef PICO_BUILD
     if (!rom_flash_metadata_is_valid()) {
@@ -852,6 +868,31 @@ const char *rom_image_get_flash_source_path(void) {
     }
 #endif
     return NULL;
+}
+
+static bool rom_flash_matches_source_path(const char *source_path, FSIZE_t file_size, int mapper_no) {
+#ifdef PICO_BUILD
+    if (!source_path || !rom_flash_metadata_is_valid() ||
+        memcmp(s_flash_rom, NES_MAGIC, sizeof(NES_MAGIC)) != 0) {
+        return false;
+    }
+    if (s_flash_meta->rom_size != (uint32_t)file_size) {
+        return false;
+    }
+    if (mapper_no >= 0 && s_flash_meta->mapper_no != (uint32_t)mapper_no) {
+        return false;
+    }
+    if (s_flash_meta->version >= 2u &&
+        s_flash_meta->source_path[0] != '\0' &&
+        strcmp(s_flash_meta->source_path, source_path) == 0) {
+        return true;
+    }
+#else
+    (void)source_path;
+    (void)file_size;
+    (void)mapper_no;
+#endif
+    return false;
 }
 
 bool rom_image_ensure_sd_mount(void) {
@@ -880,11 +921,7 @@ static int rom_stage_file_to_flash(FIL *file, FSIZE_t file_size, const char *sou
            (unsigned long)erase_count);
     fflush(stdout);
 
-    {
-        uint32_t irq = save_and_disable_interrupts();
-        flash_range_erase(erase_offs, erase_count);
-        restore_interrupts(irq);
-    }
+    rom_flash_range_erase_locked(erase_offs, erase_count);
 
     if (f_lseek(file, 0) != FR_OK) {
         printf("[ROM] flash stage seek failed\r\n");
@@ -903,11 +940,7 @@ static int rom_stage_file_to_flash(FIL *file, FSIZE_t file_size, const char *sou
             return -1;
         }
 
-        {
-            uint32_t irq = save_and_disable_interrupts();
-            flash_range_program(flash_offs + written, page_buf, FLASH_PAGE_SIZE);
-            restore_interrupts(irq);
-        }
+        rom_flash_range_program_locked(flash_offs + written, page_buf, FLASH_PAGE_SIZE);
 
         written += FLASH_PAGE_SIZE;
     }
@@ -982,6 +1015,13 @@ int InfoNES_ReadRom(const char *path) {
         fflush(stdout);
         if (file_size >= ROM_RAM_THRESHOLD_BYTES) {
 #ifdef PICO_BUILD
+            if (rom_flash_matches_source_path(path, file_size, mapper_no)) {
+                f_close(&file);
+                rom_set_flash_entry_from_path(path);
+                src = s_flash_rom;
+                printf("[ROM] flash-backed load reused existing staged ROM\r\n");
+                fflush(stdout);
+            } else
             if (rom_stage_file_to_flash(&file, file_size, path, mapper_no) != 0) {
                 f_close(&file);
                 printf("[ROM] flash stage failed\r\n");
