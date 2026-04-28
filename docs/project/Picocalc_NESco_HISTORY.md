@@ -10,6 +10,21 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.3 ROM start log 計測ブランチ (2026-04-29)
+
+- `feature/hot-path-metrics` の計測ログに、game 開始時 1 回だけ `[ROM_START]` を出す処理を追加した
+- 目的は、複数 ROM を連続して実機確認した UART log でも、後から `[CORE1_BASE]` の計測区間を ROM 名と紐づけられるようにすること
+- `InfoNES_Load()` 成功後、`DISPLAY_MODE_NES_VIEW` へ切り替えた直後に次の形式で出力する
+  - `[ROM_START] name=... path=... mapper=... prg16=... chr8=... battery=... trainer=...`
+- `InfoNES_Load()` 失敗時は `[ROM_START]` を出さず、core1 service も有効化しない
+- system version を `1.1.3` に更新した
+- build 確認:
+  - `NESCO_CORE1_BASELINE_LOG=ON`
+  - banner: `PicoCalc NESco Ver. 1.1.3 Build Apr 29 2026 08:02:42`
+  - UF2 SHA-256: `ce4e96ed88d7ae28887fe5ebe9c3d852ddcca903d5c078b0a36f635575591474`
+  - ELF SHA-256: `31e9696c1505b7adf8f7fbfef0e64aa8692d29199e155f63d64a544150d322ef`
+  - `.bss = 97232`
+
 ## 1.1.2 hot path metrics 計測ブランチ (2026-04-29)
 
 - `feature/hot-path-metrics` を作成し、frame rate 改善調査用の hot path メトリクスを追加した

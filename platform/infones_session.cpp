@@ -18,6 +18,43 @@ enum {
     DISPLAY_MODE_NES_VIEW = 1,
 };
 
+static const char *rom_log_basename(const char *path)
+{
+    const char *base = path;
+
+    if (!path)
+    {
+        return "";
+    }
+
+    for (const char *p = path; *p != '\0'; ++p)
+    {
+        if (*p == '/' || *p == '\\')
+        {
+            base = p + 1;
+        }
+    }
+
+    return base;
+}
+
+static void log_rom_start_once(const char *path)
+{
+#if defined(NESCO_CORE1_BASELINE_LOG)
+    std::printf("[ROM_START] name=%s path=%s mapper=%u prg16=%u chr8=%u battery=%u trainer=%u\n",
+                rom_log_basename(path),
+                path ? path : "",
+                static_cast<unsigned>(MapperNo),
+                static_cast<unsigned>(NesHeader.byRomSize),
+                static_cast<unsigned>(NesHeader.byVRomSize),
+                (NesHeader.byInfo1 & 0x02u) ? 1u : 0u,
+                (NesHeader.byInfo1 & 0x04u) ? 1u : 0u);
+    std::fflush(stdout);
+#else
+    (void)path;
+#endif
+}
+
 extern "C" void run_infones_session(void)
 {
     InfoNES_Main();
@@ -44,6 +81,7 @@ int InfoNES_Menu()
     }
 
     display_set_mode(DISPLAY_MODE_NES_VIEW);
+    log_rom_start_once(selected_path);
     core1_set_services(CORE1_SERVICE_KEYBOARD | CORE1_SERVICE_LCD);
 
     return load_result;
