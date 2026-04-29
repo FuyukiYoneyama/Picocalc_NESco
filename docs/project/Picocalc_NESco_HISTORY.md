@@ -10,6 +10,115 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.12 sprite composite range 最適化 (2026-04-29)
+
+- `feature/hot-path-metrics`
+  で、sprite composite
+  の走査範囲を scanline 上の sprite object 範囲へ絞る実験を行った
+- 根拠:
+  - `1.1.11`
+    の実機ログ
+    `/home/fuyuki/pico_dvl/codex/log/pico20260429_101240.log`
+    では、`ppu_sprite_comp_us`
+    が sprite 時間の約 52〜54%
+    を占めていた
+- 変更内容:
+  - `compositeSpriteRange()`
+    を追加した
+  - sprite scan 中に
+    `sprite_min_x`
+    と
+    `sprite_max_x_exclusive`
+    を記録した
+  - composite 前に range
+    を画面内へ clamp
+    し、4 pixel
+    境界へ広げた
+  - range
+    が空の場合は
+    `compositeSpriteRange()`
+    呼び出しだけを skip
+    する
+  - sprite clipping
+    と
+    `PPU_R2_MAX_SP`
+    判定は従来どおり維持した
+  - system version
+    を
+    `1.1.12`
+    に更新した
+- build 確認:
+  - banner:
+    `PicoCalc NESco Ver. 1.1.12 Build Apr 29 2026 10:29:01`
+  - UF2 SHA-256:
+    `fff9e1f28083d82a18c1752c3d53997ac9d81ea1ab4dae00bb7c9936e700df44`
+  - ELF SHA-256:
+    `851b54acc31afc7d2654683fef9f81afb8cd037dba7c254b869b419d505b04ff`
+  - size:
+    `text 285552 / data 0 / bss 97360`
+- 実機確認:
+  - log:
+    `/home/fuyuki/pico_dvl/codex/log/pico20260429_103111.log`
+  - user
+    報告で、画面の乱れがないことを確認した
+  - log
+    で
+    `LodeRunner.nes`
+    `Xevious.nes`
+    `Project_DART_V1.0.nes`
+    の
+    `[ROM_START]`
+    と
+    `[CORE1_BASE]`
+    を確認した
+- `1.1.11`
+  との平均値比較:
+  - `LodeRunner.nes`
+    - `fps_x100`:
+      `3885.2 -> 4183.9`
+      (+7.7%)
+    - `frame_us_avg`:
+      `25879.6 -> 23935.9`
+      (-7.5%)
+    - `ppu_sprite_us`:
+      `90353.8 -> 50935.9`
+      (-43.6%)
+    - `ppu_sprite_comp_us`:
+      `47564.9 -> 3117.7`
+      (-93.4%)
+  - `Xevious.nes`
+    - `fps_x100`:
+      `4477.4 -> 4819.0`
+      (+7.6%)
+    - `frame_us_avg`:
+      `22329.1 -> 20763.9`
+      (-7.0%)
+    - `ppu_sprite_us`:
+      `139677.6 -> 80324.6`
+      (-42.5%)
+    - `ppu_sprite_comp_us`:
+      `74427.9 -> 6174.7`
+      (-91.7%)
+  - `Project_DART_V1.0.nes`
+    - `fps_x100`:
+      `3463.9 -> 3784.4`
+      (+9.3%)
+    - `frame_us_avg`:
+      `28949.3 -> 26459.3`
+      (-8.6%)
+    - `ppu_sprite_us`:
+      `102941.3 -> 59420.2`
+      (-42.3%)
+    - `ppu_sprite_comp_us`:
+      `55568.1 -> 4461.0`
+      (-92.0%)
+- 判断:
+  - 3 ROM
+    すべてで画面乱れが報告されず、主要計測値も改善したため採用する
+  - 次の高速化では、`ppu_sprite_scan_us`
+    または background tile
+    側を改めて計測結果から選ぶ
+
 ## 1.1.11 sprite 内訳計測ログ追加 (2026-04-29)
 
 - `feature/hot-path-metrics` で、次の高速化候補を判断するため、`[CORE1_BASE]` の sprite 側内訳を追加した

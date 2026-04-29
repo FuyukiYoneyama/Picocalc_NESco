@@ -1452,6 +1452,42 @@ namespace
 #endif
     } while (spr < sprEnd);
   }
+
+  void __not_in_flash_func(compositeSpriteRange)(const uint16_t *pal,
+                                                 const uint8_t *spr,
+                                                 const uint8_t *bgOpaque,
+                                                 uint16_t *buf,
+                                                 int begin,
+                                                 int end)
+  {
+    if (end <= begin)
+      return;
+
+    spr += begin;
+    bgOpaque += begin;
+    buf += begin;
+
+    auto sprEnd = spr + (end - begin);
+    do
+    {
+      auto proc = [=](int i) __attribute__((always_inline))
+      {
+        int v = spr[i];
+        if (v && ((v >> 7) || !bgOpaque[i]))
+        {
+          buf[i] = pal[v & 0xf];
+        }
+      };
+
+      proc(0);
+      proc(1);
+      proc(2);
+      proc(3);
+      buf += 4;
+      spr += 4;
+      bgOpaque += 4;
+    } while (spr < sprEnd);
+  }
 }
 
 /*===================================================================*/
@@ -1818,6 +1854,8 @@ void __not_in_flash_func(InfoNES_DrawLine)()
 
     // Render a sprite to the sprite buffer
     nSprCnt = 0;
+    int sprite_min_x = NES_DISP_WIDTH;
+    int sprite_max_x_exclusive = 0;
     for (pSPRRAM = SPRRAM + (63 << 2); pSPRRAM >= SPRRAM; pSPRRAM -= 4)
     {
       nY = pSPRRAM[SPR_Y] + 1;
@@ -1931,6 +1969,12 @@ void __not_in_flash_func(InfoNES_DrawLine)()
       nAttr ^= SPR_ATTR_PRI;
       bySprCol = (nAttr & (SPR_ATTR_COLOR | SPR_ATTR_PRI)) << 2;
       nX = pSPRRAM[SPR_X];
+      const int sprite_left = nX;
+      const int sprite_right = nX + 8;
+      if (sprite_left < sprite_min_x)
+        sprite_min_x = sprite_left;
+      if (sprite_right > sprite_max_x_exclusive)
+        sprite_max_x_exclusive = sprite_right;
       const auto dst = pSprBuf + nX;
 
       if (nAttr & SPR_ATTR_H_FLIP)
@@ -2018,7 +2062,22 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     //   pPoint -= (NES_DISP_WIDTH - PPU_Scr_H_Bit);
 
 #if 1
-    compositeSprite(PalTable + 0x10, pSprBuf, BackgroundOpaqueLine, pPoint);
+    if (sprite_min_x < 0)
+      sprite_min_x = 0;
+    if (sprite_max_x_exclusive > NES_DISP_WIDTH)
+      sprite_max_x_exclusive = NES_DISP_WIDTH;
+
+    int comp_begin = sprite_min_x & ~3;
+    int comp_end = (sprite_max_x_exclusive + 3) & ~3;
+    if (comp_begin < 0)
+      comp_begin = 0;
+    if (comp_end > NES_DISP_WIDTH)
+      comp_end = NES_DISP_WIDTH;
+
+    if (comp_begin < comp_end)
+    {
+      compositeSpriteRange(PalTable + 0x10, pSprBuf, BackgroundOpaqueLine, pPoint, comp_begin, comp_end);
+    }
 #else
     {
       const auto *pal = &PalTable[0x10];
