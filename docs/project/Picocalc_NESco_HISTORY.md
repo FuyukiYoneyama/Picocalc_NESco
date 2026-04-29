@@ -10,6 +10,30 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.11 sprite 内訳計測ログ追加 (2026-04-29)
+
+- `feature/hot-path-metrics` で、次の高速化候補を判断するため、`[CORE1_BASE]` の sprite 側内訳を追加した
+- 目的は、`ppu_sprite_us` が増える場面で、sprite 処理のどの大きなブロックが重いかを確認すること
+- 変更内容:
+  - `[CORE1_BASE]` に次の fields を追加した
+    - `ppu_sprite_mapper_us`
+    - `ppu_sprite_clear_us`
+    - `ppu_sprite_scan_us`
+    - `ppu_sprite_comp_us`
+    - `ppu_sprite_clip_us`
+    - `ppu_sprite_visible_count`
+  - 計測は sprite の pixel hot loop 内ではなく、`MapperRenderScreen(0)`、sprite buffer clear、sprite scan / pattern expansion、composite、clip のブロック境界だけに入れた
+  - system version を `1.1.11` に更新した
+- build 確認:
+  - banner: `PicoCalc NESco Ver. 1.1.11 Build Apr 29 2026 10:10:50`
+  - UF2 SHA-256: `9eb2cab1814d00a766b91c7ca1772d2b13d348c026fb01feda808c7561b3b567`
+  - ELF SHA-256: `72886f3fd2a5dcf1b0ff27253844b2b333fadfd765599e2e0b2f9ed0a2a0a043`
+  - size: `text 285408 / data 0 / bss 97360`
+  - `1.1.10` から `.bss` は 44 bytes 増加した
+- 実機確認:
+  - この時点では未実施
+  - 確認対象は `LodeRunner`、`Xevious`、`Project_DART_V1.0`
+
 ## 1.1.10 UART 921600 bps 計測ログ確認 (2026-04-29)
 
 - `feature/hot-path-metrics` で、UART log の出力負荷を下げられるか確認するため、UART baud rate を `921600` bps に上げた
