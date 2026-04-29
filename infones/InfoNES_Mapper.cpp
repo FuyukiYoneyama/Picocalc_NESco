@@ -167,6 +167,7 @@ struct MapperTable_tag MapperTable[] =
         {135, Map135_Init},
         {140, Map140_Init},
         {151, Map151_Init},
+        {152, Map152_Init},
         {160, Map160_Init},
         {180, Map180_Init},
         {181, Map181_Init},
@@ -313,6 +314,7 @@ struct MapperTable_tag MapperTable[] =
 #include "mapper/InfoNES_Mapper_135.cpp"
 #include "mapper/InfoNES_Mapper_140.cpp"
 #include "mapper/InfoNES_Mapper_151.cpp"
+#include "mapper/InfoNES_Mapper_152.cpp"
 #include "mapper/InfoNES_Mapper_160.cpp"
 #include "mapper/InfoNES_Mapper_180.cpp"
 #include "mapper/InfoNES_Mapper_181.cpp"

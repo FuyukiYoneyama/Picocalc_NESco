@@ -10,6 +10,63 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.22 Mapper152 初回実装 (2026-04-29)
+
+- `mapper/mapper152-bandai74161`
+  で、未実装だった iNES Mapper 152 を追加した
+- 目的:
+  - Mapper152 ROM が `Mapper #152 is unsupported.`
+    で止まらないようにする
+  - 初回は `Map70`
+    に近い Bandai 74161/7432 系 mapper として小さく実装する
+- 実装内容:
+  - `infones/mapper/InfoNES_Mapper_152.cpp`
+    を追加した
+  - `Map152_Init()`
+    / `Map152_Write()`
+    を追加した
+  - `InfoNES_Mapper.h`
+    に Mapper152 宣言を追加した
+  - `InfoNES_Mapper.cpp`
+    の mapper include list に `InfoNES_Mapper_152.cpp`
+    を追加した
+  - `MapperTable`
+    に `{152, Map152_Init}`
+    を登録した
+  - PRG は 16KB switch at `$8000`、last 16KB fixed at `$C000`
+    として扱う
+  - CHR は 8KB switch at `$0000`
+    として扱う
+  - mirroring は bit7 により
+    `0 -> InfoNES_Mirroring(3) / one-screen 0x2000`
+    `1 -> InfoNES_Mirroring(2) / one-screen 0x2400`
+    とした
+- 初回実装の制約:
+  - Mapper152 の bus conflict は再現していない
+  - Mapper152 ROM 実機確認は未実施
+  - 対象 ROM 入手後に起動 / 表示 / 入力 / 音 / screenshot / ESC 復帰を確認する
+- build:
+  - system version
+    `1.1.22`
+  - banner:
+    `PicoCalc NESco Ver. 1.1.22 Build Apr 29 2026 20:07:06`
+  - size:
+    `text=281144 data=0 bss=97048 dec=378192 hex=5c550`
+  - UF2 SHA-256:
+    `9c88c4f1d3400312518394128a6de94d07cd7acb1b1fcd984c018ddd61716285`
+  - ELF SHA-256:
+    `12637f0bfc4697f51180904a97a2a04a8b1be48c7c54e618aa67f341fb82286f`
+- 確認:
+  - `cmake --build build -j4`
+    成功
+  - `strings build/Picocalc_NESco.elf | rg "PicoCalc NESco Ver"`
+    で `1.1.22`
+    banner を確認した
+  - `rg "\{152, Map152_Init\}" infones/InfoNES_Mapper.cpp`
+    で MapperTable 登録を確認した
+  - `rg "InfoNES_Mapper_152.cpp" infones/InfoNES_Mapper.cpp`
+    で mapper source include を確認した
+
 ## 1.1.21 BG full tile path direct args 安定化 (2026-04-29)
 
 - `feature/hot-path-metrics`

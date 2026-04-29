@@ -15,6 +15,9 @@
   - ROM 起動と表示は実機確認済み
   - 未確認なのは PRG flash overlay の書き込み / 復元
 - `[pending]` Mapper87 / Choplifter 系の確認を、別の Mapper87 ROM 入手後に再開する
+- `[pending]` Mapper152 ROM 実機確認
+  - Mapper152 初回実装は `1.1.22` で build と mapper table 登録まで確認済み
+  - 対象 ROM を入手したら、起動 / 表示 / 入力 / 音 / screenshot / ESC 復帰を確認する
 
 ## 保留中の改善候補
 

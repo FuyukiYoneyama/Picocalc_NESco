@@ -30,7 +30,10 @@
 
 ## 現在必要な計画
 
-- 現時点で、実装中の正本計画はなし。
+- Mapper152 implementation
+  - 計画: `docs/design/MAPPER152_IMPLEMENTATION_PLAN_20260429.md`
+  - Mapper70 近似の Bandai 74161/7432 系 mapper として、小さく追加する。
+  - 初回は bus conflict を再現せず、実機 ROM がない場合は未確認事項として TASKS に残す。
 
 ## 完了済み計画 / 結果
 
