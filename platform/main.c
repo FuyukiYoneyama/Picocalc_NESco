@@ -30,7 +30,10 @@
 #ifdef PICO_BUILD
 #  include "pico/stdlib.h"
 #  include "hardware/clocks.h"
+#  include "hardware/uart.h"
 #endif
+
+#define NESCO_UART_BAUD_RATE 921600u
 
 #ifdef PICO_BUILD
 static void boot_log_stage(const char *stage) {
@@ -58,7 +61,11 @@ int main(void) {
     /* Set system clock to 250 MHz (per specs/90_integrated_spec.md) */
     set_sys_clock_khz(250000, true);
     stdio_init_all();
+#ifdef uart_default
+    uart_set_baudrate(uart_default, NESCO_UART_BAUD_RATE);
+#endif
     printf("%s\r\n", PICOCALC_NESCO_BANNER_FULL);
+    printf("[BOOT] uart baud=%lu\r\n", (unsigned long)NESCO_UART_BAUD_RATE);
     __malloc_trim_threshold = 0x200u;
 #if defined(NESCO_RUNTIME_LOGS)
     extern size_t __malloc_top_pad;

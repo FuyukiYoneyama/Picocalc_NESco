@@ -10,6 +10,31 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.10 UART 921600 bps 計測ログ確認 (2026-04-29)
+
+- `feature/hot-path-metrics` で、UART log の出力負荷を下げられるか確認するため、UART baud rate を `921600` bps に上げた
+- 変更内容:
+  - `stdio_init_all()` 後に `uart_set_baudrate(uart_default, 921600)` を呼ぶようにした
+  - 起動時に `[BOOT] uart baud=921600` を出力するようにした
+  - system version を `1.1.10` に更新した
+- build 確認:
+  - banner: `PicoCalc NESco Ver. 1.1.10 Build Apr 29 2026 10:02:57`
+  - UF2 SHA-256: `adce0f48d03e18ca4987f2eb5264da0e554b16458093746bfe2b6f7f6809827d`
+  - ELF SHA-256: `e8c266c2229ee895218728fdee71ced44554154759deac51bf508cbf7054c195`
+  - size: `text 284744 / data 0 / bss 97316`
+- 実機確認:
+  - log: `/home/fuyuki/pico_dvl/codex/log/pico20260429_100134.log`
+  - log で `PicoCalc NESco Ver. 1.1.10 Build Apr 29 2026 10:02:57` と `[BOOT] uart baud=921600` を確認した
+  - `[ROM_START]` で `LodeRunner.nes`、mapper 0、SD path `sd:/nes/LodeRunner.nes` を確認した
+  - `[CORE1_BASE]` は 921600 bps で継続して取得できた
+  - 検索範囲では `idle ack timeout`、`ERROR`、`failed`、`panic` は確認されなかった
+- user 報告:
+  - `LodeRunner` を play し、つっかかりがやや解消され、play に違和感が少なくなった
+  - UART 高速化は良い方向に影響しているように見える
+- 判断:
+  - 921600 bps の UART log は今回の実機確認では成立した
+  - 計測 / debug 用の現在設定として採用する
+
 ## 1.1.9 background opaque LUT 実験は不採用 (2026-04-29)
 
 - `feature/hot-path-metrics` で、background full tile path の `dst_opaque` 生成だけを LUT 化する実験を行った
