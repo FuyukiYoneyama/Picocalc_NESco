@@ -1328,11 +1328,6 @@ namespace
                                                            BYTE opaque_hi,
                                                            BYTE opaque_lo) __attribute__((always_inline));
 
-  static inline void __not_in_flash_func(renderBgTileFullDirect)(const BYTE *pattern_row,
-                                                                 const WORD *pal,
-                                                                 WORD *dst,
-                                                                 BYTE *dst_opaque) __attribute__((always_inline));
-
   static inline void __not_in_flash_func(renderBgTileFull)(const BgTileDescriptor &desc,
                                                            BYTE packed_hi,
                                                            BYTE packed_lo,
@@ -1342,37 +1337,6 @@ namespace
     const WORD *pal = desc.pal;
     WORD *dst = desc.dst;
     BYTE *dst_opaque = desc.dst_opaque;
-
-    dst[0] = pal[(packed_hi >> 6) & 0x03u];
-    dst[1] = pal[(packed_hi >> 4) & 0x03u];
-    dst[2] = pal[(packed_hi >> 2) & 0x03u];
-    dst[3] = pal[packed_hi & 0x03u];
-    dst[4] = pal[(packed_lo >> 6) & 0x03u];
-    dst[5] = pal[(packed_lo >> 4) & 0x03u];
-    dst[6] = pal[(packed_lo >> 2) & 0x03u];
-    dst[7] = pal[packed_lo & 0x03u];
-
-    dst_opaque[0] = (BYTE)((opaque_hi >> 3) & 0x01u);
-    dst_opaque[1] = (BYTE)((opaque_hi >> 2) & 0x01u);
-    dst_opaque[2] = (BYTE)((opaque_hi >> 1) & 0x01u);
-    dst_opaque[3] = (BYTE)(opaque_hi & 0x01u);
-    dst_opaque[4] = (BYTE)((opaque_lo >> 3) & 0x01u);
-    dst_opaque[5] = (BYTE)((opaque_lo >> 2) & 0x01u);
-    dst_opaque[6] = (BYTE)((opaque_lo >> 1) & 0x01u);
-    dst_opaque[7] = (BYTE)(opaque_lo & 0x01u);
-  }
-
-  static inline void __not_in_flash_func(renderBgTileFullDirect)(const BYTE *pattern_row,
-                                                                 const WORD *pal,
-                                                                 WORD *dst,
-                                                                 BYTE *dst_opaque)
-  {
-    const BYTE pl0 = pattern_row[0];
-    const BYTE pl1 = pattern_row[8];
-    const BYTE packed_hi = g_bg_tile_pair_idx4[((pl0 & 0xF0u)) | (pl1 >> 4)];
-    const BYTE opaque_hi = g_bg_tile_pair_opaque4[((pl0 & 0xF0u)) | (pl1 >> 4)];
-    const BYTE packed_lo = g_bg_tile_pair_idx4[((pl0 & 0x0Fu) << 4) | (pl1 & 0x0Fu)];
-    const BYTE opaque_lo = g_bg_tile_pair_opaque4[((pl0 & 0x0Fu) << 4) | (pl1 & 0x0Fu)];
 
     dst[0] = pal[(packed_hi >> 6) & 0x03u];
     dst[1] = pal[(packed_hi >> 4) & 0x03u];
@@ -1642,7 +1606,6 @@ void __not_in_flash_func(InfoNES_DrawLine)()
                           int clipLeft,
                           int clipRight)
     {
-      const bool fullTile = clipLeft == 0 && clipRight == 8;
       WORD *pal;
       if constexpr (kPerfLogToSerial)
       {
@@ -1653,52 +1616,6 @@ void __not_in_flash_func(InfoNES_DrawLine)()
       else
       {
         pal = resolveBgPal(attrBase, tileX);
-      }
-
-      if (fullTile)
-      {
-        const BYTE *patternRow;
-        if constexpr (kPerfLogToSerial)
-        {
-          const uint64_t tile_build_start_us = time_us_64();
-          const int ch = *nameTablePtr;
-          const int bank = (ch >> 6) + bankOfsBG;
-          const int addrOfs = ((ch & 63) << 4) + yOfsModBG;
-          patternRow = PPUBANK[bank] + addrOfs;
-          g_perf_ppu_bg_tile_build_us += time_us_64() - tile_build_start_us;
-        }
-        else
-        {
-          const int ch = *nameTablePtr;
-          const int bank = (ch >> 6) + bankOfsBG;
-          const int addrOfs = ((ch & 63) << 4) + yOfsModBG;
-          patternRow = PPUBANK[bank] + addrOfs;
-        }
-
-        if constexpr (kPerfLogToSerial)
-        {
-          const uint64_t tile_render_start_us = time_us_64();
-          renderBgTileFullDirect(patternRow, pal, dst, dstOpaque);
-          g_perf_ppu_bg_tile_render_us += time_us_64() - tile_render_start_us;
-        }
-        else
-        {
-          renderBgTileFullDirect(patternRow, pal, dst, dstOpaque);
-        }
-
-        pbyChrData = const_cast<BYTE *>(patternRow);
-        if constexpr (kPerfLogToSerial)
-        {
-          const uint64_t mapper_ppu_start_us = time_us_64();
-          MapperPPU(PATTBL(pbyChrData));
-          g_perf_ppu_bg_mapperppu_us += time_us_64() - mapper_ppu_start_us;
-          ++g_perf_ppu_bg_tile_count;
-        }
-        else
-        {
-          MapperPPU(PATTBL(pbyChrData));
-        }
-        return;
       }
 
       BgTileDescriptor desc;
