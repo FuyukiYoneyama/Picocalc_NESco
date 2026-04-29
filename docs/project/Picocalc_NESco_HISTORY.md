@@ -10,6 +10,101 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.13 sprite scan 内訳計測版 (2026-04-29)
+
+- `feature/hot-path-metrics`
+  で、`1.1.12`
+  後に残った
+  `ppu_sprite_scan_us`
+  の中身を粗く見るための計測版を作成した
+- 目的:
+  - 次の最適化対象が visible sprite
+    の setup / fetch / write
+    なのか、それ以外の OAM scan
+    固定費なのかを切り分ける
+- 変更内容:
+  - `[CORE1_BASE]`
+    に次の fields
+    を追加した
+    - `ppu_sprite_scan_oam_us`
+    - `ppu_sprite_scan_fetch_us`
+    - `ppu_sprite_scan_write_us`
+  - `ppu_sprite_scan_oam_us`
+    は 64 件全体の OAM scan
+    ではなく、visible sprite
+    の setup
+    時間として扱う
+  - non-visible
+    判定と loop 制御 overhead
+    は、
+    `ppu_sprite_scan_us - (oam + fetch + write)`
+    の差分として扱う
+  - system version
+    を
+    `1.1.13`
+    に更新した
+- build 確認:
+  - banner:
+    `PicoCalc NESco Ver. 1.1.13 Build Apr 29 2026 10:44:07`
+  - UF2 SHA-256:
+    `dd06e79e1be8f6abffa5ad4ee3d9ee8d44c872f56ce7240955802750616902f1`
+  - ELF SHA-256:
+    `312a6b1e8a63eee5182c744893516ffdc3b910a893c8eb21ca9e216a953087b7`
+  - size:
+    `text 285560 / data 0 / bss 97384`
+- 実機確認:
+  - log:
+    `/home/fuyuki/pico_dvl/codex/log/pico20260429_104245.log`
+  - log
+    で
+    `LodeRunner.nes`
+    `Xevious.nes`
+    `Project_DART_V1.0.nes`
+    の
+    `[ROM_START]`
+    と
+    `[CORE1_BASE]`
+    を確認した
+  - 追加 fields
+    が出力されることを確認した
+- 平均値:
+  - `LodeRunner.nes`
+    - `ppu_sprite_scan_us`:
+      `37542.8`
+    - `oam + fetch + write`:
+      `4077.9`
+    - 差分:
+      `33464.9`
+      (約 89.1%)
+  - `Xevious.nes`
+    - `ppu_sprite_scan_us`:
+      `66503.6`
+    - `oam + fetch + write`:
+      `12438.1`
+    - 差分:
+      `54065.5`
+      (約 81.3%)
+  - `Project_DART_V1.0.nes`
+    - `ppu_sprite_scan_us`:
+      `43928.8`
+    - `oam + fetch + write`:
+      `5114.7`
+    - 差分:
+      `38814.2`
+      (約 88.4%)
+- 判断:
+  - visible sprite
+    の setup / fetch / write
+    は支配的ではなかった
+  - 次は sprite buffer write
+    最適化ではなく、64 sprite
+    の Y 判定 loop
+    と non-visible OAM scan
+    固定費を重点的に調べる
+  - `1.1.13`
+    は計測版であり、このまま release
+    用とはしない
+
 ## 1.1.12 sprite composite range 最適化 (2026-04-29)
 
 - `feature/hot-path-metrics`
