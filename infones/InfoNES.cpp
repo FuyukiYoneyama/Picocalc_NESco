@@ -209,6 +209,7 @@ constexpr bool kPerfLogToSerial =
 #else
     false;
 #endif
+constexpr bool kDetailedPerfLogToSerial = false;
 constexpr uint64_t kPerfWindowUs = 1000000;
 constexpr int kNesViewScaleStretch320x300 = 1;
 
@@ -270,62 +271,7 @@ uint32_t g_perf_audio_wait_count = 0;
 inline void perf_reset()
 {
   g_perf_window_start_us = time_us_64();
-  g_perf_last_frame_us = 0;
-  g_perf_frame_us_total = 0;
-  g_perf_frame_us_max = 0;
-  g_perf_frame_samples = 0;
-  g_perf_last_pad_us = 0;
-  g_perf_pad_interval_us_total = 0;
-  g_perf_pad_interval_us_max = 0;
-  g_perf_pad_interval_samples = 0;
   g_perf_frames = 0;
-  g_perf_scanlines = 0;
-  g_perf_cpu_us = 0;
-  g_perf_apu_us = 0;
-  g_perf_draw_us = 0;
-  g_perf_ppu_bg_us = 0;
-  g_perf_ppu_bg_mapper_us = 0;
-  g_perf_ppu_bg_clear_us = 0;
-  g_perf_ppu_bg_setup_us = 0;
-  g_perf_ppu_bg_tile_us = 0;
-  g_perf_ppu_bg_tile_pal_us = 0;
-  g_perf_ppu_bg_tile_build_us = 0;
-  g_perf_ppu_bg_tile_render_us = 0;
-  g_perf_ppu_bg_mapperppu_us = 0;
-  g_perf_ppu_bg_tile_count = 0;
-  g_perf_ppu_bg_tile_full_count = 0;
-  g_perf_ppu_bg_tile_partial_count = 0;
-  g_perf_ppu_bg_clip_us = 0;
-  g_perf_ppu_sprite_us = 0;
-  g_perf_ppu_sprite_mapper_us = 0;
-  g_perf_ppu_sprite_clear_us = 0;
-  g_perf_ppu_sprite_scan_us = 0;
-  g_perf_ppu_sprite_scan_oam_us = 0;
-  g_perf_ppu_sprite_scan_fetch_us = 0;
-  g_perf_ppu_sprite_scan_write_us = 0;
-  g_perf_ppu_sprite_scan_skip_count = 0;
-  g_perf_ppu_sprite_active_build_us = 0;
-  g_perf_ppu_sprite_active_entries = 0;
-  g_perf_ppu_sprite_active_lines = 0;
-  g_perf_ppu_sprite_active_max_per_line = 0;
-  g_perf_ppu_sprite_comp_us = 0;
-  g_perf_ppu_sprite_clip_us = 0;
-  g_perf_ppu_sprite_visible_count = 0;
-  g_perf_mapper_hsync_us = 0;
-  g_perf_mapper_vsync_us = 0;
-  g_perf_load_frame_us = 0;
-  g_perf_tail_us = 0;
-  g_perf_lcd_wait_us = 0;
-  g_perf_lcd_flush_us = 0;
-  g_perf_lcd_queue_wait_us = 0;
-  g_perf_lcd_queue_wait_count = 0;
-  g_perf_frame_pacing_sleep_us = 0;
-  g_perf_frame_pacing_sleep_count = 0;
-  g_perf_audio_wait_us = 0;
-  g_perf_audio_wait_count = 0;
-  (void)input_consume_event_count();
-  display_perf_reset();
-  audio_perf_reset();
 }
 
 inline void perf_note_frame(uint64_t now_us)
@@ -373,50 +319,19 @@ inline void perf_log_if_due(uint64_t now_us)
   if (elapsed_us < kPerfWindowUs)
     return;
 
-  display_perf_snapshot(&g_perf_lcd_wait_us,
-                        &g_perf_lcd_flush_us,
-                        &g_perf_lcd_queue_wait_us,
-                        &g_perf_lcd_queue_wait_count,
-                        &g_perf_frame_pacing_sleep_us,
-                        &g_perf_frame_pacing_sleep_count);
-  audio_perf_snapshot(&g_perf_audio_wait_us, &g_perf_audio_wait_count);
   const uint64_t fps_x100 =
       elapsed_us != 0
           ? (static_cast<uint64_t>(g_perf_frames) * 100ull * 1000000ull) / elapsed_us
           : 0;
-  const uint64_t frame_us_avg =
-      g_perf_frame_samples != 0
-          ? g_perf_frame_us_total / g_perf_frame_samples
-          : 0;
-  const unsigned input_events = input_consume_event_count();
   const char *view_mode =
       display_get_nes_view_scale() == kNesViewScaleStretch320x300
           ? "stretch"
           : "normal";
-  const uint64_t cpu_us = g_perf_cpu_us;
-  const uint64_t ppu_us = g_perf_draw_us;
-  const uint64_t apu_us = g_perf_apu_us;
-  const uint64_t accounted_us = cpu_us + ppu_us + apu_us;
-  const uint64_t other_us = elapsed_us > accounted_us ? elapsed_us - accounted_us : 0;
-  const auto pct_x10 = [elapsed_us](uint64_t value) -> uint64_t {
-    return elapsed_us != 0 ? (value * 1000ull) / elapsed_us : 0;
-  };
 
-  printf("[CORE1_SUMMARY] t_us=%llu frames=%lu fps_x100=%llu frame_us_avg=%llu frame_us_max=%llu cpu_us=%llu ppu_us=%llu apu_us=%llu other_us=%llu cpu_pct_x10=%llu ppu_pct_x10=%llu apu_pct_x10=%llu other_pct_x10=%llu input_events=%u view_mode=%s\n",
+  printf("[FPS_SUMMARY] t_us=%llu frames=%lu fps_x100=%llu view_mode=%s\n",
          static_cast<unsigned long long>(now_us),
          static_cast<unsigned long>(g_perf_frames),
          static_cast<unsigned long long>(fps_x100),
-         static_cast<unsigned long long>(frame_us_avg),
-         static_cast<unsigned long long>(g_perf_frame_us_max),
-         static_cast<unsigned long long>(cpu_us),
-         static_cast<unsigned long long>(ppu_us),
-         static_cast<unsigned long long>(apu_us),
-         static_cast<unsigned long long>(other_us),
-         static_cast<unsigned long long>(pct_x10(cpu_us)),
-         static_cast<unsigned long long>(pct_x10(ppu_us)),
-         static_cast<unsigned long long>(pct_x10(apu_us)),
-         static_cast<unsigned long long>(pct_x10(other_us)),
-         input_events,
          view_mode);
   fflush(stdout);
 
@@ -1032,7 +947,6 @@ void __not_in_flash_func(InfoNES_Cycle)()
           if (SpriteJustHit == PPU_Scanline &&
               PPU_ScanTable[PPU_Scanline] == SCAN_ON_SCREEN)
           {
-              const uint64_t cpu_start_us = time_us_64();
               // # of Steps to execute before sprite #0 hit
               int nStep = SPRRAM[SPR_X] * STEP_PER_SCANLINE / NES_DISP_WIDTH;
 
@@ -1049,14 +963,11 @@ void __not_in_flash_func(InfoNES_Cycle)()
 
               // Execute instructions
               K6502_Step(STEP_PER_SCANLINE - nStep);
-              g_perf_cpu_us += time_us_64() - cpu_start_us;
           }
           else
           {
               // Execute instructions
-              const uint64_t cpu_start_us = time_us_64();
               K6502_Step(STEP_PER_SCANLINE);
-              g_perf_cpu_us += time_us_64() - cpu_start_us;
           }
 
           // Frame IRQ in H-Sync
@@ -1071,9 +982,7 @@ void __not_in_flash_func(InfoNES_Cycle)()
           //util::WorkMeterMark(MARKER_CPU);
       }
     // A mapper function in H-Sync
-    const uint64_t mapper_hsync_start_us = time_us_64();
     MapperHSync();
-    g_perf_mapper_hsync_us += time_us_64() - mapper_hsync_start_us;
 
     // A function in H-Sync
     if (InfoNES_HSync() == -1) //quit was called
@@ -1086,7 +995,7 @@ void __not_in_flash_func(InfoNES_Cycle)()
 
 inline void measureSpriteActiveListShadow()
 {
-  if constexpr (!kPerfLogToSerial)
+  if constexpr (!kDetailedPerfLogToSerial)
   {
     return;
   }
@@ -1152,14 +1061,7 @@ int __not_in_flash_func(InfoNES_HSync)()
    *   -1 : Exit an emulation
    */
 
-  const uint64_t hsync_start_us = time_us_64();
-  uint64_t apu_us = 0;
-  uint64_t draw_us = 0;
-
-  const uint64_t apu_start_us = time_us_64();
   InfoNES_pAPUHsync(!APU_Mute);
-  apu_us = time_us_64() - apu_start_us;
-  g_perf_apu_us += apu_us;
   //util::WorkMeterMark(MARKER_SOUND);
 
   // int tmpv = (PPU_Addr >> 12) + ((PPU_Addr >> 5) << 3);
@@ -1174,7 +1076,6 @@ int __not_in_flash_func(InfoNES_HSync)()
   if (FrameCnt == 0 &&
       PPU_ScanTable[PPU_Scanline] == SCAN_ON_SCREEN)
   {
-      const uint64_t draw_start_us = time_us_64();
       InfoNES_PreDrawLine(PPU_Scanline);
     if (PPU_Scanline >= 4 && PPU_Scanline < 240 - 4)
     {
@@ -1187,8 +1088,6 @@ int __not_in_flash_func(InfoNES_HSync)()
       InfoNES_MemorySet(WorkLine, 0, NES_DISP_WIDTH << 1);
     }
      InfoNES_PostDrawLine(PPU_Scanline, false);
-     draw_us = time_us_64() - draw_start_us;
-     g_perf_draw_us += draw_us;
     //  if (PPU_Scanline >=240) {
     //   printf("hello");
     //  }
@@ -1254,7 +1153,7 @@ int __not_in_flash_func(InfoNES_HSync)()
     if (NesHeader.byVRomSize == 0 && FrameCnt == 0)
       InfoNES_SetupChr();
 
-    if constexpr (kPerfLogToSerial)
+    if constexpr (kDetailedPerfLogToSerial)
     {
       if (FrameCnt == 0 && (PPU_R1 & R1_SHOW_SP))
       {
@@ -1270,11 +1169,9 @@ int __not_in_flash_func(InfoNES_HSync)()
     if (FrameCnt == 0)
     {
       // Transfer the contents of work frame on the screen
-      const uint64_t load_frame_start_us = time_us_64();
       InfoNES_LoadFrame();
-      g_perf_load_frame_us += time_us_64() - load_frame_start_us;
-      perf_note_frame(time_us_64());
       ++g_perf_frames;
+      perf_log_if_due(time_us_64());
 
 #if 0
         // Switching of the double buffer
@@ -1300,12 +1197,9 @@ int __not_in_flash_func(InfoNES_HSync)()
     InfoNES_pAPUVsync();
 
     // A mapper function in V-Sync
-    const uint64_t mapper_vsync_start_us = time_us_64();
     MapperVSync();
-    g_perf_mapper_vsync_us += time_us_64() - mapper_vsync_start_us;
 
     // Get the condition of the joypad
-    perf_note_pad_poll(time_us_64());
     InfoNES_PadState(&PAD1_Latch, &PAD2_Latch, &PAD_System);
 #if INFONES_ENABLE_BOKOSUKA_STATE_LOG
     InfoNES_BokosukaHeartbeat();
@@ -1350,11 +1244,7 @@ int __not_in_flash_func(InfoNES_HSync)()
     break;
   }
 
-  const uint64_t hsync_end_us = time_us_64();
-  g_perf_tail_us += (hsync_end_us - hsync_start_us) - apu_us - draw_us;
-  ++g_perf_scanlines;
   audio_debug_poll();
-  perf_log_if_due(hsync_end_us);
 
   // Successful
   return 0;
@@ -1398,22 +1288,22 @@ namespace
     }
   }
 
-  static inline void __not_in_flash_func(renderBgTileFull)(const BgTileDescriptor &desc,
+  static inline void __not_in_flash_func(renderBgTileFull)(const WORD *pal,
+                                                           WORD *dst,
+                                                           BYTE *dst_opaque,
                                                            BYTE packed_hi,
                                                            BYTE packed_lo,
                                                            BYTE opaque_hi,
                                                            BYTE opaque_lo) __attribute__((always_inline));
 
-  static inline void __not_in_flash_func(renderBgTileFull)(const BgTileDescriptor &desc,
+  static inline void __not_in_flash_func(renderBgTileFull)(const WORD *pal,
+                                                           WORD *dst,
+                                                           BYTE *dst_opaque,
                                                            BYTE packed_hi,
                                                            BYTE packed_lo,
                                                            BYTE opaque_hi,
                                                            BYTE opaque_lo)
   {
-    const WORD *pal = desc.pal;
-    WORD *dst = desc.dst;
-    BYTE *dst_opaque = desc.dst_opaque;
-
     dst[0] = pal[(packed_hi >> 6) & 0x03u];
     dst[1] = pal[(packed_hi >> 4) & 0x03u];
     dst[2] = pal[(packed_hi >> 2) & 0x03u];
@@ -1446,7 +1336,7 @@ namespace
 
     if (desc.clip_left == 0 && desc.clip_right == 8)
     {
-      renderBgTileFull(desc, packed_hi, packed_lo, opaque_hi, opaque_lo);
+      renderBgTileFull(desc.pal, dst, dst_opaque, packed_hi, packed_lo, opaque_hi, opaque_lo);
       return;
     }
 
@@ -1585,18 +1475,18 @@ void __not_in_flash_func(InfoNES_DrawLine)()
   /*  Render Background                                                */
   /*-------------------------------------------------------------------*/
 
-  if constexpr (kPerfLogToSerial)
+  if constexpr (kDetailedPerfLogToSerial)
   {
     bg_start_us = time_us_64();
   }
 
   /* MMC5 VROM switch */
-  if constexpr (kPerfLogToSerial)
+  if constexpr (kDetailedPerfLogToSerial)
   {
     bg_mapper_start_us = time_us_64();
   }
   MapperRenderScreen(1);
-  if constexpr (kPerfLogToSerial)
+  if constexpr (kDetailedPerfLogToSerial)
   {
     g_perf_ppu_bg_mapper_us += time_us_64() - bg_mapper_start_us;
   }
@@ -1606,12 +1496,12 @@ void __not_in_flash_func(InfoNES_DrawLine)()
   assert(WorkLine);
   pPoint = WorkLine;
   pOpaquePoint = BackgroundOpaqueLine;
-  if constexpr (kPerfLogToSerial)
+  if constexpr (kDetailedPerfLogToSerial)
   {
     bg_clear_start_us = time_us_64();
   }
   InfoNES_MemorySet(BackgroundOpaqueLine, 0, NES_DISP_WIDTH);
-  if constexpr (kPerfLogToSerial)
+  if constexpr (kDetailedPerfLogToSerial)
   {
     g_perf_ppu_bg_clear_us += time_us_64() - bg_clear_start_us;
   }
@@ -1619,19 +1509,19 @@ void __not_in_flash_func(InfoNES_DrawLine)()
   // Clear a scanline if screen is off
   if (!(PPU_R1 & R1_SHOW_SCR))
   {
-    if constexpr (kPerfLogToSerial)
+    if constexpr (kDetailedPerfLogToSerial)
     {
       bg_clear_start_us = time_us_64();
     }
     InfoNES_MemorySet(pPoint, 0, NES_DISP_WIDTH << 1);
-    if constexpr (kPerfLogToSerial)
+    if constexpr (kDetailedPerfLogToSerial)
     {
       g_perf_ppu_bg_clear_us += time_us_64() - bg_clear_start_us;
     }
   }
   else
   {
-    if constexpr (kPerfLogToSerial)
+    if constexpr (kDetailedPerfLogToSerial)
     {
       bg_setup_start_us = time_us_64();
     }
@@ -1719,7 +1609,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
                           int clipLeft,
                           int clipRight)
     {
-      if constexpr (kPerfLogToSerial)
+      if constexpr (kDetailedPerfLogToSerial)
       {
         ++g_perf_ppu_bg_tile_count;
         if (clipLeft == 0 && clipRight == 8)
@@ -1747,7 +1637,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
 
     pbyNameTable = PPUBANK[nNameTable] + nY * 32 + nX;
     pAttrBase = PPUBANK[nNameTable] + 0x3c0 + (nY / 4) * 8;
-    if constexpr (kPerfLogToSerial)
+    if constexpr (kDetailedPerfLogToSerial)
     {
       g_perf_ppu_bg_setup_us += time_us_64() - bg_setup_start_us;
       bg_tile_start_us = time_us_64();
@@ -1824,7 +1714,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
                pOpaquePoint,
                0,
                PPU_Scr_H_Bit);
-    if constexpr (kPerfLogToSerial)
+    if constexpr (kDetailedPerfLogToSerial)
     {
       g_perf_ppu_bg_tile_us += time_us_64() - bg_tile_start_us;
       bg_clip_start_us = time_us_64();
@@ -1856,14 +1746,14 @@ void __not_in_flash_func(InfoNES_DrawLine)()
       InfoNES_MemorySet(pPointTop, 0, NES_DISP_WIDTH << 1);
       InfoNES_MemorySet(BackgroundOpaqueLine, 0, NES_DISP_WIDTH);
     }
-    if constexpr (kPerfLogToSerial)
+    if constexpr (kDetailedPerfLogToSerial)
     {
       g_perf_ppu_bg_clip_us += time_us_64() - bg_clip_start_us;
     }
   }
 
   //util::WorkMeterMark(MARKER_BG);
-  if constexpr (kPerfLogToSerial)
+  if constexpr (kDetailedPerfLogToSerial)
   {
     g_perf_ppu_bg_us += time_us_64() - bg_start_us;
     sprite_start_us = time_us_64();
@@ -1874,12 +1764,12 @@ void __not_in_flash_func(InfoNES_DrawLine)()
   /*-------------------------------------------------------------------*/
 
   /* MMC5 VROM switch */
-  if constexpr (kPerfLogToSerial)
+  if constexpr (kDetailedPerfLogToSerial)
   {
     sprite_block_start_us = time_us_64();
   }
   MapperRenderScreen(0);
-  if constexpr (kPerfLogToSerial)
+  if constexpr (kDetailedPerfLogToSerial)
   {
     g_perf_ppu_sprite_mapper_us += time_us_64() - sprite_block_start_us;
   }
@@ -1890,12 +1780,12 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     PPU_R2 &= ~R2_MAX_SP;
 
     // Reset sprite buffer
-    if constexpr (kPerfLogToSerial)
+    if constexpr (kDetailedPerfLogToSerial)
     {
       sprite_block_start_us = time_us_64();
     }
     InfoNES_MemorySet(pSprBuf, 0, sizeof pSprBuf);
-    if constexpr (kPerfLogToSerial)
+    if constexpr (kDetailedPerfLogToSerial)
     {
       g_perf_ppu_sprite_clear_us += time_us_64() - sprite_block_start_us;
       sprite_block_start_us = time_us_64();
@@ -1914,7 +1804,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
       nY = pSPRRAM[SPR_Y] + 1;
       if (nY > PPU_Scanline || nY + PPU_SP_Height <= PPU_Scanline)
       {
-        if constexpr (kPerfLogToSerial)
+        if constexpr (kDetailedPerfLogToSerial)
         {
           ++sprite_scan_skip_count;
         }
@@ -1927,13 +1817,13 @@ void __not_in_flash_func(InfoNES_DrawLine)()
 
       // Holizontal Sprite Count +1
       ++nSprCnt;
-      if constexpr (kPerfLogToSerial)
+      if constexpr (kDetailedPerfLogToSerial)
       {
         ++g_perf_ppu_sprite_visible_count;
       }
 
       uint64_t sprite_scan_part_start_us = 0;
-      if constexpr (kPerfLogToSerial)
+      if constexpr (kDetailedPerfLogToSerial)
       {
         sprite_scan_part_start_us = time_us_64();
       }
@@ -2025,7 +1915,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
 
       const int bank = (ch >> 6) + bankOfs;
       const int addrOfs = ((ch & 63) << 4) + ((yOfsModSP & 8) << 1) + (yOfsModSP & 7);
-      if constexpr (kPerfLogToSerial)
+      if constexpr (kDetailedPerfLogToSerial)
       {
         const uint64_t now_us = time_us_64();
         g_perf_ppu_sprite_scan_oam_us += now_us - sprite_scan_part_start_us;
@@ -2037,7 +1927,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
       const uint32_t pl1 = data[8];
       const auto pat0 = ((pl0 & 0x55) << 24) | ((pl1 & 0x55) << 25);
       const auto pat1 = ((pl0 & 0xaa) << 23) | ((pl1 & 0xaa) << 24);
-      if constexpr (kPerfLogToSerial)
+      if constexpr (kDetailedPerfLogToSerial)
       {
         const uint64_t now_us = time_us_64();
         g_perf_ppu_sprite_scan_fetch_us += now_us - sprite_scan_part_start_us;
@@ -2127,13 +2017,13 @@ void __not_in_flash_func(InfoNES_DrawLine)()
           dst[7] = bySprCol | v;
         }
       }
-      if constexpr (kPerfLogToSerial)
+      if constexpr (kDetailedPerfLogToSerial)
       {
         g_perf_ppu_sprite_scan_write_us += time_us_64() - sprite_scan_part_start_us;
       }
 #endif
     }
-    if constexpr (kPerfLogToSerial)
+    if constexpr (kDetailedPerfLogToSerial)
     {
       g_perf_ppu_sprite_scan_skip_count += sprite_scan_skip_count;
       g_perf_ppu_sprite_scan_us += time_us_64() - sprite_block_start_us;
@@ -2194,7 +2084,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
       }
     }
 #endif
-    if constexpr (kPerfLogToSerial)
+    if constexpr (kDetailedPerfLogToSerial)
     {
       g_perf_ppu_sprite_comp_us += time_us_64() - sprite_block_start_us;
       sprite_block_start_us = time_us_64();
@@ -2216,13 +2106,13 @@ void __not_in_flash_func(InfoNES_DrawLine)()
       PPU_R2 |= R2_MAX_SP; // Set a flag of maximum sprites on scanline
 
     //util::WorkMeterMark(MARKER_SPRITE);
-    if constexpr (kPerfLogToSerial)
+    if constexpr (kDetailedPerfLogToSerial)
     {
       g_perf_ppu_sprite_clip_us += time_us_64() - sprite_block_start_us;
     }
   }
 
-  if constexpr (kPerfLogToSerial)
+  if constexpr (kDetailedPerfLogToSerial)
   {
     g_perf_ppu_sprite_us += time_us_64() - sprite_start_us;
   }

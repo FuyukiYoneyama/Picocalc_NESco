@@ -30,13 +30,21 @@
 
 ## 現在必要な計画
 
-- BG opaque LUT optimization
-  - 計画: `docs/design/BG_OPAQUE_LUT_OPTIMIZATION_PLAN_20260429.md`
-  - `1.1.8` の軽量計測結果を基準に、`renderBgTileFull()` の `dst_opaque` 生成だけを LUT 化して小さく検証する。
-  - 32bit store / partial tile / `MapperPPU()` / `emitBgTile()` 構造変更は行わない。
+- 現時点で、実装中の正本計画はなし。
 
 ## 完了済み計画 / 結果
 
+- Hot path metrics / frame rate improvement
+  - 計画:
+    - `docs/design/BG_TILE_HOTPATH_OPTIMIZATION_PLAN_20260429.md`
+    - `docs/design/BG_OPAQUE_LUT_OPTIMIZATION_PLAN_20260429.md`
+    - `docs/design/SPRITE_COMPOSITE_RANGE_OPTIMIZATION_PLAN_20260429.md`
+    - `docs/design/SPRITE_SCAN_BREAKDOWN_METRICS_PLAN_20260429.md`
+    - `docs/design/SPRITE_OAM_SCAN_FIXED_COST_METRICS_PLAN_20260429.md`
+    - `docs/design/SPRITE_ACTIVE_LIST_SHADOW_METRICS_PLAN_20260429.md`
+  - 結果: `docs/project/Picocalc_NESco_HISTORY.md`
+  - `1.1.21` で BG full tile path direct args 化、sprite composite range 最適化、軽量 FPS log の状態に整理した。
+  - `Xevious` の低再現な背景崩れは再現待ちで、現時点では採用候補を維持する。
 - Background tile hot path optimization
   - 計画: `docs/design/BG_TILE_HOTPATH_OPTIMIZATION_PLAN_20260429.md`
   - 結果: `docs/project/Picocalc_NESco_HISTORY.md`

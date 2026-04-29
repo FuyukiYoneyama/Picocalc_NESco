@@ -10,6 +10,108 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.21 BG full tile path direct args 安定化 (2026-04-29)
+
+- `feature/hot-path-metrics`
+  で、`renderBgTileFull()`
+  の引数を
+  `BgTileDescriptor`
+  reference
+  から direct args
+  へ変更した
+- 目的:
+  - `1.1.17`
+    以降で採用している BG full tile path
+    最適化を、速度を落とさずに堅牢化する
+  - hot path
+    内で参照する
+    `pal`
+    `dst`
+    `dst_opaque`
+    を呼び出し側で明示し、descriptor
+    経由の依存を減らす
+  - 一時的な BG / CHR
+    詳細 debug log
+    を外し、
+    通常計測に近い
+    `[ROM_START]`
+    と
+    `[FPS_SUMMARY]`
+    だけを残す
+- 変更内容:
+  - `renderBgTileFull()`
+    の signature
+    を
+    `const WORD *pal`
+    `WORD *dst`
+    `BYTE *dst_opaque`
+    `packed_hi`
+    `packed_lo`
+    `opaque_hi`
+    `opaque_lo`
+    へ変更した
+  - `renderBgTile()`
+    の full tile path
+    から direct args
+    で呼ぶようにした
+  - 詳細 perf
+    fields
+    は
+    `kDetailedPerfLogToSerial = false`
+    側へ退避し、通常の perf log
+    は
+    `[FPS_SUMMARY]`
+    に戻した
+  - system version
+    を
+    `1.1.21`
+    に更新した
+- build 確認:
+  - banner:
+    `PicoCalc NESco Ver. 1.1.21 Build Apr 29 2026 13:15:04`
+  - UF2 SHA-256:
+    `20f3a59319664b451c38114cab0dd7ab5b27b84cf37adc9dad06364ae0bfeacf`
+  - ELF SHA-256:
+    `bb8efaa90ba145d4c57d3ebc31225f0bfc5d95cff36a3314b942f45853149852`
+  - size:
+    `text 280616 / data 0 / bss 97048`
+- 実機ログ確認:
+  - log:
+    `/home/fuyuki/pico_dvl/codex/log/pico20260429_131623.log`
+  - user
+    報告で、`Xevious`
+    の背景崩れは再現しなかった
+  - log
+    で
+    `LodeRunner.nes`
+    `Xevious.nes`
+    `Project_DART_V1.0.nes`
+    の
+    `[ROM_START]`
+    と
+    `[FPS_SUMMARY]`
+    を確認した
+  - BG / CHR
+    詳細 debug line
+    は出ていないことを確認した
+- drop-first-2
+  後の fps
+  平均:
+  - `LodeRunner.nes`:
+    `48.06 fps`
+  - `Xevious.nes`:
+    `53.54 fps`
+  - `Project_DART_V1.0.nes`:
+    `44.65 fps`
+- 判断:
+  - `1.1.21`
+    を現時点の hot path
+    最適化採用候補として維持する
+  - `Xevious`
+    の低再現な背景崩れは、再現するまで様子見とする
+  - 追加の sprite composite range
+    安全化は、症状が再現した時点で別途検討する
+
 ## 1.1.16 compact performance summary log (2026-04-29)
 
 - `feature/hot-path-metrics`
