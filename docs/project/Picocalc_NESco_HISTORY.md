@@ -10,6 +10,20 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 追加 ROM 起動確認 (2026-04-29)
+
+- 実機で次の ROM 起動を確認した
+  - `Dragon Quest II`
+    - Mapper2
+    - 起動確認
+  - `Takeshi no Sengoku Fuuunji`
+    - Mapper33
+    - 起動確認
+  - `Pro Yakyuu Family Stadium`
+    - Mapper206
+    - 起動確認
+- この確認は起動確認までであり、長時間 gameplay / save / screenshot / ESC 復帰などの詳細確認は別扱いとする
+
 ## 1.1.22 Mapper152 初回実装 (2026-04-29)
 
 - `mapper/mapper152-bandai74161`
@@ -43,8 +57,9 @@
     とした
 - 初回実装の制約:
   - Mapper152 の bus conflict は再現していない
-  - Mapper152 ROM 実機確認は未実施
-  - 対象 ROM 入手後に起動 / 表示 / 入力 / 音 / screenshot / ESC 復帰を確認する
+  - Mapper152 ROM の確認は `Arkanoid 2`
+    で起動確認まで実施した
+  - 入力 / 音 / screenshot / ESC 復帰などの詳細確認は、必要に応じて追加確認する
 - build:
   - system version
     `1.1.22`
@@ -66,6 +81,8 @@
     で MapperTable 登録を確認した
   - `rg "InfoNES_Mapper_152.cpp" infones/InfoNES_Mapper.cpp`
     で mapper source include を確認した
+  - 実機で `Arkanoid 2`
+    の起動を確認した
 
 ## 1.1.21 BG full tile path direct args 安定化 (2026-04-29)
 

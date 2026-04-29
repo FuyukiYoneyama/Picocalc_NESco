@@ -6,18 +6,22 @@
 ## 互換性・未確認機能
 
 - `[pending]` Mapper 動的確保済み mapper の実機確認を進める
-  - `Map6`
-  - `Map19`
-  - `Map185`
-  - `Map188`
-  - `Map235`
+  - 優先確認:
+    - `Map19`
+      - Namco 163 系で、市販タイトル確認対象として優先度が高い
+    - `Map185`
+      - CNROM copy protection 系で、市販タイトル確認対象として優先度が高い
+  - 低優先 / 特殊枠:
+    - `Map6`
+      - FFE / copier 系寄りとして扱う
+    - `Map188`
+      - 正規市販タイトル確認対象としては優先度低めとして扱う
+    - `Map235`
+      - multicart mapper として扱い、通常の市販単体タイトル確認とは別枠にする
 - `[pending]` Mapper30 の `*.m30` 保存 / 復元を実ゲームで確認する
   - ROM 起動と表示は実機確認済み
   - 未確認なのは PRG flash overlay の書き込み / 復元
 - `[pending]` Mapper87 / Choplifter 系の確認を、別の Mapper87 ROM 入手後に再開する
-- `[pending]` Mapper152 ROM 実機確認
-  - Mapper152 初回実装は `1.1.22` で build と mapper table 登録まで確認済み
-  - 対象 ROM を入手したら、起動 / 表示 / 入力 / 音 / screenshot / ESC 復帰を確認する
 
 ## 保留中の改善候補
 
