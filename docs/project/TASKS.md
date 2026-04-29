@@ -13,6 +13,18 @@
     の 0x2000 / 0x2400
     反転実験では改善しなかった
   - いったん追加追跡は止め、必要時に CHR RAM / PPU nametable 更新タイミング側から再調査する
+- `[pending]` Mapper9 / MMC2 の画面崩れを不具合ありとして保留する
+  - `Punch-Out!! (USA)`
+    で CHR / background
+    崩れを確認した
+  - MMC2 latch trigger
+    範囲を `$0FD8/$0FE8`
+    と `$1FD8-$1FDF/$1FE8-$1FEF`
+    に合わせる実験では改善しなかった
+  - 次に調査する場合は、BG fetch
+    だけでなく sprite fetch
+    時にも MapperPPU latch
+    更新が必要かを重点的に見る
 - `[pending]` Mapper 動的確保済み mapper の実機確認を進める
   - 優先確認:
     - `Map19`

@@ -57,6 +57,51 @@
   - Mapper7 は不具合ありとして `TASKS.md`
     に残し、必要時に CHR RAM / PPU nametable 更新タイミング側から再調査する
 
+## Mapper9 / MMC2 画面崩れ保留 (2026-04-29)
+
+- `Punch-Out!! (USA)`
+  の Picocalc_NESco screenshot
+  で、portrait / match
+  画面の CHR / background
+  崩れを確認した
+- Mesen2 screenshot
+  では同場面が正常であるため、Picocalc_NESco
+  側の Mapper9 / PPU latch
+  処理の問題として扱う
+- `mapper9-mmc2-latch-fix`
+  で、MMC2 latch trigger
+  範囲を NESdev の記述に合わせる実験 build
+  `1.1.23`
+  を作成した
+  - commit:
+    `6fd65c7 Fix mapper 9 MMC2 latch triggers`
+  - banner:
+    `PicoCalc NESco Ver. 1.1.23 Build Apr 29 2026 22:19:45`
+  - UF2 SHA-256:
+    `0d55e9d4d0a248d60b6f0f49411bcafaf4e2bb7a234cb814b85f96aa8a3eb8c5`
+- 実機確認結果:
+  - latch trigger
+    範囲修正では変化なし
+- 採用判断:
+  - `mapper9-mmc2-latch-fix`
+    は採用しない
+  - `main`
+    には反映しない
+  - Mapper9 は不具合ありとして `TASKS.md`
+    に残す
+- 次回調査候補:
+  - 現行 renderer
+    は BG tile fetch
+    後に `MapperPPU(PATTBL(...))`
+    を呼ぶが、sprite fetch
+    側で Mapper9 latch
+    を更新していない可能性がある
+  - MMC2 は sprite / BG
+    の特定 tile fetch
+    で latch
+    が切り替わるため、次に調べるなら sprite fetch
+    時の latch 更新を重点的に見る
+
 ## 1.1.22 Mapper152 初回実装 (2026-04-29)
 
 - `mapper/mapper152-bandai74161`
