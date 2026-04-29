@@ -24,6 +24,39 @@
     - 起動確認
 - この確認は起動確認までであり、長時間 gameplay / save / screenshot / ESC 復帰などの詳細確認は別扱いとする
 
+## Mapper7 / AxROM 画面崩れ保留 (2026-04-29)
+
+- `Solstice (Japan)`
+  の Picocalc_NESco screenshot
+  で、title / background
+  の nametable
+  崩れを確認した
+- screenshot BMP
+  自体は 320x320 top-down 24bit
+  として正常に保存されており、保存処理ではなく emulation 表示側の問題として扱う
+- `mapper7-mirroring-experiment`
+  で、Mapper7 / AxROM
+  の one-screen mirroring
+  選択を反転した build
+  `1.1.23`
+  を作成した
+  - commit:
+    `5b9622f Test mapper 7 mirroring direction`
+  - banner:
+    `PicoCalc NESco Ver. 1.1.23 Build Apr 29 2026 21:51:47`
+  - UF2 SHA-256:
+    `07bfb3cc37ca400ddf2e9c11c52cc724984177f37900fa789d946f9293986836`
+- 実機確認結果:
+  - mirroring 反転では変化なし
+  - Mapper7 の単純な 0x2000 / 0x2400
+    取り違え説は可能性が下がった
+- 採用判断:
+  - mirroring 反転実験は採用しない
+  - `main`
+    には反映しない
+  - Mapper7 は不具合ありとして `TASKS.md`
+    に残し、必要時に CHR RAM / PPU nametable 更新タイミング側から再調査する
+
 ## 1.1.22 Mapper152 初回実装 (2026-04-29)
 
 - `mapper/mapper152-bandai74161`

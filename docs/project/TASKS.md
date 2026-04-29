@@ -5,6 +5,14 @@
 
 ## 互換性・未確認機能
 
+- `[pending]` Mapper7 / AxROM の画面崩れを不具合ありとして保留する
+  - `Solstice (Japan)`
+    で nametable / background
+    崩れを確認した
+  - Mapper7 one-screen mirroring
+    の 0x2000 / 0x2400
+    反転実験では改善しなかった
+  - いったん追加追跡は止め、必要時に CHR RAM / PPU nametable 更新タイミング側から再調査する
 - `[pending]` Mapper 動的確保済み mapper の実機確認を進める
   - 優先確認:
     - `Map19`
