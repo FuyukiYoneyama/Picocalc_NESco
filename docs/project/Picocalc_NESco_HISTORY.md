@@ -10,6 +10,31 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.7 background full tile direct path 実験は不採用 (2026-04-29)
+
+- `feature/hot-path-metrics` で、background full tile path の descriptor 経由を避ける実験を行った
+- commit `f6fb40c` で次を試した:
+  - `renderBgTileFullDirect()` を追加
+  - full tile の場合だけ `emitBgTile()` 側で `patternRow` を直接求め、`BgTileDescriptor` を構築せずに描画した
+  - partial tile path と `MapperPPU()` 呼び出し順は変更しなかった
+  - system version を `1.1.7` に更新した
+- build 確認:
+  - banner: `PicoCalc NESco Ver. 1.1.7 Build Apr 29 2026 08:58:58`
+  - UF2 SHA-256: `0aa02fee28756a76b5626ce54d2a1453c004ec8ce232f9b3e9e2a5f074bd331e`
+  - ELF SHA-256: `10cf7370aaae610aabb0a673ac8c0875f75112ddf8597471189bea8ed4be3c99`
+  - `.bss = 97308`
+- 実機比較:
+  - log: `/home/fuyuki/pico_dvl/codex/log/pico20260429_090119.log`
+  - user 操作: `LodeRunner`、`Xevious`、`Project_DART_V1.0` を順に play
+  - `1.1.6` からの比較:
+    - `LodeRunner.nes`: fps -2.63%、`frame_us_avg` +2.62%、`ppu_bg_tile_build_us` -9.03%、`ppu_bg_tile_render_us` +0.74%
+    - `Xevious.nes`: fps -2.21%、`frame_us_avg` +2.23%、`ppu_bg_tile_build_us` -9.35%、`ppu_bg_tile_render_us` -2.10%
+    - `Project_DART_V1.0.nes`: fps -2.03%、`frame_us_avg` +2.19%、`ppu_bg_tile_build_us` -9.20%、`ppu_bg_tile_render_us` -0.83%
+- 判断:
+  - `ppu_bg_tile_build_us` は約 9% 下がったが、3 ROM すべてで fps と frame time が悪化した
+  - `draw_us` / `ppu_bg_us` / `ppu_bg_tile_us` も悪化しており、採用しない
+  - commit `7133d66` で revert し、現在の採用状態は `1.1.6` に戻した
+
 ## 1.1.6 `renderBgTile()` full tile path 小改善ブランチ (2026-04-29)
 
 - `feature/hot-path-metrics` で、`renderBgTile()` の full tile path を小さく分離した
