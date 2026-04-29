@@ -10,6 +10,79 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.16 compact performance summary log (2026-04-29)
+
+- `feature/hot-path-metrics`
+  で、高速化検討用の UART
+  log
+  を軽量化した
+- 目的:
+  - 詳細な hot path
+    内訳を一旦止め、現在のフレームレートと
+    CPU / PPU / APU / その他
+    の大まかな割合を見る
+  - UART
+    出力負荷そのものが game
+    の引っかかりや計測値に与える影響を減らす
+- 変更内容:
+  - `[CORE1_BASE]`
+    の巨大な詳細行をやめ、
+    `[CORE1_SUMMARY]`
+    に変更した
+  - 出力項目を
+    `fps_x100`
+    `frame_us_avg`
+    `cpu_us`
+    `ppu_us`
+    `apu_us`
+    `other_us`
+    `cpu_pct_x10`
+    `ppu_pct_x10`
+    `apu_pct_x10`
+    `other_pct_x10`
+    `input_events`
+    `view_mode`
+    へ絞った
+  - `ppu_us`
+    は現時点では
+    `draw_us`
+    として扱う
+  - `other_us`
+    は log window
+    の経過時間から
+    CPU / PPU / APU
+    を引いた残りとして扱う
+  - 実機検証コストの規約を
+    `docs/project/CONVENTIONS.md`
+    に追記した
+  - system version
+    を
+    `1.1.16`
+    に更新した
+- build 確認:
+  - banner:
+    `PicoCalc NESco Ver. 1.1.16 Build Apr 29 2026 11:41:49`
+  - UF2 SHA-256:
+    `b287073c5290b7d9e64a04de53a771946a99b435c593d71b95522547577feaba`
+  - ELF SHA-256:
+    `1d31ae028305dcc19ee3a7c958d2783a44b72f77ccc6f51022d6ba1b4563db48`
+  - size:
+    `text 285024 / data 0 / bss 97376`
+- 実機確認:
+  - 未実施
+  - 期待する確認:
+    - `[CORE1_SUMMARY]`
+      が出る
+    - UART
+      log
+      が軽くなり、play
+      の引っかかりが減るかを見る
+    - `cpu_pct_x10`
+      `ppu_pct_x10`
+      `apu_pct_x10`
+      `other_pct_x10`
+      から大まかな支配要因を見る
+
 ## 1.1.15 sprite active list shadow build 計測版 (2026-04-29)
 
 - `feature/hot-path-metrics`
