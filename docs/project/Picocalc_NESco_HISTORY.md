@@ -28,6 +28,26 @@
   - ELF SHA-256: `868c163a433d2755fa9e200b75a70632422afc62f803e66f2a5506e0a12132df`
   - `.bss = 97316`
   - `1.1.6` から `.bss` は 8 bytes 増加した
+- 実機比較:
+  - log: `/home/fuyuki/pico_dvl/codex/log/pico20260429_091111.log`
+  - user 操作: `LodeRunner`、`Xevious`、`Project_DART_V1.0` を順に play
+  - `[ROM_START]` で確認した ROM:
+    - `LodeRunner.nes`: mapper 0
+    - `Xevious.nes`: mapper 0
+    - `Project_DART_V1.0.nes`: mapper 30
+  - `1.1.6` からの比較:
+    - `LodeRunner.nes`: fps +78.92%、`frame_us_avg` -43.92%、`ppu_bg_tile_us` -62.15%
+    - `Xevious.nes`: fps +78.56%、`frame_us_avg` -43.93%、`ppu_bg_tile_us` -63.01%
+    - `Project_DART_V1.0.nes`: fps +74.58%、`frame_us_avg` -42.43%、`ppu_bg_tile_us` -63.75%
+  - tile 比率:
+    - `LodeRunner.nes`: full 96.16%、partial 3.84%
+    - `Xevious.nes`: full 96.97%、partial 3.03%
+    - `Project_DART_V1.0.nes`: full 95.20%、partial 4.80%
+- 判断:
+  - `1.1.5` / `1.1.6` の詳細計測は tile ごとの `time_us_64()` が重く、通常実行性能の判断には使えない
+  - `1.1.8` は「軽量計測の正本」として採用する
+  - full tile が約 95% 以上を占めるため、今後の描画最適化は full tile path を主対象にしてよい
+  - ただし `ppu_bg_tile_pal_us` / `build_us` / `render_us` / `mapperppu_us` は 1.1.8 では加算していないため、細分内訳の比較には使わない
 
 ## 1.1.7 background full tile direct path 実験は不採用 (2026-04-29)
 
