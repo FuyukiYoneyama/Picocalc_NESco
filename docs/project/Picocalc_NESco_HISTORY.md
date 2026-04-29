@@ -10,6 +10,137 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.15 sprite active list shadow build 計測版 (2026-04-29)
+
+- `feature/hot-path-metrics`
+  で、active sprite list
+  / scanline prefilter
+  を本実装する前に、frame
+  先頭 snapshot
+  から shadow active list
+  を構築するコストを測る計測版を作成した
+- 目的:
+  - `1.1.14`
+    で確認した non-visible sprite
+    skip 固定費に対し、active sprite list
+    構築コストが十分小さいかを見る
+  - 今回の shadow list
+    は描画には使わず、互換性判断にも使わない
+- 変更内容:
+  - `[CORE1_BASE]`
+    に
+    `ppu_sprite_active_build_us`
+    `ppu_sprite_active_entries`
+    `ppu_sprite_active_lines`
+    `ppu_sprite_active_max_per_line`
+    を追加した
+  - `SCAN_TOP_OFF_SCREEN`
+    / `FrameCnt == 0`
+    / sprite 表示有効時に、frame
+    先頭時点の
+    `SPRRAM`
+    snapshot
+    から shadow build
+    コストだけを測る
+  - active list
+    は描画、sprite overflow
+    flag、描画優先順位、sprite 0 hit
+    には使わない
+  - system version
+    を
+    `1.1.15`
+    に更新した
+- build 確認:
+  - banner:
+    `PicoCalc NESco Ver. 1.1.15 Build Apr 29 2026 11:21:29`
+  - UF2 SHA-256:
+    `d0ea4257e7902099d75f62356968d5d40f23ef253a13f88774819735a5f32055`
+  - ELF SHA-256:
+    `66ef701772cefacff40abb476693767db3ac916fc7e29252ff3293e9d16d5cce`
+  - size:
+    `text 286448 / data 0 / bss 97408`
+- 実機ログ確認:
+  - log:
+    `/home/fuyuki/pico_dvl/codex/log/pico20260429_112349.log`
+  - log
+    で
+    `LodeRunner.nes`
+    `Xevious.nes`
+    `Project_DART_V1.0.nes`
+    の
+    `[ROM_START]`
+    と
+    `[CORE1_BASE]`
+    を確認した
+  - `ppu_sprite_active_build_us`
+    `ppu_sprite_active_entries`
+    `ppu_sprite_active_lines`
+    `ppu_sprite_active_max_per_line`
+    が出力されることを確認した
+- sprite scan
+  が出ている sample
+  に限定した平均値:
+  - `LodeRunner.nes`
+    - samples:
+      `52`
+    - `scan_unaccounted_per_frame`:
+      `1161.8 us`
+    - `active_build_per_frame`:
+      `18.1 us`
+    - `active_build / scan_unaccounted`:
+      約 `1.6%`
+    - `active_entries_per_frame`:
+      `96.0`
+    - `active_lines_per_frame`:
+      `41.5`
+    - `active_max_per_line`:
+      最大 `6`
+  - `Xevious.nes`
+    - samples:
+      `32`
+    - `scan_unaccounted_per_frame`:
+      `1287.5 us`
+    - `active_build_per_frame`:
+      `27.8 us`
+    - `active_build / scan_unaccounted`:
+      約 `2.2%`
+    - `active_entries_per_frame`:
+      `206.0`
+    - `active_lines_per_frame`:
+      `74.1`
+    - `active_max_per_line`:
+      最大 `14`
+  - `Project_DART_V1.0.nes`
+    - samples:
+      `27`
+    - `scan_unaccounted_per_frame`:
+      `1174.7 us`
+    - `active_build_per_frame`:
+      `20.9 us`
+    - `active_build / scan_unaccounted`:
+      約 `1.8%`
+    - `active_entries_per_frame`:
+      `123.9`
+    - `active_lines_per_frame`:
+      `38.3`
+    - `active_max_per_line`:
+      最大 `64`
+- 判断:
+  - shadow active list
+    の構築コストは、現行 sprite scan
+    の未説明固定費に対してかなり小さい
+  - 次は active sprite list
+    / scanline prefilter
+    の実描画適用計画を作る価値が高い
+  - ただし、この計測は frame
+    先頭 snapshot
+    の構築コストだけであり、OAM DMA
+    / `$2004`
+    write
+    の invalidation
+    や sprite overflow
+    の互換性判断は別計画で扱う
+
 ## 1.1.14 sprite OAM scan skip count 計測版 (2026-04-29)
 
 - `feature/hot-path-metrics`

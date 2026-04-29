@@ -247,6 +247,10 @@ uint64_t g_perf_ppu_sprite_scan_oam_us = 0;
 uint64_t g_perf_ppu_sprite_scan_fetch_us = 0;
 uint64_t g_perf_ppu_sprite_scan_write_us = 0;
 uint32_t g_perf_ppu_sprite_scan_skip_count = 0;
+uint64_t g_perf_ppu_sprite_active_build_us = 0;
+uint32_t g_perf_ppu_sprite_active_entries = 0;
+uint32_t g_perf_ppu_sprite_active_lines = 0;
+uint32_t g_perf_ppu_sprite_active_max_per_line = 0;
 uint64_t g_perf_ppu_sprite_comp_us = 0;
 uint64_t g_perf_ppu_sprite_clip_us = 0;
 uint32_t g_perf_ppu_sprite_visible_count = 0;
@@ -300,6 +304,10 @@ inline void perf_reset()
   g_perf_ppu_sprite_scan_fetch_us = 0;
   g_perf_ppu_sprite_scan_write_us = 0;
   g_perf_ppu_sprite_scan_skip_count = 0;
+  g_perf_ppu_sprite_active_build_us = 0;
+  g_perf_ppu_sprite_active_entries = 0;
+  g_perf_ppu_sprite_active_lines = 0;
+  g_perf_ppu_sprite_active_max_per_line = 0;
   g_perf_ppu_sprite_comp_us = 0;
   g_perf_ppu_sprite_clip_us = 0;
   g_perf_ppu_sprite_visible_count = 0;
@@ -390,7 +398,7 @@ inline void perf_log_if_due(uint64_t now_us)
           ? "stretch"
           : "normal";
 
-  printf("[CORE1_BASE] t_us=%llu frames=%lu fps_x100=%llu frame_us_avg=%llu frame_us_max=%llu cpu_us=%llu apu_us=%llu draw_us=%llu ppu_bg_us=%llu ppu_bg_mapper_us=%llu ppu_bg_clear_us=%llu ppu_bg_setup_us=%llu ppu_bg_tile_us=%llu ppu_bg_tile_pal_us=%llu ppu_bg_tile_build_us=%llu ppu_bg_tile_render_us=%llu ppu_bg_mapperppu_us=%llu ppu_bg_tile_count=%lu ppu_bg_tile_full_count=%lu ppu_bg_tile_partial_count=%lu ppu_bg_clip_us=%llu ppu_sprite_us=%llu ppu_sprite_mapper_us=%llu ppu_sprite_clear_us=%llu ppu_sprite_scan_us=%llu ppu_sprite_scan_oam_us=%llu ppu_sprite_scan_fetch_us=%llu ppu_sprite_scan_write_us=%llu ppu_sprite_visible_count=%lu ppu_sprite_scan_skip_count=%lu ppu_sprite_comp_us=%llu ppu_sprite_clip_us=%llu mapper_hsync_us=%llu mapper_vsync_us=%llu load_frame_us=%llu tail_us=%llu lcd_wait_us=%llu lcd_flush_us=%llu lcd_queue_wait_us=%llu lcd_queue_wait_count=%lu frame_pacing_sleep_us=%llu frame_pacing_sleep_count=%lu audio_wait_us=%llu audio_wait_count=%lu pad_interval_us_avg=%llu pad_interval_us_max=%llu input_events=%u view_mode=%s\n",
+  printf("[CORE1_BASE] t_us=%llu frames=%lu fps_x100=%llu frame_us_avg=%llu frame_us_max=%llu cpu_us=%llu apu_us=%llu draw_us=%llu ppu_bg_us=%llu ppu_bg_mapper_us=%llu ppu_bg_clear_us=%llu ppu_bg_setup_us=%llu ppu_bg_tile_us=%llu ppu_bg_tile_pal_us=%llu ppu_bg_tile_build_us=%llu ppu_bg_tile_render_us=%llu ppu_bg_mapperppu_us=%llu ppu_bg_tile_count=%lu ppu_bg_tile_full_count=%lu ppu_bg_tile_partial_count=%lu ppu_bg_clip_us=%llu ppu_sprite_us=%llu ppu_sprite_mapper_us=%llu ppu_sprite_clear_us=%llu ppu_sprite_scan_us=%llu ppu_sprite_scan_oam_us=%llu ppu_sprite_scan_fetch_us=%llu ppu_sprite_scan_write_us=%llu ppu_sprite_visible_count=%lu ppu_sprite_scan_skip_count=%lu ppu_sprite_active_build_us=%llu ppu_sprite_active_entries=%lu ppu_sprite_active_lines=%lu ppu_sprite_active_max_per_line=%lu ppu_sprite_comp_us=%llu ppu_sprite_clip_us=%llu mapper_hsync_us=%llu mapper_vsync_us=%llu load_frame_us=%llu tail_us=%llu lcd_wait_us=%llu lcd_flush_us=%llu lcd_queue_wait_us=%llu lcd_queue_wait_count=%lu frame_pacing_sleep_us=%llu frame_pacing_sleep_count=%lu audio_wait_us=%llu audio_wait_count=%lu pad_interval_us_avg=%llu pad_interval_us_max=%llu input_events=%u view_mode=%s\n",
          static_cast<unsigned long long>(now_us),
          static_cast<unsigned long>(g_perf_frames),
          static_cast<unsigned long long>(fps_x100),
@@ -421,6 +429,10 @@ inline void perf_log_if_due(uint64_t now_us)
          static_cast<unsigned long long>(g_perf_ppu_sprite_scan_write_us),
          static_cast<unsigned long>(g_perf_ppu_sprite_visible_count),
          static_cast<unsigned long>(g_perf_ppu_sprite_scan_skip_count),
+         static_cast<unsigned long long>(g_perf_ppu_sprite_active_build_us),
+         static_cast<unsigned long>(g_perf_ppu_sprite_active_entries),
+         static_cast<unsigned long>(g_perf_ppu_sprite_active_lines),
+         static_cast<unsigned long>(g_perf_ppu_sprite_active_max_per_line),
          static_cast<unsigned long long>(g_perf_ppu_sprite_comp_us),
          static_cast<unsigned long long>(g_perf_ppu_sprite_clip_us),
          static_cast<unsigned long long>(g_perf_mapper_hsync_us),
@@ -1105,6 +1117,59 @@ void __not_in_flash_func(InfoNES_Cycle)()
   }
 }
 
+inline void measureSpriteActiveListShadow()
+{
+  if constexpr (!kPerfLogToSerial)
+  {
+    return;
+  }
+
+  const uint64_t start_us = time_us_64();
+  BYTE line_counts[NES_DISP_HEIGHT] = {};
+  uint32_t entries = 0;
+
+  for (int sprite_offset = 0; sprite_offset < SPRRAM_SIZE; sprite_offset += 4)
+  {
+    const int y0 = static_cast<int>(SPRRAM[sprite_offset + SPR_Y]) + 1;
+    const int y1 = y0 + static_cast<int>(PPU_SP_Height);
+    if (y1 <= 0 || y0 >= NES_DISP_HEIGHT)
+    {
+      continue;
+    }
+
+    const int clamped_y0 = (y0 < 0) ? 0 : y0;
+    const int clamped_y1 = (y1 > NES_DISP_HEIGHT) ? NES_DISP_HEIGHT : y1;
+    for (int y = clamped_y0; y < clamped_y1; ++y)
+    {
+      ++line_counts[y];
+      ++entries;
+    }
+  }
+
+  uint32_t active_lines = 0;
+  uint32_t max_per_line = 0;
+  for (int y = 0; y < NES_DISP_HEIGHT; ++y)
+  {
+    const uint32_t count = line_counts[y];
+    if (count != 0)
+    {
+      ++active_lines;
+      if (count > max_per_line)
+      {
+        max_per_line = count;
+      }
+    }
+  }
+
+  g_perf_ppu_sprite_active_build_us += time_us_64() - start_us;
+  g_perf_ppu_sprite_active_entries += entries;
+  g_perf_ppu_sprite_active_lines += active_lines;
+  if (max_per_line > g_perf_ppu_sprite_active_max_per_line)
+  {
+    g_perf_ppu_sprite_active_max_per_line = max_per_line;
+  }
+}
+
 /*===================================================================*/
 /*                                                                   */
 /*              InfoNES_HSync() : A function in H-Sync               */
@@ -1221,6 +1286,14 @@ int __not_in_flash_func(InfoNES_HSync)()
     // Set up a character data
     if (NesHeader.byVRomSize == 0 && FrameCnt == 0)
       InfoNES_SetupChr();
+
+    if constexpr (kPerfLogToSerial)
+    {
+      if (FrameCnt == 0 && (PPU_R1 & R1_SHOW_SP))
+      {
+        measureSpriteActiveListShadow();
+      }
+    }
 
     // Get position of sprite #0
     InfoNES_GetSprHitY();
