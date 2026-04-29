@@ -246,6 +246,7 @@ uint64_t g_perf_ppu_sprite_scan_us = 0;
 uint64_t g_perf_ppu_sprite_scan_oam_us = 0;
 uint64_t g_perf_ppu_sprite_scan_fetch_us = 0;
 uint64_t g_perf_ppu_sprite_scan_write_us = 0;
+uint32_t g_perf_ppu_sprite_scan_skip_count = 0;
 uint64_t g_perf_ppu_sprite_comp_us = 0;
 uint64_t g_perf_ppu_sprite_clip_us = 0;
 uint32_t g_perf_ppu_sprite_visible_count = 0;
@@ -298,6 +299,7 @@ inline void perf_reset()
   g_perf_ppu_sprite_scan_oam_us = 0;
   g_perf_ppu_sprite_scan_fetch_us = 0;
   g_perf_ppu_sprite_scan_write_us = 0;
+  g_perf_ppu_sprite_scan_skip_count = 0;
   g_perf_ppu_sprite_comp_us = 0;
   g_perf_ppu_sprite_clip_us = 0;
   g_perf_ppu_sprite_visible_count = 0;
@@ -388,7 +390,7 @@ inline void perf_log_if_due(uint64_t now_us)
           ? "stretch"
           : "normal";
 
-  printf("[CORE1_BASE] t_us=%llu frames=%lu fps_x100=%llu frame_us_avg=%llu frame_us_max=%llu cpu_us=%llu apu_us=%llu draw_us=%llu ppu_bg_us=%llu ppu_bg_mapper_us=%llu ppu_bg_clear_us=%llu ppu_bg_setup_us=%llu ppu_bg_tile_us=%llu ppu_bg_tile_pal_us=%llu ppu_bg_tile_build_us=%llu ppu_bg_tile_render_us=%llu ppu_bg_mapperppu_us=%llu ppu_bg_tile_count=%lu ppu_bg_tile_full_count=%lu ppu_bg_tile_partial_count=%lu ppu_bg_clip_us=%llu ppu_sprite_us=%llu ppu_sprite_mapper_us=%llu ppu_sprite_clear_us=%llu ppu_sprite_scan_us=%llu ppu_sprite_scan_oam_us=%llu ppu_sprite_scan_fetch_us=%llu ppu_sprite_scan_write_us=%llu ppu_sprite_comp_us=%llu ppu_sprite_clip_us=%llu ppu_sprite_visible_count=%lu mapper_hsync_us=%llu mapper_vsync_us=%llu load_frame_us=%llu tail_us=%llu lcd_wait_us=%llu lcd_flush_us=%llu lcd_queue_wait_us=%llu lcd_queue_wait_count=%lu frame_pacing_sleep_us=%llu frame_pacing_sleep_count=%lu audio_wait_us=%llu audio_wait_count=%lu pad_interval_us_avg=%llu pad_interval_us_max=%llu input_events=%u view_mode=%s\n",
+  printf("[CORE1_BASE] t_us=%llu frames=%lu fps_x100=%llu frame_us_avg=%llu frame_us_max=%llu cpu_us=%llu apu_us=%llu draw_us=%llu ppu_bg_us=%llu ppu_bg_mapper_us=%llu ppu_bg_clear_us=%llu ppu_bg_setup_us=%llu ppu_bg_tile_us=%llu ppu_bg_tile_pal_us=%llu ppu_bg_tile_build_us=%llu ppu_bg_tile_render_us=%llu ppu_bg_mapperppu_us=%llu ppu_bg_tile_count=%lu ppu_bg_tile_full_count=%lu ppu_bg_tile_partial_count=%lu ppu_bg_clip_us=%llu ppu_sprite_us=%llu ppu_sprite_mapper_us=%llu ppu_sprite_clear_us=%llu ppu_sprite_scan_us=%llu ppu_sprite_scan_oam_us=%llu ppu_sprite_scan_fetch_us=%llu ppu_sprite_scan_write_us=%llu ppu_sprite_visible_count=%lu ppu_sprite_scan_skip_count=%lu ppu_sprite_comp_us=%llu ppu_sprite_clip_us=%llu mapper_hsync_us=%llu mapper_vsync_us=%llu load_frame_us=%llu tail_us=%llu lcd_wait_us=%llu lcd_flush_us=%llu lcd_queue_wait_us=%llu lcd_queue_wait_count=%lu frame_pacing_sleep_us=%llu frame_pacing_sleep_count=%lu audio_wait_us=%llu audio_wait_count=%lu pad_interval_us_avg=%llu pad_interval_us_max=%llu input_events=%u view_mode=%s\n",
          static_cast<unsigned long long>(now_us),
          static_cast<unsigned long>(g_perf_frames),
          static_cast<unsigned long long>(fps_x100),
@@ -417,9 +419,10 @@ inline void perf_log_if_due(uint64_t now_us)
          static_cast<unsigned long long>(g_perf_ppu_sprite_scan_oam_us),
          static_cast<unsigned long long>(g_perf_ppu_sprite_scan_fetch_us),
          static_cast<unsigned long long>(g_perf_ppu_sprite_scan_write_us),
+         static_cast<unsigned long>(g_perf_ppu_sprite_visible_count),
+         static_cast<unsigned long>(g_perf_ppu_sprite_scan_skip_count),
          static_cast<unsigned long long>(g_perf_ppu_sprite_comp_us),
          static_cast<unsigned long long>(g_perf_ppu_sprite_clip_us),
-         static_cast<unsigned long>(g_perf_ppu_sprite_visible_count),
          static_cast<unsigned long long>(g_perf_mapper_hsync_us),
          static_cast<unsigned long long>(g_perf_mapper_vsync_us),
          static_cast<unsigned long long>(g_perf_load_frame_us),
@@ -1865,11 +1868,18 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     nSprCnt = 0;
     int sprite_min_x = NES_DISP_WIDTH;
     int sprite_max_x_exclusive = 0;
+    uint32_t sprite_scan_skip_count = 0;
     for (pSPRRAM = SPRRAM + (63 << 2); pSPRRAM >= SPRRAM; pSPRRAM -= 4)
     {
       nY = pSPRRAM[SPR_Y] + 1;
       if (nY > PPU_Scanline || nY + PPU_SP_Height <= PPU_Scanline)
+      {
+        if constexpr (kPerfLogToSerial)
+        {
+          ++sprite_scan_skip_count;
+        }
         continue; // Next sprite
+      }
 
       /*-------------------------------------------------------------------*/
       /*  A sprite in scanning line                                        */
@@ -2085,6 +2095,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     }
     if constexpr (kPerfLogToSerial)
     {
+      g_perf_ppu_sprite_scan_skip_count += sprite_scan_skip_count;
       g_perf_ppu_sprite_scan_us += time_us_64() - sprite_block_start_us;
       sprite_block_start_us = time_us_64();
     }

@@ -10,6 +10,118 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.14 sprite OAM scan skip count 計測版 (2026-04-29)
+
+- `feature/hot-path-metrics`
+  で、`1.1.13`
+  の sprite scan
+  内訳計測を受け、
+  non-visible sprite
+  の skip
+  数を確認する計測版を作成した
+- 目的:
+  - `ppu_sprite_scan_us`
+    のうち、
+    visible sprite
+    の setup / fetch / write
+    では説明できない部分が、64 sprite
+    の Y 判定 loop
+    / non-visible OAM scan
+    固定費に近いかを見る
+- 変更内容:
+  - `[CORE1_BASE]`
+    に
+    `ppu_sprite_scan_skip_count`
+    を追加した
+  - 重複 field
+    を避けるため、
+    `ppu_sprite_scan_loop_us`
+    と
+    `ppu_sprite_scan_visible_count`
+    は追加しなかった
+  - `ppu_sprite_visible_count`
+    は既存 field
+    を使う
+  - system version
+    を
+    `1.1.14`
+    に更新した
+- build 確認:
+  - banner:
+    `PicoCalc NESco Ver. 1.1.14 Build Apr 29 2026 11:03:15`
+  - UF2 SHA-256:
+    `7bb391ca43c3c7e5bda9061de0004f93a77514776eadbef46cdb9279cabb167d`
+  - ELF SHA-256:
+    `607da70cfceffbf3e12c5b06094fa8603647b22a4dc12836fc1bee2f881496e6`
+  - size:
+    `text 285648 / data 0 / bss 97388`
+- 実機ログ確認:
+  - log:
+    `/home/fuyuki/pico_dvl/codex/log/pico20260429_110452.log`
+  - log
+    で
+    `LodeRunner.nes`
+    `Xevious.nes`
+    `Project_DART_V1.0.nes`
+    の
+    `[ROM_START]`
+    と
+    `[CORE1_BASE]`
+    を確認した
+  - `ppu_sprite_scan_skip_count`
+    が出力されることを確認した
+- sprite scan
+  が出ている sample
+  に限定した平均値:
+  - `LodeRunner.nes`
+    - samples:
+      `42`
+    - `skip_per_frame`:
+      `14132.3`
+    - `visible_per_frame`:
+      `101.7`
+    - `scan_unaccounted_per_frame`:
+      `1166.0 us`
+    - `scan_unaccounted / scan`:
+      約 `90.0%`
+  - `Xevious.nes`
+    - samples:
+      `33`
+    - `skip_per_frame`:
+      `14512.5`
+    - `visible_per_frame`:
+      `219.6`
+    - `scan_unaccounted_per_frame`:
+      `1302.8 us`
+    - `scan_unaccounted / scan`:
+      約 `83.0%`
+  - `Project_DART_V1.0.nes`
+    - samples:
+      `27`
+    - `skip_per_frame`:
+      `13944.9`
+    - `visible_per_frame`:
+      `114.5`
+    - `scan_unaccounted_per_frame`:
+      `1169.3 us`
+    - `scan_unaccounted / scan`:
+      約 `89.8%`
+- 判断:
+  - 3 ROM
+    とも `skip_per_frame`
+    は 240 scanlines x 64 sprites
+    の全走査に近い値になった
+  - visible sprite
+    内部処理ではなく、毎 scanline
+    で 64 sprite
+    を見る固定費が次の主要候補になった
+  - 次は active sprite list
+    / scanline prefilter
+    のような構造変更を検討する
+  - `1.1.14`
+    は計測版であり、このまま release
+    用とはしない
+
 ## 1.1.13 sprite scan 内訳計測版 (2026-04-29)
 
 - `feature/hot-path-metrics`
