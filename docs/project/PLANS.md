@@ -30,13 +30,18 @@
 
 ## 現在必要な計画
 
-- Background tile hot path optimization
-  - 計画: `docs/design/BG_TILE_HOTPATH_OPTIMIZATION_PLAN_20260429.md`
-  - `1.1.5` の詳細計測結果をもとに、`renderBgTile()` full tile path から小さく改善する。
-  - まず `1.1.6` で full tile path の小改善を行い、`LodeRunner` / `Xevious` / `DART` で再計測する。
+- BG opaque LUT optimization
+  - 計画: `docs/design/BG_OPAQUE_LUT_OPTIMIZATION_PLAN_20260429.md`
+  - `1.1.8` の軽量計測結果を基準に、`renderBgTileFull()` の `dst_opaque` 生成だけを LUT 化して小さく検証する。
+  - 32bit store / partial tile / `MapperPPU()` / `emitBgTile()` 構造変更は行わない。
 
 ## 完了済み計画 / 結果
 
+- Background tile hot path optimization
+  - 計画: `docs/design/BG_TILE_HOTPATH_OPTIMIZATION_PLAN_20260429.md`
+  - 結果: `docs/project/Picocalc_NESco_HISTORY.md`
+  - `1.1.5` から `1.1.8` までの計測で、tile ごとの詳細 timing 計測は通常実行性能の判断には重すぎると確認。
+  - `1.1.8` を軽量計測の正本として採用。
 - Core1 活用
   - 計画: `docs/design/CORE1_PARALLELIZATION_WORK_PLAN_20260428.md`
   - Pico の core1 を使った keyboard polling と LCD worker 化。
