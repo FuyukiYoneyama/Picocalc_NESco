@@ -10,6 +10,38 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.9 background opaque LUT 実験は不採用 (2026-04-29)
+
+- `feature/hot-path-metrics` で、background full tile path の `dst_opaque` 生成だけを LUT 化する実験を行った
+- 目的は、`1.1.8` の軽量計測で full tile が 95% 以上を占めることを根拠に、sprite 合成用 opaque buffer 生成を小さく軽くできるか確認すること
+- 変更内容:
+  - `g_bg_opaque4_lut[16][4]` を追加した
+  - LUT は `const` を付けず、RAM 側に置く方針にした
+  - `renderBgTileFull()` の `dst_opaque[0..7]` 生成を shift から LUT 参照へ変更した
+  - `renderPacked4()`、partial tile path、palette 展開、`MapperPPU()` 呼び出し順は変更しなかった
+  - system version を `1.1.9` に更新した
+- build 確認:
+  - banner: `PicoCalc NESco Ver. 1.1.9 Build Apr 29 2026 09:43:43`
+  - UF2 SHA-256: `ff5845447a4d1c458882107c890691da8fddd823ee1ecee2ee1407b79cf177ae`
+  - ELF SHA-256: `6267c122b819638a8ff176f40c1a2f93c9b6638834e85613b920fab8bdbffd18`
+  - size: `text 284560 / data 0 / bss 97316`
+  - `g_bg_opaque4_lut` は `readelf` 上で `.data` section、address `0x2000b1c4`、size `64 bytes`
+- 実機比較:
+  - log: `/home/fuyuki/pico_dvl/codex/log/pico20260429_094621.log`
+  - `[ROM_START]` で確認した ROM:
+    - `LodeRunner.nes`: mapper 0
+    - `Xevious.nes`: mapper 0
+    - `Project_DART_V1.0.nes`: mapper 30
+  - `1.1.8` からの比較:
+    - `LodeRunner.nes`: fps -0.23%、`frame_us_avg` +0.36%、`ppu_bg_tile_us` +2.85%
+    - `Xevious.nes`: fps -0.69%、`frame_us_avg` +0.64%、`ppu_bg_tile_us` +3.10%
+    - `Project_DART_V1.0.nes`: fps -0.64%、`frame_us_avg` +0.59%、`ppu_bg_tile_us` +2.06%
+- 判断:
+  - 3 ROM すべてで `ppu_bg_tile_us` が悪化した
+  - `frame_us_avg` も 3 ROM すべてで悪化した
+  - 採用条件を満たさないため、この LUT 化は採用しない
+  - 実装は commit せず戻し、現在の採用状態は `1.1.8` の軽量計測版を維持する
+
 ## 1.1.8 background tile 軽量計測ブランチ (2026-04-29)
 
 - `feature/hot-path-metrics` で、background tile の軽量計測版を追加した
