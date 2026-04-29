@@ -10,6 +10,25 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.8 background tile 軽量計測ブランチ (2026-04-29)
+
+- `feature/hot-path-metrics` で、background tile の軽量計測版を追加した
+- 目的は、`1.1.5` / `1.1.6` の tile ごとの詳細 timing 計測が hot path を乱している可能性を下げ、より通常実行に近い状態で `ppu_bg_tile_us` と tile 数を確認すること
+- 変更内容:
+  - `emitBgTile()` 内の tile ごとの `time_us_64()` 計測を外した
+  - `ppu_bg_tile_us` の大枠計測は維持した
+  - `ppu_bg_tile_pal_us` / `ppu_bg_tile_build_us` / `ppu_bg_tile_render_us` / `ppu_bg_mapperppu_us` は log format 互換のため残すが、この版では加算しない
+  - `ppu_bg_tile_full_count` と `ppu_bg_tile_partial_count` を追加した
+  - `ppu_bg_tile_count` は tile ごとの counter として維持した
+- system version を `1.1.8` に更新した
+- build 確認:
+  - `NESCO_CORE1_BASELINE_LOG=ON`
+  - banner: `PicoCalc NESco Ver. 1.1.8 Build Apr 29 2026 09:11:09`
+  - UF2 SHA-256: `ecb8461042fee2b4d6bc6d779bf96131cf3346a3c0361237b116669fde62772b`
+  - ELF SHA-256: `868c163a433d2755fa9e200b75a70632422afc62f803e66f2a5506e0a12132df`
+  - `.bss = 97316`
+  - `1.1.6` から `.bss` は 8 bytes 増加した
+
 ## 1.1.7 background full tile direct path 実験は不採用 (2026-04-29)
 
 - `feature/hot-path-metrics` で、background full tile path の descriptor 経由を避ける実験を行った
