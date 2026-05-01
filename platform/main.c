@@ -65,7 +65,6 @@ int main(void) {
     uart_set_baudrate(uart_default, NESCO_UART_BAUD_RATE);
 #endif
     printf("%s\r\n", PICOCALC_NESCO_BANNER_FULL);
-    printf("[BOOT] uart baud=%lu\r\n", (unsigned long)NESCO_UART_BAUD_RATE);
     __malloc_trim_threshold = 0x200u;
 #if defined(NESCO_RUNTIME_LOGS)
     extern size_t __malloc_top_pad;

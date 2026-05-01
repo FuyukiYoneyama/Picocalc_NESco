@@ -1,6 +1,7 @@
 #include "core1_worker.h"
 
 #include "display.h"
+#include "runtime_log.h"
 
 #include "pico/multicore.h"
 #include "pico/stdlib.h"
@@ -196,10 +197,9 @@ bool core1_wait_idle_ack(unsigned timeout_ms) {
         sleep_ms(1);
     } while (absolute_time_diff_us(get_absolute_time(), deadline) > 0);
 
-    printf("[CORE1] idle ack timeout services=%u status=%u\n",
-           s_core1_requested_services,
-           s_core1_status);
-    fflush(stdout);
+    NESCO_LOGF("[CORE1] idle ack timeout services=%u status=%u\n",
+               s_core1_requested_services,
+               s_core1_status);
     return false;
 }
 

@@ -24,6 +24,67 @@
     - 起動確認
 - この確認は起動確認までであり、長時間 gameplay / save / screenshot / ESC 復帰などの詳細確認は別扱いとする
 
+## 1.1.24 release candidate 整理 (2026-05-02)
+
+- `1.1.22`
+  を release
+  する前提で確認したが、採用しなかった実験 build
+  `1.1.23`
+  の生成物が `build/`
+  に残っていたため、混乱を避けて release candidate
+  version を `1.1.24`
+  に更新した
+- 変更内容:
+  - 起動時の UART 出力を `PicoCalc NESco Ver. ... Build ...`
+    の 1 行だけにした
+  - `platform/main.c`
+    の `[BOOT] uart baud=...`
+    出力を削除した
+  - `core1_wait_idle_ack()`
+    の timeout 出力を `NESCO_LOGF`
+    経由にし、release build
+    では出力しないようにした
+  - `NESCO_CORE1_BASELINE_LOG`
+    を OFF
+    にした release build
+    で未使用 warning
+    が出ないよう、`rom_log_basename`
+    を baseline log
+    有効時だけ使う形にした
+- release build options:
+  - `NESCO_RUNTIME_LOGS=OFF`
+  - `NESCO_INPUT_IO_LOGS=OFF`
+  - `NESCO_BOKOSUKA_STATE_LOGS=OFF`
+  - `NESCO_CORE1_BASELINE_LOG=OFF`
+  - `NESCO_CORE1_KEYBOARD_LOG=OFF`
+- build:
+  - system version
+    `1.1.24`
+  - banner:
+    `PicoCalc NESco Ver. 1.1.24 Build May  2 2026 08:00:10`
+  - size:
+    `text=278604 data=0 bss=97040 dec=375644 hex=5bb5c`
+  - UF2 SHA-256:
+    `054f9a4c71b109057d6c53869a32de677a9b764cbafa65bf13cc70db75a9f5d2`
+  - ELF SHA-256:
+    `31227c0b56c7671db4f7a9e2b511d74949e8c94c1210091c9ee54d81c69a859d`
+- artifact:
+  - `local_uf2_archive/Picocalc_NESco-1.1.24.uf2`
+  - `local_uf2_archive/`
+    は `.gitignore`
+    対象であり、GitHub Release
+    へ添付するためのローカル保管場所として扱う
+- 確認:
+  - `strings build/Picocalc_NESco.elf | rg "PicoCalc NESco Ver|\\[BOOT\\]|\\[ROM_START\\]|\\[FPS_SUMMARY\\]|\\[CORE1\\]|\\[MENU\\]|\\[ROM\\]"`
+    で、banner
+    以外の runtime log
+    文字列が残っていないことを確認した
+  - `cmake -LA build | rg "NESCO_.*LOG"`
+    で release log
+    options
+    が OFF
+    であることを確認した
+
 ## Mapper7 / AxROM 画面崩れ保留 (2026-04-29)
 
 - `Solstice (Japan)`

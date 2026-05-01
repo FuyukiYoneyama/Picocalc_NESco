@@ -18,29 +18,29 @@ enum {
     DISPLAY_MODE_NES_VIEW = 1,
 };
 
-static const char *rom_log_basename(const char *path)
-{
-    const char *base = path;
-
-    if (!path)
-    {
-        return "";
-    }
-
-    for (const char *p = path; *p != '\0'; ++p)
-    {
-        if (*p == '/' || *p == '\\')
-        {
-            base = p + 1;
-        }
-    }
-
-    return base;
-}
-
 static void log_rom_start_once(const char *path)
 {
 #if defined(NESCO_CORE1_BASELINE_LOG)
+    auto rom_log_basename = [](const char *log_path) -> const char *
+    {
+        const char *base = log_path;
+
+        if (!log_path)
+        {
+            return "";
+        }
+
+        for (const char *p = log_path; *p != '\0'; ++p)
+        {
+            if (*p == '/' || *p == '\\')
+            {
+                base = p + 1;
+            }
+        }
+
+        return base;
+    };
+
     std::printf("[ROM_START] name=%s path=%s mapper=%u prg16=%u chr8=%u battery=%u trainer=%u\n",
                 rom_log_basename(path),
                 path ? path : "",
