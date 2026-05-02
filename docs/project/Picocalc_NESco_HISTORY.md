@@ -87,7 +87,7 @@
 
 ## Mapper7 / AxROM 画面崩れ保留 (2026-04-29)
 
-- `Solstice (Japan)`
+- Mapper7 ROM
   の Picocalc_NESco screenshot
   で、title / background
   の nametable
@@ -120,7 +120,7 @@
 
 ## Mapper9 / MMC2 画面崩れ保留 (2026-04-29)
 
-- `Punch-Out!! (USA)`
+- Mapper9 ROM
   の Picocalc_NESco screenshot
   で、portrait / match
   画面の CHR / background

@@ -45,14 +45,14 @@
 ## 既知の不具合
 
 - Mapper7 / AxROM
-  - `Solstice (Japan)`
+  - Mapper7 ROM
     で nametable / background
     崩れを確認しています。
   - one-screen mirroring
     反転実験では改善しませんでした。
   - 現時点では不具合ありとして保留しています。
 - Mapper9 / MMC2
-  - `Punch-Out!! (USA)`
+  - Mapper9 ROM
     で CHR / background
     崩れを確認しています。
   - MMC2 latch trigger

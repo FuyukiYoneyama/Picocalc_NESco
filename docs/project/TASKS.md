@@ -6,7 +6,7 @@
 ## 互換性・未確認機能
 
 - `[pending]` Mapper7 / AxROM の画面崩れを不具合ありとして保留する
-  - `Solstice (Japan)`
+  - Mapper7 ROM
     で nametable / background
     崩れを確認した
   - Mapper7 one-screen mirroring
@@ -14,7 +14,7 @@
     反転実験では改善しなかった
   - いったん追加追跡は止め、必要時に CHR RAM / PPU nametable 更新タイミング側から再調査する
 - `[pending]` Mapper9 / MMC2 の画面崩れを不具合ありとして保留する
-  - `Punch-Out!! (USA)`
+  - Mapper9 ROM
     で CHR / background
     崩れを確認した
   - MMC2 latch trigger
