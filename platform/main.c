@@ -2,7 +2,7 @@
  * main.c — PicoCalc NES emulator entry point
  *
  * Sequence:
- *   1. RP2040 hardware init (250 MHz, UART, SPI, I2C)
+ *   1. RP2040 clock / stdio / UART init
  *   2. display_init()   — LCD + RGB444→RGB565 LUT
  *   3. input_init()     — I2C keyboard
  *   4. audio_init()     — PWM/DMA audio hardware (power-on init)

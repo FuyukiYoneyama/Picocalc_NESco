@@ -2,7 +2,7 @@
  * version.h — Picocalc_NESco system-wide version information
  *
  * System version is managed intentionally by the project.
- * The assistant bumps PICOCALC_NESCO_VERSION before each reported build.
+ * PICOCALC_NESCO_VERSION is bumped for releases or significant checkpoints.
  * Build id changes on every compile so hardware logs can distinguish binaries.
  */
 

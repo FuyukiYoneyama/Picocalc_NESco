@@ -3,7 +3,8 @@
  *
  * Video path (per scanline):
  *   InfoNES_PreDrawLine points the PPU at s_line_buffer[256].
- *   InfoNES_PostDrawLine packs that RGB565 line into the LCD DMA buffer.
+ *   InfoNES_PostDrawLine either queues that RGB565 line for the core1 LCD
+ *   worker, or packs it directly into the LCD DMA buffer on the fallback path.
  *   Completed strips are flushed to the active NES viewport.
  *
  * Normal view keeps the original 256×240 frame centered on the 320×320 LCD.

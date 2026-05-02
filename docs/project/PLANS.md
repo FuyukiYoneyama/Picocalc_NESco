@@ -30,13 +30,31 @@
 
 ## 現在必要な計画
 
-- Mapper152 implementation
-  - 計画: `docs/design/MAPPER152_IMPLEMENTATION_PLAN_20260429.md`
-  - Mapper70 近似の Bandai 74161/7432 系 mapper として、小さく追加する。
-  - 初回は bus conflict を再現せず、実機 ROM がない場合は未確認事項として TASKS に残す。
+- 現時点で、実装開始前レビュー中の計画はなし。
 
 ## 完了済み計画 / 結果
 
+- Compile-time logging cleanup / source comment cleanup
+  - 結果: `docs/project/Picocalc_NESco_HISTORY.md`
+  - runtime / perf log
+    の compile-time macro
+    整理を実施した。
+  - 続けて、PicoCalc_NESco
+    側 source comment
+    と現在実装のずれを確認し、comment
+    のみ更新した。
+  - 詳細計画は完了後に HISTORY
+    へ統合し、独立文書としては削除した。
+- Mapper152 implementation
+  - 結果: `docs/project/Picocalc_NESco_HISTORY.md`
+  - Mapper70 近似の Bandai 74161/7432 系 mapper として追加した。
+  - 初回実装では bus conflict
+    は再現していない。
+  - Mapper152 ROM
+    の起動確認結果は HISTORY
+    に記録済み。
+  - 実装計画は完了後に HISTORY
+    へ統合し、独立文書としては削除した。
 - Hot path metrics / frame rate improvement
   - 計画:
     - `docs/design/BG_TILE_HOTPATH_OPTIMIZATION_PLAN_20260429.md`
@@ -74,22 +92,22 @@
     `1.0.0` では build / artifact / 文書 / git 状態の整合性を中心に確認する。
   - 2026-04-26 に作成済み。
 - 公開準備方針
-  - 計画: `docs/release/PUBLIC_RELEASE_PREP_PLAN_20260426.md`
   - 結果:
     - `core/README.md`
     - `docs/release/FINAL_CODE_REVIEW_20260426.md`
     - `docs/release/RELEASE_ARTIFACT_PROCEDURE.md`
-    - `docs/release/RELEASE_BUILD_CHECK_20260426.md`
   - 2026-04-26 に完了済み。
+  - 公開準備の計画文書と中間 build check
+    は完了後に整理し、独立文書としては削除した。
 - README 機能記述と実装状態の最終照合
-  - 計画: `docs/release/README_IMPLEMENTATION_FINAL_AUDIT_PLAN_20260426.md`
   - 結果: `docs/release/README_IMPLEMENTATION_FINAL_AUDIT_20260426.md`
   - 2026-04-26 に完了済み。
+  - 照合計画は結果文書へ統合済みとして削除した。
 - clean build / release artifact 手順
   - 手順: `docs/release/RELEASE_ARTIFACT_PROCEDURE.md`
-  - build 確認: `docs/release/RELEASE_BUILD_CHECK_20260426.md`
   - `1.0.0` build 確認: `docs/release/RELEASE_BUILD_CHECK_1_0_0.md`
-  - 2026-04-26 に手順書作成と current build 確認を完了。
+  - 2026-04-26 に手順書作成と `1.0.0`
+    build 確認を完了。
 - 最新 `main` の最終コードレビュー
   - 結果: `docs/release/FINAL_CODE_REVIEW_20260426.md`
   - 2026-04-26 に完了済み。

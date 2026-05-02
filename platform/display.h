@@ -2,7 +2,8 @@
  * display.h — LCD display pipeline interface (PicoCalc)
  *
  * Implements InfoNES_PreDrawLine / InfoNES_PostDrawLine for the active NES
- * viewport. Lines are packed into LCD DMA strips before transfer.
+ * viewport. Lines are packed into LCD DMA strips directly or via the core1
+ * LCD worker queue before transfer.
  *
  * LCD: 320×320 RGB565
  * NES normal view: 256×240 pixels at (32,24)

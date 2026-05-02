@@ -10,6 +10,70 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## Source comment review / comment cleanup (2026-05-02)
+
+- PicoCalc_NESco 側で構築・変更してきた source comment
+  と現在の実装にずれがないか確認した
+- 対象:
+  - `platform/`
+  - `drivers/`
+  - `infones/mapper/`
+    の追加 mapper 周辺
+  - `infones/InfoNES.cpp`
+    の PicoCalc_NESco
+    側から呼ばれる platform hook 周辺
+- 原典由来の
+  `infones/`
+  platform files、
+  `ppc2002/`,
+  `ppc2003/`,
+  `win32/`,
+  `linux/`
+  は今回の PicoCalc_NESco
+  実行経路とは別枠として扱った
+- 修正した comment:
+  - `platform/version.h`
+    - version
+      は release / significant checkpoint
+      で更新し、通常 build
+      の識別は build id
+      で行う説明へ更新した
+  - `platform/main.c`
+    - 起動 sequence
+      の step 1
+      を clock / stdio / UART init
+      に合わせた
+  - `platform/rom_image.h`
+    / `platform/rom_image.c`
+    - SD RAM path、
+      SD Flash staged path、
+      SYSTEM FLASH entry
+      を含む ROM loading
+      説明へ更新した
+  - `platform/audio.h`
+    - PWM interrupt
+      ではなく DMA IRQ refill
+      経由で audio ring
+      を消費する説明へ更新した
+    - `AUDIO_DMA_CHUNK`
+      は legacy chunk constant
+      として説明を更新した
+  - `platform/input.c`
+    - 実装で確認できない
+      `Ctrl+R`
+      reset
+      記述を削除した
+  - `platform/display.h`
+    / `platform/display.c`
+    - core1 LCD worker queue
+      経由と direct fallback path
+      の両方がある説明へ更新した
+- source comment
+  のみ更新し、処理本体は変更していない
+- 一時記録
+  `docs/project/SOURCE_COMMENT_REVIEW_20260502.md`
+  は本履歴へ統合したため削除した
+
 ## 追加 ROM 起動確認 (2026-04-29)
 
 - 実機で次の ROM 起動を確認した
@@ -87,8 +151,7 @@
 
 ## Compile-time logging cleanup 完了 (2026-05-02)
 
-- `docs/design/COMPILE_TIME_LOGGING_CLEANUP_PLAN_20260502.md`
-  に従い、runtime / perf log
+- runtime / perf log
   の compile-time macro
   整理を実施した
 - 実装内容:
@@ -181,6 +244,8 @@
   - `bd75be8 Use runtime log macro in ROM menu and loader`
   - `282f4dd Use compile-time perf log macro`
 - この作業は完了扱いとする
+- 詳細計画文書は完了後に本 HISTORY
+  へ統合したため、独立文書としては削除した
 
 ## Mapper7 / AxROM 画面崩れ保留 (2026-04-29)
 

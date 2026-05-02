@@ -2,9 +2,10 @@
  * rom_image.h — ROM image loader (Flash XIP / SD card backend)
  *
  * Implements InfoNES_ReadRom() and InfoNES_ReleaseRom().
- * Supports two ROM backends:
- *   - Flash XIP: ROM embedded in RP2040 Flash; accessed via const pointer
- *   - File: ROM loaded from SD card into heap (fallback)
+ * Supports ROM images from:
+ *   - Flash XIP: staged ROM area or existing SYSTEM FLASH entry
+ *   - SD card RAM path: small ROM files copied into heap
+ *   - SD card Flash path: larger ROM files staged into the Flash XIP ROM area
  *
  * Part of Picocalc_NESco
  * MIT License

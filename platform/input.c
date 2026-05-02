@@ -8,7 +8,7 @@
  *   [                  → B button
  *   ]                  → A button
  *   Escape             → PAD_SYS_QUIT
- *   F1 / Ctrl+R        → PAD_SYS_RESET
+ *   F1                 → PAD_SYS_RESET
  *   F5                → PAD_SYS_SCREENSHOT
  *   Shift+W            → PAD_SYS_VIEW_TOGGLE
  *

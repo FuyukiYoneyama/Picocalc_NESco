@@ -3,7 +3,7 @@
  *
  * Ring-buffer + PWM audio pipeline:
  *   APU → InfoNES_SoundOutput → g_audio_ring[4096]
- *   PWM interrupt → consume ring samples → PicoCalc audio pins
+ *   DMA IRQ refill → consume ring samples → PWM DMA buffer → PicoCalc audio pins
  *
  * Part of Picocalc_NESco
  * MIT License
@@ -17,7 +17,7 @@ extern "C" {
 #endif
 
 #define AUDIO_RING_SIZE   4096   /* 4 KB ring buffer */
-#define AUDIO_DMA_CHUNK   512    /* Samples per DMA transfer */
+#define AUDIO_DMA_CHUNK   512    /* Legacy chunk constant; active PWM DMA half size is driver-local */
 
 extern BYTE g_audio_ring[AUDIO_RING_SIZE];
 

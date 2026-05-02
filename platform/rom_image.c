@@ -40,7 +40,8 @@
 
 /* =====================================================================
  *  Flash XIP configuration
- *  ROM embedded at fixed offset from Flash base.
+ *  ROM data area at a fixed offset from Flash base. This area can hold a
+ *  staged SD ROM and is also used for the SYSTEM FLASH entry.
  *  Reserve one sector for persistent metadata so staged ROM info survives
  *  power cycle.
  * ===================================================================== */
