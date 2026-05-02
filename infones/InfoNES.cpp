@@ -328,12 +328,11 @@ inline void perf_log_if_due(uint64_t now_us)
           ? "stretch"
           : "normal";
 
-  printf("[FPS_SUMMARY] t_us=%llu frames=%lu fps_x100=%llu view_mode=%s\n",
-         static_cast<unsigned long long>(now_us),
-         static_cast<unsigned long>(g_perf_frames),
-         static_cast<unsigned long long>(fps_x100),
-         view_mode);
-  fflush(stdout);
+  NESCO_LOG_PERF("[FPS_SUMMARY] t_us=%llu frames=%lu fps_x100=%llu view_mode=%s\n",
+                 static_cast<unsigned long long>(now_us),
+                 static_cast<unsigned long>(g_perf_frames),
+                 static_cast<unsigned long long>(fps_x100),
+                 view_mode);
 
   perf_reset();
 }
