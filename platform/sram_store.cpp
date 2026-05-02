@@ -4,20 +4,11 @@
 #include "InfoNES_Mapper.h"
 #include "InfoNES_System.h"
 #include "rom_image.h"
+#include "runtime_log.h"
 #include "ff.h"
 
 #include <cstdio>
 #include <cstring>
-
-#if defined(NESCO_RUNTIME_LOGS)
-#define NESCO_CPP_LOGF(...)        \
-    do {                           \
-        std::printf(__VA_ARGS__);  \
-        std::fflush(stdout);       \
-    } while (0)
-#else
-#define NESCO_CPP_LOGF(...) do { } while (0)
-#endif
 
 namespace {
 
@@ -150,7 +141,7 @@ void sram_ensure_save_dir(void)
 
     FRESULT fr = f_mkdir("0:/saves");
     if (fr != FR_OK && fr != FR_EXIST) {
-        NESCO_CPP_LOGF("[SRAM] mkdir failed path=0:/saves fr=%d\r\n", (int)fr);
+        NESCO_LOG_RUNTIME("[SRAM] mkdir failed path=0:/saves fr=%d\r\n", (int)fr);
     }
 }
 
@@ -176,7 +167,7 @@ void sram_store_restore_map30(void)
     if (fr != FR_OK || bytes_read != sizeof(header) ||
         std::memcmp(header.magic, "M30S", 4) != 0 || header.version != 1) {
         f_close(&file);
-        NESCO_CPP_LOGF("[M30] restore failed path=%s fr=%d header=%u\r\n",
+        NESCO_LOG_RUNTIME("[M30] restore failed path=%s fr=%d header=%u\r\n",
                        s_current_map30_path,
                        (int)fr,
                        (unsigned)bytes_read);
@@ -186,7 +177,7 @@ void sram_store_restore_map30(void)
     fr = f_read(&file, slot_data, sizeof(slot_data), &bytes_read);
     f_close(&file);
     if (fr != FR_OK || bytes_read != sizeof(slot_data)) {
-        NESCO_CPP_LOGF("[M30] restore failed path=%s fr=%d bytes=%u\r\n",
+        NESCO_LOG_RUNTIME("[M30] restore failed path=%s fr=%d bytes=%u\r\n",
                        s_current_map30_path,
                        (int)fr,
                        (unsigned)bytes_read);
@@ -204,7 +195,7 @@ void sram_store_restore_map30(void)
 
     Map30_ReapplyState();
     Map30_ClearFlashSaveDirty();
-    NESCO_CPP_LOGF("[M30] restore path=%s slots=%u\r\n",
+    NESCO_LOG_RUNTIME("[M30] restore path=%s slots=%u\r\n",
                    s_current_map30_path,
                    restored_slots);
 }
@@ -237,14 +228,14 @@ void sram_store_flush_map30(void)
 
     fr = f_open(&file, s_current_map30_path, FA_CREATE_ALWAYS | FA_WRITE);
     if (fr != FR_OK) {
-        NESCO_CPP_LOGF("[M30] flush open failed path=%s fr=%d\r\n", s_current_map30_path, (int)fr);
+        NESCO_LOG_RUNTIME("[M30] flush open failed path=%s fr=%d\r\n", s_current_map30_path, (int)fr);
         return;
     }
 
     fr = f_write(&file, &header, sizeof(header), &bytes_written);
     if (fr != FR_OK || bytes_written != sizeof(header)) {
         f_close(&file);
-        NESCO_CPP_LOGF("[M30] flush failed path=%s fr=%d bytes=%u\r\n",
+        NESCO_LOG_RUNTIME("[M30] flush failed path=%s fr=%d bytes=%u\r\n",
                        s_current_map30_path,
                        (int)fr,
                        (unsigned)bytes_written);
@@ -254,7 +245,7 @@ void sram_store_flush_map30(void)
     fr = f_write(&file, slot0, 0x4000, &bytes_written);
     if (fr != FR_OK || bytes_written != 0x4000u) {
         f_close(&file);
-        NESCO_CPP_LOGF("[M30] flush failed path=%s fr=%d bytes=%u\r\n",
+        NESCO_LOG_RUNTIME("[M30] flush failed path=%s fr=%d bytes=%u\r\n",
                        s_current_map30_path,
                        (int)fr,
                        (unsigned)bytes_written);
@@ -264,7 +255,7 @@ void sram_store_flush_map30(void)
     fr = f_write(&file, slot1, 0x4000, &bytes_written);
     f_close(&file);
     if (fr != FR_OK || bytes_written != 0x4000u) {
-        NESCO_CPP_LOGF("[M30] flush failed path=%s fr=%d bytes=%u\r\n",
+        NESCO_LOG_RUNTIME("[M30] flush failed path=%s fr=%d bytes=%u\r\n",
                        s_current_map30_path,
                        (int)fr,
                        (unsigned)bytes_written);
@@ -272,7 +263,7 @@ void sram_store_flush_map30(void)
     }
 
     Map30_ClearFlashSaveDirty();
-    NESCO_CPP_LOGF("[M30] flush path=%s slots=%u\r\n",
+    NESCO_LOG_RUNTIME("[M30] flush path=%s slots=%u\r\n",
                    s_current_map30_path,
                    (unsigned)(header.used[0] + header.used[1]));
 }
@@ -315,14 +306,14 @@ extern "C" void sram_store_restore_for_current_rom(void)
     sram_zero_buffer();
 
     if (!sram_current_rom_uses_save()) {
-        NESCO_CPP_LOGF("[SRAM] restore skip no-sram path=%s\r\n", s_current_rom_path);
+        NESCO_LOG_RUNTIME("[SRAM] restore skip no-sram path=%s\r\n", s_current_rom_path);
         sram_store_restore_map30();
         return;
     }
 
     fr = f_open(&file, s_current_save_path, FA_READ);
     if (fr != FR_OK) {
-        NESCO_CPP_LOGF("[SRAM] no save found path=%s fr=%d\r\n", s_current_save_path, (int)fr);
+        NESCO_LOG_RUNTIME("[SRAM] no save found path=%s fr=%d\r\n", s_current_save_path, (int)fr);
         sram_store_restore_map30();
         return;
     }
@@ -331,7 +322,7 @@ extern "C" void sram_store_restore_for_current_rom(void)
     f_close(&file);
     if (fr != FR_OK) {
         sram_zero_buffer();
-        NESCO_CPP_LOGF("[SRAM] restore failed path=%s fr=%d\r\n", s_current_save_path, (int)fr);
+        NESCO_LOG_RUNTIME("[SRAM] restore failed path=%s fr=%d\r\n", s_current_save_path, (int)fr);
         sram_store_restore_map30();
         return;
     }
@@ -340,7 +331,7 @@ extern "C" void sram_store_restore_for_current_rom(void)
         std::memset(SRAM + bytes_read, 0, SRAM_SIZE - bytes_read);
     }
     SRAMwritten = false;
-    NESCO_CPP_LOGF("[SRAM] restore path=%s bytes=%u\r\n",
+    NESCO_LOG_RUNTIME("[SRAM] restore path=%s bytes=%u\r\n",
                    s_current_save_path,
                    (unsigned)bytes_read);
 
@@ -358,13 +349,13 @@ extern "C" void sram_store_flush_current_rom(void)
     }
 
     if (!sram_current_rom_uses_save()) {
-        NESCO_CPP_LOGF("[SRAM] flush skip no-sram path=%s\r\n", s_current_rom_path);
+        NESCO_LOG_RUNTIME("[SRAM] flush skip no-sram path=%s\r\n", s_current_rom_path);
         sram_store_flush_map30();
         return;
     }
 
     if (!SRAMwritten) {
-        NESCO_CPP_LOGF("[SRAM] flush skip clean path=%s\r\n", s_current_save_path);
+        NESCO_LOG_RUNTIME("[SRAM] flush skip clean path=%s\r\n", s_current_save_path);
         sram_store_flush_map30();
         return;
     }
@@ -373,7 +364,7 @@ extern "C" void sram_store_flush_current_rom(void)
 
     fr = f_open(&file, s_current_save_path, FA_CREATE_ALWAYS | FA_WRITE);
     if (fr != FR_OK) {
-        NESCO_CPP_LOGF("[SRAM] flush open failed path=%s fr=%d\r\n", s_current_save_path, (int)fr);
+        NESCO_LOG_RUNTIME("[SRAM] flush open failed path=%s fr=%d\r\n", s_current_save_path, (int)fr);
         sram_store_flush_map30();
         return;
     }
@@ -381,7 +372,7 @@ extern "C" void sram_store_flush_current_rom(void)
     fr = f_write(&file, SRAM, SRAM_SIZE, &bytes_written);
     f_close(&file);
     if (fr != FR_OK || bytes_written != SRAM_SIZE) {
-        NESCO_CPP_LOGF("[SRAM] flush failed path=%s fr=%d bytes=%u\r\n",
+        NESCO_LOG_RUNTIME("[SRAM] flush failed path=%s fr=%d bytes=%u\r\n",
                        s_current_save_path,
                        (int)fr,
                        (unsigned)bytes_written);
@@ -390,7 +381,7 @@ extern "C" void sram_store_flush_current_rom(void)
     }
 
     SRAMwritten = false;
-    NESCO_CPP_LOGF("[SRAM] flush path=%s bytes=%u\r\n",
+    NESCO_LOG_RUNTIME("[SRAM] flush path=%s bytes=%u\r\n",
                    s_current_save_path,
                    (unsigned)bytes_written);
 
