@@ -23,6 +23,7 @@
 #include "InfoNES.h"
 #include "InfoNES_Mapper.h"
 #include "InfoNES_System.h"
+#include "runtime_log.h"
 
 #include "ff.h"
 
@@ -35,11 +36,6 @@
 #  include "pico/stdlib.h"
 #  include "hardware/sync.h"
 #  include "pico/multicore.h"
-#endif
-
-#if !defined(NESCO_RUNTIME_LOGS)
-#define printf(...) ((void)0)
-#define fflush(...) ((void)0)
 #endif
 
 /* =====================================================================
@@ -230,13 +226,12 @@ static void rom_restore_flash_entry_from_metadata(void) {
 void rom_image_log_heap(const char *tag) {
 #if defined(NESCO_RUNTIME_LOGS)
     struct mallinfo mi = mallinfo();
-    printf("[ROM] heap %s arena=%lu used=%lu free=%lu keep=%lu\r\n",
+    NESCO_LOG_RUNTIME("[ROM] heap %s arena=%lu used=%lu free=%lu keep=%lu\r\n",
            tag ? tag : "(null)",
            (unsigned long)mi.arena,
            (unsigned long)mi.uordblks,
            (unsigned long)mi.fordblks,
            (unsigned long)mi.keepcost);
-    fflush(stdout);
 #else
     (void)tag;
 #endif
@@ -253,14 +248,13 @@ void rom_image_log_heap_estimate(const char *tag) {
         reserved_limit = heap_limit;
     }
 
-    printf("[ROM] heap-est %s start=0x%08lx reserve_end=0x%08lx limit=0x%08lx reserve=%lu gap=%lu\r\n",
+    NESCO_LOG_RUNTIME("[ROM] heap-est %s start=0x%08lx reserve_end=0x%08lx limit=0x%08lx reserve=%lu gap=%lu\r\n",
            tag ? tag : "(null)",
            (unsigned long)heap_start,
            (unsigned long)reserved_limit,
            (unsigned long)heap_limit,
            (unsigned long)(reserved_limit - heap_start),
            heap_gap_bytes);
-    fflush(stdout);
 #else
     (void)tag;
 #endif
@@ -492,31 +486,26 @@ static bool rom_sd_mount(void) {
     FRESULT fr;
 
     if (s_fatfs_mounted) {
-        printf("[ROM] SD already mounted\r\n");
-        fflush(stdout);
+        NESCO_LOG_RUNTIME("[ROM] SD already mounted\r\n");
         rom_set_statusf("SD mount ok");
         return true;
     }
     if (s_fatfs_attempted) {
-        printf("[ROM] SD mount previously failed\r\n");
-        fflush(stdout);
+        NESCO_LOG_RUNTIME("[ROM] SD mount previously failed\r\n");
         return false;
     }
     s_fatfs_attempted = true;
 
-    printf("[ROM] mounting SD as 0:/\r\n");
-    fflush(stdout);
+    NESCO_LOG_RUNTIME("[ROM] mounting SD as 0:/\r\n");
     fr = f_mount(&s_fatfs, "0:", 1);
     if (fr != FR_OK) {
-        printf("[ROM] f_mount failed: %d\r\n", (int)fr);
-        fflush(stdout);
+        NESCO_LOG_RUNTIME("[ROM] f_mount failed: %d\r\n", (int)fr);
         rom_set_statusf("SD mount error (%d)", (int)fr);
         return false;
     }
 
     s_fatfs_mounted = true;
-    printf("[ROM] SD mount ok\r\n");
-    fflush(stdout);
+    NESCO_LOG_RUNTIME("[ROM] SD mount ok\r\n");
     rom_set_statusf("SD mount ok");
     return true;
 }
@@ -549,16 +538,13 @@ static int rom_scan_sd_menu_entries(rom_menu_entry_info_t *out_entries, int max_
     int count = start_index;
 
     if (!out_entries || max_entries <= start_index || !rom_sd_mount()) {
-        printf("[ROM] skip SD scan\r\n");
-        fflush(stdout);
+        NESCO_LOG_RUNTIME("[ROM] skip SD scan\r\n");
         return start_index;
     }
 
-    printf("[ROM] scanning %s\r\n", s_current_dir);
-    fflush(stdout);
+    NESCO_LOG_RUNTIME("[ROM] scanning %s\r\n", s_current_dir);
     if (f_opendir(&dir, s_current_dir) != FR_OK) {
-        printf("[ROM] f_opendir failed for %s\r\n", s_current_dir);
-        fflush(stdout);
+        NESCO_LOG_RUNTIME("[ROM] f_opendir failed for %s\r\n", s_current_dir);
         return start_index;
     }
 
@@ -580,15 +566,13 @@ static int rom_scan_sd_menu_entries(rom_menu_entry_info_t *out_entries, int max_
         if (f_readdir(&dir, &fno) != FR_OK || fno.fname[0] == '\0') {
             break;
         }
-        printf("[ROM] dir entry: %s size=%lu attr=%02X\r\n",
+        NESCO_LOG_RUNTIME("[ROM] dir entry: %s size=%lu attr=%02X\r\n",
                fno.fname,
                (unsigned long)fno.fsize,
                (unsigned int)fno.fattrib);
-        fflush(stdout);
         if ((fno.fattrib & AM_DIR) != 0) {
             if (count >= max_entries || count >= ROM_MENU_ENTRY_CAPACITY) {
-                printf("[ROM] menu entry buffer full\r\n");
-                fflush(stdout);
+                NESCO_LOG_RUNTIME("[ROM] menu entry buffer full\r\n");
                 break;
             }
             rom_copy_string(s_menu_labels[count], sizeof(s_menu_labels[count]), "[");
@@ -603,10 +587,9 @@ static int rom_scan_sd_menu_entries(rom_menu_entry_info_t *out_entries, int max_
             s_menu_entries[count].storage = ROM_STORAGE_UNKNOWN;
             s_menu_entries[count].enabled = 1;
             out_entries[count] = s_menu_entries[count];
-            printf("[ROM] add dir entry: %s path=%s\r\n",
+            NESCO_LOG_RUNTIME("[ROM] add dir entry: %s path=%s\r\n",
                    s_menu_entries[count].label,
                    s_menu_entries[count].path);
-            fflush(stdout);
             count++;
             continue;
         }
@@ -614,8 +597,7 @@ static int rom_scan_sd_menu_entries(rom_menu_entry_info_t *out_entries, int max_
             continue;
         }
         if (count >= max_entries || count >= ROM_MENU_ENTRY_CAPACITY) {
-            printf("[ROM] menu entry buffer full\r\n");
-            fflush(stdout);
+            NESCO_LOG_RUNTIME("[ROM] menu entry buffer full\r\n");
             break;
         }
 
@@ -649,20 +631,18 @@ static int rom_scan_sd_menu_entries(rom_menu_entry_info_t *out_entries, int max_
         rom_append_save_tag(s_menu_details[count], sizeof(s_menu_details[count]), s_menu_paths[count]);
         s_menu_entries[count].detail = s_menu_details[count];
         out_entries[count] = s_menu_entries[count];
-        printf("[ROM] add menu entry: %s path=%s mapper=%d mode=%s enabled=%u\r\n",
+        NESCO_LOG_RUNTIME("[ROM] add menu entry: %s path=%s mapper=%d mode=%s enabled=%u\r\n",
                s_menu_entries[count].label,
                s_menu_entries[count].path,
                mapper_no,
                (s_menu_entries[count].storage == ROM_STORAGE_RAM) ? "RAM" :
                (s_menu_entries[count].storage == ROM_STORAGE_FLASH) ? "FLASH" : "UNSUPPORTED",
                (unsigned int)s_menu_entries[count].enabled);
-        fflush(stdout);
         count++;
     }
 
     f_closedir(&dir);
-    printf("[ROM] scan complete, %d entries total\r\n", count);
-    fflush(stdout);
+    NESCO_LOG_RUNTIME("[ROM] scan complete, %d entries total\r\n", count);
     if (count == start_index) {
         rom_set_statusf("No *.nes files on SD");
     } else {
@@ -722,15 +702,13 @@ bool rom_image_enter_directory(const char *path) {
         }
         rom_set_directory(next_dir);
         rom_set_statusf("DIR %s", rom_is_root_dir() ? "/" : s_current_dir + 2);
-        printf("[ROM] cd parent -> %s\r\n", s_current_dir);
-        fflush(stdout);
+        NESCO_LOG_RUNTIME("[ROM] cd parent -> %s\r\n", s_current_dir);
         return true;
     }
 
     rom_set_directory(path);
     rom_set_statusf("DIR %s", rom_is_root_dir() ? "/" : s_current_dir + 2);
-    printf("[ROM] cd %s\r\n", s_current_dir);
-    fflush(stdout);
+    NESCO_LOG_RUNTIME("[ROM] cd %s\r\n", s_current_dir);
     return true;
 }
 
@@ -761,32 +739,28 @@ static int rom_verify_flash_against_file(FIL *file, FSIZE_t file_size) {
     uint32_t verified = 0;
 
     if (f_lseek(file, 0) != FR_OK) {
-        printf("[ROM] flash verify seek failed\r\n");
-        fflush(stdout);
+        NESCO_LOG_RUNTIME("[ROM] flash verify seek failed\r\n");
         return -1;
     }
 
     while (verified < file_size) {
         UINT to_read = (UINT)((file_size - verified) > FLASH_PAGE_SIZE ? FLASH_PAGE_SIZE : (file_size - verified));
         if (f_read(file, page_buf, to_read, &bytes_read) != FR_OK || bytes_read != to_read) {
-            printf("[ROM] flash verify read failed at %lu bytes=%u\r\n",
+            NESCO_LOG_RUNTIME("[ROM] flash verify read failed at %lu bytes=%u\r\n",
                    (unsigned long)verified,
                    (unsigned int)bytes_read);
-            fflush(stdout);
             return -1;
         }
         if (memcmp(s_flash_rom + verified, page_buf, to_read) != 0) {
-            printf("[ROM] flash verify mismatch at %lu size=%u\r\n",
+            NESCO_LOG_RUNTIME("[ROM] flash verify mismatch at %lu size=%u\r\n",
                    (unsigned long)verified,
                    (unsigned int)to_read);
-            fflush(stdout);
             return -1;
         }
         verified += to_read;
     }
 
-    printf("[ROM] flash verify complete verified=%lu\r\n", (unsigned long)verified);
-    fflush(stdout);
+    NESCO_LOG_RUNTIME("[ROM] flash verify complete verified=%lu\r\n", (unsigned long)verified);
     return 0;
 }
 
@@ -829,16 +803,14 @@ static int rom_write_flash_metadata(const char *source_path, FSIZE_t file_size, 
         s_flash_meta->rom_size != (uint32_t)file_size ||
         s_flash_meta->mapper_no != (uint32_t)mapper_no ||
         strcmp(s_flash_meta->file_name, rom_basename(source_path)) != 0) {
-        printf("[ROM] flash metadata verify failed\r\n");
-        fflush(stdout);
+        NESCO_LOG_RUNTIME("[ROM] flash metadata verify failed\r\n");
         return -1;
     }
 
-    printf("[ROM] flash metadata complete size=%lu mapper=%d name=%s\r\n",
+    NESCO_LOG_RUNTIME("[ROM] flash metadata complete size=%lu mapper=%d name=%s\r\n",
            (unsigned long)file_size,
            mapper_no,
            s_flash_meta->file_name);
-    fflush(stdout);
     return 0;
 }
 
@@ -909,23 +881,20 @@ static int rom_stage_file_to_flash(FIL *file, FSIZE_t file_size, const char *sou
     uint32_t written = 0;
 
     if (file_size > XIP_ROM_MAX_BYTES) {
-        printf("[ROM] flash stage too large size=%lu max=%lu\r\n",
+        NESCO_LOG_RUNTIME("[ROM] flash stage too large size=%lu max=%lu\r\n",
                (unsigned long)file_size,
                (unsigned long)XIP_ROM_MAX_BYTES);
-        fflush(stdout);
         return -1;
     }
 
-    printf("[ROM] flash stage begin size=%lu erase=%lu\r\n",
+    NESCO_LOG_RUNTIME("[ROM] flash stage begin size=%lu erase=%lu\r\n",
            (unsigned long)file_size,
            (unsigned long)erase_count);
-    fflush(stdout);
 
     rom_flash_range_erase_locked(erase_offs, erase_count);
 
     if (f_lseek(file, 0) != FR_OK) {
-        printf("[ROM] flash stage seek failed\r\n");
-        fflush(stdout);
+        NESCO_LOG_RUNTIME("[ROM] flash stage seek failed\r\n");
         return -1;
     }
 
@@ -933,10 +902,9 @@ static int rom_stage_file_to_flash(FIL *file, FSIZE_t file_size, const char *sou
         memset(page_buf, 0xFF, sizeof(page_buf));
         UINT to_read = (UINT)((file_size - written) > FLASH_PAGE_SIZE ? FLASH_PAGE_SIZE : (file_size - written));
         if (f_read(file, page_buf, to_read, &bytes_read) != FR_OK || bytes_read != to_read) {
-            printf("[ROM] flash stage read failed at %lu bytes=%u\r\n",
+            NESCO_LOG_RUNTIME("[ROM] flash stage read failed at %lu bytes=%u\r\n",
                    (unsigned long)written,
                    (unsigned int)bytes_read);
-            fflush(stdout);
             return -1;
         }
 
@@ -946,14 +914,12 @@ static int rom_stage_file_to_flash(FIL *file, FSIZE_t file_size, const char *sou
     }
 
     if (rom_verify_flash_against_file(file, file_size) != 0) {
-        printf("[ROM] flash stage verify failed\r\n");
-        fflush(stdout);
+        NESCO_LOG_RUNTIME("[ROM] flash stage verify failed\r\n");
         return -1;
     }
 
     if (rom_write_flash_metadata(source_path, file_size, mapper_no) != 0) {
-        printf("[ROM] flash metadata write failed\r\n");
-        fflush(stdout);
+        NESCO_LOG_RUNTIME("[ROM] flash metadata write failed\r\n");
         return -1;
     }
 
@@ -963,10 +929,9 @@ static int rom_stage_file_to_flash(FIL *file, FSIZE_t file_size, const char *sou
         restore_interrupts(irq);
     }
 
-    printf("[ROM] flash stage complete written=%lu verified=%lu\r\n",
+    NESCO_LOG_RUNTIME("[ROM] flash stage complete written=%lu verified=%lu\r\n",
            (unsigned long)written,
            (unsigned long)file_size);
-    fflush(stdout);
     return 0;
 }
 #endif
@@ -984,8 +949,7 @@ int InfoNES_ReadRom(const char *path) {
 
     /* ---- Determine source ---- */
     if (path == NULL || strncmp(path, "flash:", 6) == 0) {
-        printf("[ROM] load flash path=%s\r\n", path ? path : "(null)");
-        fflush(stdout);
+        NESCO_LOG_RUNTIME("[ROM] load flash path=%s\r\n", path ? path : "(null)");
 #ifdef PICO_BUILD
         src = s_flash_rom;
 #else
@@ -993,50 +957,42 @@ int InfoNES_ReadRom(const char *path) {
         return -1;
 #endif
     } else if (strncmp(path, "sd:/", 4) == 0) {
-        printf("[ROM] load sd path=%s\r\n", path);
-        fflush(stdout);
+        NESCO_LOG_RUNTIME("[ROM] load sd path=%s\r\n", path);
         if (!rom_sd_mount()) {
-            printf("[ROM] SD mount unavailable during load\r\n");
-            fflush(stdout);
+            NESCO_LOG_RUNTIME("[ROM] SD mount unavailable during load\r\n");
             return -1;
         }
         snprintf(fatfs_path, sizeof(fatfs_path), "0:/%s", path + 4);
         if (f_open(&file, fatfs_path, FA_READ) != FR_OK) {
-            printf("[ROM] f_open failed: %s\r\n", fatfs_path);
-            fflush(stdout);
+            NESCO_LOG_RUNTIME("[ROM] f_open failed: %s\r\n", fatfs_path);
             return -1;
         }
 
         file_size = f_size(&file);
         mapper_no = rom_probe_mapper_number(fatfs_path);
-        printf("[ROM] file size=%lu threshold=%lu\r\n",
+        NESCO_LOG_RUNTIME("[ROM] file size=%lu threshold=%lu\r\n",
                (unsigned long)file_size,
                (unsigned long)ROM_RAM_THRESHOLD_BYTES);
-        fflush(stdout);
         if (file_size >= ROM_RAM_THRESHOLD_BYTES) {
 #ifdef PICO_BUILD
             if (rom_flash_matches_source_path(path, file_size, mapper_no)) {
                 f_close(&file);
                 rom_set_flash_entry_from_path(path);
                 src = s_flash_rom;
-                printf("[ROM] flash-backed load reused existing staged ROM\r\n");
-                fflush(stdout);
+                NESCO_LOG_RUNTIME("[ROM] flash-backed load reused existing staged ROM\r\n");
             } else
             if (rom_stage_file_to_flash(&file, file_size, path, mapper_no) != 0) {
                 f_close(&file);
-                printf("[ROM] flash stage failed\r\n");
-                fflush(stdout);
+                NESCO_LOG_RUNTIME("[ROM] flash stage failed\r\n");
                 return -1;
             }
             f_close(&file);
             rom_set_flash_entry_from_path(path);
             src = s_flash_rom;
-            printf("[ROM] flash-backed load ready\r\n");
-            fflush(stdout);
+            NESCO_LOG_RUNTIME("[ROM] flash-backed load ready\r\n");
 #else
             f_close(&file);
-            printf("[ROM] file too large for RAM path\r\n");
-            fflush(stdout);
+            NESCO_LOG_RUNTIME("[ROM] file too large for RAM path\r\n");
             return -1;
 #endif
         } else {
@@ -1057,55 +1013,48 @@ int InfoNES_ReadRom(const char *path) {
                     ? (unsigned long)(heap_gap_bytes - ram_request_bytes)
                     : 0ul;
 #endif
-            printf("[ROM] heap before RAM copy arena=%lu used=%lu free=%lu keep=%lu request=%lu\r\n",
+            NESCO_LOG_RUNTIME("[ROM] heap before RAM copy arena=%lu used=%lu free=%lu keep=%lu request=%lu\r\n",
                    (unsigned long)mi_before.arena,
                    (unsigned long)mi_before.uordblks,
                    (unsigned long)mi_before.fordblks,
                    (unsigned long)mi_before.keepcost,
                    ram_request_bytes);
-            fflush(stdout);
 #ifdef PICO_BUILD
-            printf("[ROM] heap calc before RAM copy gap=%lu request=%lu remain=%lu\r\n",
+            NESCO_LOG_RUNTIME("[ROM] heap calc before RAM copy gap=%lu request=%lu remain=%lu\r\n",
                    heap_gap_bytes,
                    ram_request_bytes,
                    heap_after_alloc);
-            fflush(stdout);
 #endif
 #endif
             if (file_size > ROM_RAM_THRESHOLD_BYTES) {
                 f_close(&file);
-	                printf("[ROM] mapper0 RAM image too large size=%lu max=%lu\r\n",
+	                NESCO_LOG_RUNTIME("[ROM] mapper0 RAM image too large size=%lu max=%lu\r\n",
 	                       (unsigned long)file_size,
 	                       (unsigned long)ROM_RAM_THRESHOLD_BYTES);
-	                fflush(stdout);
 	                return -1;
             }
             rom_release_mapper0_buffer();
             s_rom_buf = (BYTE *)malloc(ROM_RAM_THRESHOLD_BYTES);
             if (!s_rom_buf) {
                 f_close(&file);
-                printf("[ROM] mapper0 RAM malloc failed size=%lu\r\n",
+                NESCO_LOG_RUNTIME("[ROM] mapper0 RAM malloc failed size=%lu\r\n",
                        ram_request_bytes);
-                fflush(stdout);
                 return -1;
             }
 	            if (f_read(&file, s_rom_buf, (UINT)file_size, &bytes_read) != FR_OK || bytes_read != (UINT)file_size) {
 	                rom_release_mapper0_buffer();
 	                f_close(&file);
-	                printf("[ROM] f_read failed bytes=%u\r\n", (unsigned int)bytes_read);
-	                fflush(stdout);
+	                NESCO_LOG_RUNTIME("[ROM] f_read failed bytes=%u\r\n", (unsigned int)bytes_read);
 	                return -1;
 	            }
 	            f_close(&file);
 	            src = s_rom_buf;
-	            printf("[ROM] SD load complete using mapper0 malloc buffer=%lu\r\n",
+	            NESCO_LOG_RUNTIME("[ROM] SD load complete using mapper0 malloc buffer=%lu\r\n",
 	                   (unsigned long)file_size);
-	            fflush(stdout);
 	        }
     } else {
         /* Load from SD card / file system */
-        printf("[ROM] unsupported path=%s\r\n", path ? path : "(null)");
-        fflush(stdout);
+        NESCO_LOG_RUNTIME("[ROM] unsupported path=%s\r\n", path ? path : "(null)");
         return -1;
     }
 
@@ -1145,8 +1094,7 @@ int InfoNES_ReadRom(const char *path) {
  * ===================================================================== */
 void InfoNES_ReleaseRom(void) {
     /* Flash XIP: nothing to free (ROM is a pointer into Flash) */
-    printf("[ROM] release begin\r\n");
-    fflush(stdout);
+    NESCO_LOG_RUNTIME("[ROM] release begin\r\n");
     sram_store_flush_current_rom();
     InfoNES_Mapper_ReleaseCurrent();
     rom_release_mapper0_buffer();
@@ -1157,6 +1105,5 @@ void InfoNES_ReleaseRom(void) {
     ROM  = NULL;
     VROM = NULL;
     sram_store_clear_session();
-    printf("[ROM] release end\r\n");
-    fflush(stdout);
+    NESCO_LOG_RUNTIME("[ROM] release end\r\n");
 }

@@ -16,6 +16,7 @@
 #include "rom_image.h"
 #include "screenshot.h"
 #include "screenshot_viewer.h"
+#include "runtime_log.h"
 #include "version.h"
 
 #include <stdio.h>
@@ -24,11 +25,6 @@
 
 #ifdef PICO_BUILD
 #  include "pico/stdlib.h"
-#endif
-
-#if !defined(NESCO_RUNTIME_LOGS)
-#define printf(...) ((void)0)
-#define fflush(...) ((void)0)
 #endif
 
 extern BYTE i2c_kbd_read_key(void);
@@ -633,13 +629,12 @@ static void menu_screenshot_done_sound(nesco_screenshot_result_t result) {
 
 static void menu_log_key(BYTE key, BYTE state) {
     if (key >= 32 && key <= 126) {
-        printf("[MENU] key=%02X state=%u char=%c\r\n", key, state, (char)key);
+        NESCO_LOG_RUNTIME("[MENU] key=%02X state=%u char=%c\r\n", key, state, (char)key);
     } else if (key == KEY_ENTER) {
-        printf("[MENU] key=%02X state=%u char=LF\r\n", key, state);
+        NESCO_LOG_RUNTIME("[MENU] key=%02X state=%u char=LF\r\n", key, state);
     } else {
-        printf("[MENU] key=%02X state=%u\r\n", key, state);
+        NESCO_LOG_RUNTIME("[MENU] key=%02X state=%u\r\n", key, state);
     }
-    fflush(stdout);
 }
 
 const char *picocalc_rom_menu(void) {
@@ -660,11 +655,9 @@ const char *picocalc_rom_menu(void) {
     int help_page = HELP_PAGE_HELP;
     const char *status_text = NULL;
 
-    printf("[MENU] enter\r\n");
-    fflush(stdout);
+    NESCO_LOG_RUNTIME("[MENU] enter\r\n");
     if (!menu_text_buffer_begin()) {
-        printf("[MENU] text buffer alloc failed\r\n");
-        fflush(stdout);
+        NESCO_LOG_RUNTIME("[MENU] text buffer alloc failed\r\n");
 #ifdef PICO_BUILD
         display_set_mode(DISPLAY_MODE_FULLSCREEN);
         menu_fill_rect(0, 0, 320, 320, MENU_BG);
@@ -879,16 +872,15 @@ const char *picocalc_rom_menu(void) {
                              (unsigned)(battery & 0x7Fu),
                              (battery & 0x80u) ? "CHG" : "IDLE");
                     status_text = status_buf;
-                    printf("[MENU] battery raw=0x%02X percent=%u charging=%u\r\n",
+                    NESCO_LOG_RUNTIME("[MENU] battery raw=0x%02X percent=%u charging=%u\r\n",
                            battery,
                            (unsigned)(battery & 0x7Fu),
                            (unsigned)((battery & 0x80u) ? 1u : 0u));
                 } else {
                     snprintf(status_buf, sizeof(status_buf), "BAT READ FAILED");
                     status_text = status_buf;
-                    printf("[MENU] battery read failed rc=%d\r\n", rc);
+                    NESCO_LOG_RUNTIME("[MENU] battery read failed rc=%d\r\n", rc);
                 }
-                fflush(stdout);
             } else if (show_help) {
                 if (key == KEY_ESC || key == KEY_ENTER || key == KEY_MINUS) {
                     show_help = 0;
@@ -1000,8 +992,7 @@ const char *picocalc_rom_menu(void) {
                             status_text = "DIRECTORY CHANGE FAILED";
                         }
                     } else {
-                        printf("[MENU] launch %s\r\n", entries[selected].path);
-                        fflush(stdout);
+                        NESCO_LOG_RUNTIME("[MENU] launch %s\r\n", entries[selected].path);
                         rom_image_set_selected_path(entries[selected].path);
                         {
                             const char *launch_path = rom_image_get_selected_path();
@@ -1015,8 +1006,7 @@ const char *picocalc_rom_menu(void) {
                     menu_render(entries, entry_count, selected, first_visible, last_key, last_state, status_text);
                     continue;
                 }
-                printf("[MENU] unavailable %s\r\n", entries[selected].path ? entries[selected].path : "(null)");
-                fflush(stdout);
+                NESCO_LOG_RUNTIME("[MENU] unavailable %s\r\n", entries[selected].path ? entries[selected].path : "(null)");
                 status_text = "SELECTABLE *.NES FILE NOT AVAILABLE";
             }
         } else {
