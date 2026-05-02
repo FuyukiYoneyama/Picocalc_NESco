@@ -77,7 +77,7 @@
 
 - version: `1.1.24`
 - build id: `May  2 2026 08:00:10`
-- commit: `release commit after this note is committed`
+- commit: `c8bfca0 Add 1.1.24 release notes`
 - UF2: `Picocalc_NESco-1.1.24.uf2`
 - UF2 SHA-256:
   `054f9a4c71b109057d6c53869a32de677a9b764cbafa65bf13cc70db75a9f5d2`
