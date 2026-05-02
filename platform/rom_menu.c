@@ -258,24 +258,6 @@ static void menu_draw_title_bar(void) {
     menu_draw_battery_header(MENU_BG, MENU_ACCENT);
 }
 
-static const char *menu_default_status(const rom_menu_entry_info_t *entries,
-                                       int entry_count,
-                                       int selected) {
-    if (entry_count <= 0 || selected < 0 || selected >= entry_count) {
-        return NULL;
-    }
-
-    if (!entries[selected].enabled) {
-        return "ENTRY NOT AVAILABLE YET";
-    }
-
-    if (entries[selected].kind == ROM_ENTRY_FILE) {
-        return "PRESS ENTER/- TO START";
-    }
-
-    return "PRESS ENTER/- TO OPEN";
-}
-
 static char menu_state_code(BYTE last_state) {
     switch (last_state) {
     case 1:
@@ -315,13 +297,34 @@ static void menu_draw_index(int entry_count, int selected) {
     menu_draw_text_span(index_x, 28, 312 - index_x, index_text, MENU_DIM, MENU_BG);
 }
 
-static void menu_draw_status_line(const rom_menu_entry_info_t *entries,
-                                  int entry_count,
-                                  int selected,
-                                  const char *status_text) {
-    const char *effective_status = (status_text && *status_text)
-                                       ? status_text
-                                       : menu_default_status(entries, entry_count, selected);
+static void menu_build_directory_text(char *text, unsigned text_size) {
+    const char *dir = rom_image_current_directory();
+
+    if (!text || text_size == 0) {
+        return;
+    }
+
+    if (!dir || !*dir || strcmp(dir, "0:/") == 0) {
+        snprintf(text, text_size, "DIR /");
+        return;
+    }
+
+    if (strncmp(dir, "0:/", 3) == 0) {
+        snprintf(text, text_size, "DIR /%s", dir + 3);
+        return;
+    }
+
+    snprintf(text, text_size, "DIR %s", dir);
+}
+
+static void menu_draw_status_line(const char *status_text) {
+    char directory_text[80];
+    const char *effective_status = status_text;
+
+    if (!effective_status || !*effective_status) {
+        menu_build_directory_text(directory_text, sizeof(directory_text));
+        effective_status = directory_text;
+    }
 
     menu_fill_rect(8, 42, 220, FONT_H, MENU_BG);
     if (effective_status && *effective_status) {
@@ -408,7 +411,7 @@ static void menu_update_selection_rows(const rom_menu_entry_info_t *entries,
         menu_draw_entry_row(entries, entry_count, selected, first_visible, selected);
     }
     menu_draw_index(entry_count, selected);
-    menu_draw_status_line(entries, entry_count, selected, status_text);
+    menu_draw_status_line(status_text);
     menu_draw_debug_code(last_key, last_state);
 }
 
@@ -425,7 +428,7 @@ static void menu_render(const rom_menu_entry_info_t *entries,
 
     menu_draw_text_span(8, 28, 120, "FILE MENU", MENU_DIM, MENU_BG);
     menu_draw_index(entry_count, selected);
-    menu_draw_status_line(entries, entry_count, selected, status_text);
+    menu_draw_status_line(status_text);
     menu_fill_rect(8, 56, 304, 2, MENU_ACCENT);
 
     for (int row = 0; row < MENU_LIST_MAX_VISIBLE; row++) {
@@ -915,7 +918,7 @@ const char *picocalc_rom_menu(void) {
                 } else {
                     first_visible = menu_keep_visible_or_clamp(entry_count, selected, first_visible);
                 }
-                status_text = menu_default_status(entries, entry_count, selected);
+                status_text = NULL;
                 if (page_scroll_up || wrap_up) {
                     menu_render(entries, entry_count, selected, first_visible, last_key, last_state, status_text);
                     continue;
@@ -954,7 +957,7 @@ const char *picocalc_rom_menu(void) {
                 } else {
                     first_visible = menu_keep_visible_or_clamp(entry_count, selected, first_visible);
                 }
-                status_text = menu_default_status(entries, entry_count, selected);
+                status_text = NULL;
                 if (page_scroll_down || wrap_down) {
                     menu_render(entries, entry_count, selected, first_visible, last_key, last_state, status_text);
                     continue;
