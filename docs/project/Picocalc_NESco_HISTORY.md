@@ -85,6 +85,103 @@
     が OFF
     であることを確認した
 
+## Compile-time logging cleanup 完了 (2026-05-02)
+
+- `docs/design/COMPILE_TIME_LOGGING_CLEANUP_PLAN_20260502.md`
+  に従い、runtime / perf log
+  の compile-time macro
+  整理を実施した
+- 実装内容:
+  - `platform/runtime_log.h`
+    に `NESCO_LOG_RUNTIME(...)` /
+    `NESCO_RUNTIME_ONLY(stmt)` /
+    `NESCO_LOG_PERF(...)` /
+    `NESCO_PERF_ONLY(stmt)`
+    を追加した
+  - `platform/sram_store.cpp`
+    の file-local runtime log macro
+    を共通 macro
+    へ置き換えた
+  - `platform/rom_menu.c`
+    と
+    `platform/rom_image.c`
+    の file-local
+    `printf(...)` / `fflush(...)`
+    抑制 macro
+    を外し、debug / runtime log
+    を `NESCO_LOG_RUNTIME(...)`
+    へ置き換えた
+  - `infones/InfoNES.cpp`
+    の `[FPS_SUMMARY]`
+    出力を `NESCO_LOG_PERF(...)`
+    へ置き換えた
+- 通常 build:
+  - `cmake --build build -j8`
+    で成功した
+  - banner:
+    `PicoCalc NESco Ver. 1.1.24 Build May  2 2026 18:54:54`
+  - size:
+    `text=278604 data=0 bss=97040 dec=375644 hex=5bb5c`
+  - UF2 SHA-256:
+    `277bd1a29f437d60d847fd6f6e51935f1eefb9b20587da3044c4ff6c71436b82`
+  - ELF SHA-256:
+    `2738cb85b052a9b3c6c4569e2d19e212a1bf541495f5e512d1bba5b476b01def`
+- perf build:
+  - `NESCO_CORE1_BASELINE_LOG=ON`
+    の別 build
+    で成功した
+  - banner:
+    `PicoCalc NESco Ver. 1.1.24 Build May  2 2026 19:12:41`
+  - size:
+    `text=280992 data=0 bss=97048 dec=378040 hex=5c4b8`
+- runtime log ON build:
+  - `NESCO_RUNTIME_LOGS=ON`
+    の別 build
+    で成功した
+  - banner:
+    `PicoCalc NESco Ver. 1.1.24 Build May  2 2026 19:31:06`
+  - size:
+    `text=313144 data=0 bss=97060 dec=410204 hex=6425c`
+  - UF2 SHA-256:
+    `143e35f95537689ca8630b30eff9297cdf5c49e94a37c381f558a92404993c97`
+  - ELF SHA-256:
+    `5962274f181ccc6b61a81c352f760bfe8e90558ccf635b2118a5852fdbe64b8c`
+- 確認:
+  - `platform/rom_menu.c`
+    と
+    `platform/rom_image.c`
+    について、裸の `printf()` /
+    `fflush()`
+    が残っていないことを確認した
+  - 通常 build
+    の実機確認で、ROM menu、ROM
+    起動、screenshot、ESC
+    による ROM menu
+    復帰、ROM menu
+    復帰後の操作が正常に動作することを確認した
+  - runtime log ON build
+    の実機ログ
+    `pico20260502_191759.log`
+    で、`[BOOT]` / `[MENU]` / `[ROM]` /
+    `[SRAM]` / screenshot
+    log
+    が出ることを確認した
+  - runtime log ON build
+    の実機ログで、ROM 起動、screenshot
+    保存、ROM menu
+    復帰の流れが確認できた
+  - runtime log ON build
+    の実機ログで
+    `[CORE1] idle ack timeout ...`
+    は見当たらなかった
+- commit:
+  - `41e5b53 Add compile-time logging cleanup plan`
+  - `5ae406f Add compile-time logging macros`
+  - `cb29b34 Use shared runtime log macro for SRAM store`
+  - `bd75be8 Use runtime log macro in ROM menu and loader`
+  - `282f4dd Use compile-time perf log macro`
+- この作業は完了扱いとする
+
 ## Mapper7 / AxROM 画面崩れ保留 (2026-04-29)
 
 - Mapper7 ROM
