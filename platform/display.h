@@ -1,9 +1,26 @@
 /*
  * display.h — LCD display pipeline interface (PicoCalc)
  *
- * Implements InfoNES_PreDrawLine / InfoNES_PostDrawLine for the active NES
- * viewport. Lines are packed into LCD DMA strips directly or via the core1
- * LCD worker queue before transfer.
+ * This is the platform-side owner of the LCD drawing policy.
+ *
+ * The low-level driver in drivers/lcd_spi.c only knows how to select a
+ * rectangular LCD address window and push RGB565 bytes to it. This layer
+ * decides which rectangle is active, how NES scanlines are converted to
+ * LCD pixels, and when fullscreen UI code may take direct ownership of the
+ * panel.
+ *
+ * InfoNES integration:
+ *   - InfoNES_PreDrawLine() gives the PPU a 256-pixel RGB565 line buffer.
+ *   - InfoNES_PostDrawLine() is called after the PPU has filled that line.
+ *   - Lines are batched into 8-source-line strips before being sent to LCD.
+ *   - In normal view, 8 NES lines become 8 LCD lines at 256 pixels wide.
+ *   - In stretch view, 8 NES lines become 10 LCD lines at 320 pixels wide.
+ *
+ * LCD ownership rule:
+ *   - DISPLAY_MODE_NES_VIEW is for game rendering through this pipeline.
+ *   - DISPLAY_MODE_FULLSCREEN is for menus, help, screenshot viewer, etc.
+ *   - Before fullscreen UI draws, display_lcd_worker_stop_and_drain() must
+ *     ensure the core1 LCD worker and the DMA engine are idle.
  *
  * LCD: 320×320 RGB565
  * NES normal view: 256×240 pixels at (32,24)
@@ -24,7 +41,14 @@ extern "C" {
 /* NES palette lookup source data (64 entries) */
 extern const WORD NesPalette[64];
 
-/* 8 source lines fit the LCD DMA staging buffer in both normal and stretch view. */
+/*
+ * 8 source NES lines are the batching unit.
+ *
+ * The LCD driver exposes a staging buffer large enough for either:
+ *   - 8 lines x 256 pixels x 2 bytes in normal view, or
+ *   - 10 lines x 320 pixels x 2 bytes in stretch view
+ *     because every fourth NES line is repeated.
+ */
 #define STRIP_HEIGHT  8
 
 typedef enum {

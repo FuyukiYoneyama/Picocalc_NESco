@@ -3,13 +3,20 @@
  *
  * Video path (per scanline):
  *   InfoNES_PreDrawLine points the PPU at s_line_buffer[256].
- *   InfoNES_PostDrawLine either queues that RGB565 line for the core1 LCD
- *   worker, or packs it directly into the LCD DMA buffer on the fallback path.
- *   Completed strips are flushed to the active NES viewport.
+ *   InfoNES_PostDrawLine either queues a copy of that RGB565 line for the
+ *   core1 LCD worker, or packs it directly into the LCD DMA buffer on the
+ *   fallback path. Completed strips are flushed to the active NES viewport.
  *
  * Normal view keeps the original 256×240 frame centered on the 320×320 LCD.
  * Stretch view expands 256×240 to 320×300 by repeating every fourth source
  * line and every fourth source pixel.
+ *
+ * Important ownership rule:
+ *   The LCD driver has asynchronous DMA. Any buffer handed to
+ *   lcd_dma_write_*_async() must not be overwritten until lcd_dma_wait()
+ *   has completed. This file therefore batches into the driver-owned DMA
+ *   buffer, waits before reusing it, and drains the core1 worker before
+ *   fullscreen UI or screenshot code touches the panel.
  *
  * Platform-specific LCD SPI/DMA functions are declared extern and must
  * be implemented in the driver layer (drivers/lcd_spi.c).
@@ -58,7 +65,17 @@ static WORD s_rgb4_to_rgb565_r[16];
 static WORD s_rgb4_to_rgb565_g[16];
 static WORD s_rgb4_to_rgb565_b[16];
 
-static int s_strip_line = 0;   /* Source lines written into the current strip. */
+/* Source NES lines already packed into the current 8-line strip. */
+static int s_strip_line = 0;
+
+/*
+ * Single scanline buffer shared with InfoNES.
+ *
+ * The PPU writes one 256-pixel RGB565 line here between PreDrawLine and
+ * PostDrawLine. When core1 LCD worker is active, PostDrawLine copies the
+ * pixels into a queue item before returning, so the next PPU line can reuse
+ * this buffer safely.
+ */
 static WORD s_line_buffer[256];
 static uint64_t s_perf_lcd_wait_us = 0;
 static uint64_t s_perf_lcd_flush_us = 0;
@@ -77,7 +94,14 @@ static display_mode_t s_display_mode = DISPLAY_MODE_NES_VIEW;
 static nes_view_scale_mode_t s_nes_view_scale = NES_VIEW_SCALE_NORMAL;
 static volatile display_lcd_worker_state_t s_lcd_worker_state = DISPLAY_LCD_WORKER_STOPPED;
 
-/* Active LCD rectangle for NES output or full-screen UI operations. */
+/*
+ * Active LCD rectangle.
+ *
+ * For game rendering this is the NES viewport. For fullscreen UI this is the
+ * whole 320x320 panel. Higher-level code should change it through
+ * display_set_mode(), display_set_viewport(), and display_apply_nes_viewport()
+ * instead of calling lcd_set_window() directly.
+ */
 static int s_lcd_x0 = 32;
 static int s_lcd_y0 = 24;
 static int s_lcd_w  = 256;
@@ -107,6 +131,11 @@ typedef enum {
 typedef struct {
     display_lcd_worker_item_type_t type;
     int scanline;
+    /*
+     * Viewport and scale are snapshotted with each queued line.
+     * This prevents core1 from reading globals that may change when the user
+     * toggles stretch mode, opens the ROM menu, or starts screenshot capture.
+     */
     int viewport_x;
     int viewport_y;
     int viewport_w;
@@ -196,11 +225,20 @@ static bool display_lcd_worker_queue_empty(void) {
 }
 
 void display_lcd_worker_prepare_nes_view(void) {
+    /*
+     * Start with an empty queue whenever game rendering owns the LCD again.
+     * Old queued lines must not survive a ROM menu return or scale toggle.
+     */
     display_lcd_worker_reset_queue();
     s_lcd_worker_state = DISPLAY_LCD_WORKER_RUNNING;
 }
 
 void display_lcd_worker_stop_and_drain(void) {
+    /*
+     * Fullscreen UI and screenshot capture call this before direct LCD access.
+     * The worker first stops accepting new lines, then core0 waits until
+     * queued lines and any active DMA transfer are finished.
+     */
     if (s_lcd_worker_state == DISPLAY_LCD_WORKER_RUNNING) {
         s_lcd_worker_state = DISPLAY_LCD_WORKER_DRAINING;
     }
@@ -439,6 +477,15 @@ static void display_apply_nes_viewport(void) {
 }
 
 void display_set_mode(display_mode_t mode) {
+    /*
+     * Mode switch is also LCD ownership transfer.
+     *
+     * FULLSCREEN:
+     *   stop/drain worker, then let menu/help/screenshot code draw directly.
+     * NES_VIEW:
+     *   clear and prepare the game viewport, then allow core1 worker to
+     *   receive scanline queue items.
+     */
     if (mode == DISPLAY_MODE_FULLSCREEN) {
         display_lcd_worker_stop_and_drain();
     }
@@ -460,6 +507,11 @@ void display_set_mode(display_mode_t mode) {
 }
 
 void display_toggle_nes_view_scale(void) {
+    /*
+     * Stretch/normal changes the viewport size and line packing rule.
+     * Drain first so no old-scale queued strip reaches the LCD after the
+     * viewport has been reconfigured.
+     */
     display_lcd_worker_stop_and_drain();
 
     s_nes_view_scale =
@@ -679,6 +731,10 @@ static bool display_lcd_worker_submit_line(int scanline, const WORD *src) {
     item.viewport_w = s_lcd_w;
     item.viewport_h = s_lcd_h;
     item.scale_mode = s_nes_view_scale;
+    /*
+     * Copy the line into the queue item. Do not queue s_line_buffer by pointer:
+     * InfoNES will reuse that buffer for the next scanline immediately.
+     */
     memcpy(item.pixels, src, sizeof(item.pixels));
 
     bool queue_waited = false;
@@ -703,6 +759,10 @@ static bool display_lcd_worker_submit_line(int scanline, const WORD *src) {
 #endif
 
     if (scanline == 239) {
+        /*
+         * A frame-end marker lets core1 flush a short final strip and lets
+         * drain logic know there is no hidden partial strip left.
+         */
         memset(&item, 0, sizeof(item));
         item.type = DISPLAY_LCD_WORKER_ITEM_FRAME_END;
         queue_waited = false;
@@ -799,6 +859,11 @@ bool display_lcd_worker_poll_once(void) {
     }
 
     if (item.type == DISPLAY_LCD_WORKER_ITEM_FRAME_END) {
+        /*
+         * The marker itself carries no pixels. It is a synchronization point
+         * so pending DMA is complete before a mode change or screenshot can
+         * observe the framebuffer.
+         */
         lcd_dma_wait();
         return true;
     }
@@ -847,7 +912,15 @@ static void display_pack_line_stretch_320(BYTE *dst, const WORD *src) {
 }
 
 /* =====================================================================
- *  InfoNES_PostDrawLine — pack RGB565 line buffer into LCD byte buffer
+ *  InfoNES_PostDrawLine — hand one completed NES scanline to the LCD path
+ *
+ *  Normal fast path:
+ *    core0 copies the line into the core1 queue and returns to emulation.
+ *    core1 packs queued lines into LCD DMA strips.
+ *
+ *  Fallback path:
+ *    core0 packs into the LCD DMA buffer directly. This is also the path
+ *    used for menu-origin draws (`frommenu`) and if the worker is stopped.
  * ===================================================================== */
 void InfoNES_PostDrawLine(int scanline, bool frommenu) {
     const WORD *src = s_line_buffer;

@@ -1,8 +1,24 @@
 /*
- * lcd_spi.c — PicoCalc LCD driver (blocking SPI baseline)
+ * lcd_spi.c — PicoCalc LCD panel driver
  *
- * This implementation intentionally starts with plain SPI writes so the
- * panel can be brought up and validated before migrating to DMA/PIO.
+ * Hardware view:
+ *   - The LCD panel is driven like an SPI display.
+ *   - PIO generates the SCK/MOSI write stream.
+ *   - DMA feeds bytes into the PIO TX FIFO for large pixel transfers.
+ *   - A slower bit-bang path exists only for LCD readback / diagnostics.
+ *
+ * Public drawing contract:
+ *   1. Call lcd_set_window(x, y, w, h).
+ *      This sends column address set (0x2A), row address set (0x2B),
+ *      then memory write (0x2C). After that, pixel bytes stream into the
+ *      selected rectangle from left-to-right, top-to-bottom.
+ *   2. Call lcd_dma_write_rgb565_async() or lcd_dma_write_bytes_async().
+ *      These start an asynchronous DMA transfer.
+ *   3. Call lcd_dma_wait() before changing the LCD window, reusing a buffer,
+ *      switching to readback, or letting another subsystem draw.
+ *
+ * Byte order:
+ *   Pixel data is RGB565, high byte first, low byte second.
  */
 
 #include "common_types.h"
@@ -52,6 +68,14 @@ typedef enum lcd_read_edge_t {
     LCD_READ_EDGE_FALLING = 1,
 } lcd_read_edge_t;
 
+/*
+ * The two DMA buffers are driver-owned staging memory.
+ *
+ * Callers may either provide WORD pixels and let lcd_dma_write_rgb565_async()
+ * convert to high-byte/low-byte order, or ask for lcd_dma_acquire_buffer()
+ * and fill a byte buffer themselves. In both cases the buffer selected for
+ * DMA must not be overwritten until lcd_dma_wait() completes.
+ */
 #ifdef PICO_BUILD
 static const float LCD_PIO_CLKDIV = 2.0f; /* 250 MHz sysclk -> 62.5 MHz SPI-equivalent */
 static BYTE s_lcd_dma_buf[2][LCD_DMA_MAX_PIXELS * 2];
@@ -109,6 +133,11 @@ static void lcd_wait_idle(void) {
 }
 
 void lcd_dma_wait(void) {
+    /*
+     * DMA completion is not enough by itself: wait until PIO has shifted the
+     * final byte out, then release CS. This makes the next command/window
+     * change safe.
+     */
     if (!s_lcd_dma_active) {
         return;
     }
@@ -132,6 +161,7 @@ static void lcd_write_bytes(const BYTE *buf, size_t len) {
 }
 
 static void lcd_write_command(BYTE cmd) {
+    /* Commands are serialized with any pending pixel DMA. */
     lcd_dma_wait();
     lcd_select();
     lcd_set_dc(0);
@@ -145,6 +175,7 @@ static void lcd_write_data(const BYTE *buf, size_t len) {
         return;
     }
 
+    /* Small setup payloads are written synchronously through PIO. */
     lcd_dma_wait();
     lcd_select();
     lcd_set_dc(1);
@@ -177,6 +208,11 @@ static void lcd_fill_black(void) {
 }
 
 static void lcd_set_bitbang_mode(bool enabled) {
+    /*
+     * LCD readback cannot use the write-only PIO program. Temporarily stop
+     * the PIO state machine and switch the pins to SIO bit-bang mode.
+     * Normal display writes switch back to PIO mode.
+     */
     if (!s_lcd_pio_ready) {
         return;
     }
@@ -815,6 +851,13 @@ static __attribute__((unused)) void lcd_probe_readback_mode(void) {
 
 void lcd_init(void) {
 #ifdef PICO_BUILD
+    /*
+     * Init order matters:
+     *   1. GPIO idle levels
+     *   2. PIO program for write transfers
+     *   3. DMA channel configured to feed PIO TX FIFO
+     *   4. panel reset and controller-specific command sequence
+     */
     gpio_init(LCD_PIN_CS);
     gpio_init(LCD_PIN_DC);
     gpio_init(LCD_PIN_RST);
@@ -893,6 +936,13 @@ void lcd_init(void) {
 }
 
 void lcd_set_window(int x, int y, int w, int h) {
+    /*
+     * Select the target rectangle for the following pixel stream.
+     *
+     * The LCD controller auto-increments its GRAM address inside this window,
+     * so callers do not send per-pixel coordinates. s_window_pixels tracks
+     * the remaining capacity and prevents accidental overrun.
+     */
     if (w <= 0 || h <= 0) {
         s_window_pixels = 0;
         return;
@@ -928,13 +978,18 @@ void lcd_set_window(int x, int y, int w, int h) {
         (BYTE)(y1 & 0xFF),
     };
 
-    lcd_write_commandn(0x2Au, col, ARRAY_SIZE(col));
-    lcd_write_commandn(0x2Bu, row, ARRAY_SIZE(row));
-    lcd_write_command(0x2Cu);
+    lcd_write_commandn(0x2Au, col, ARRAY_SIZE(col)); /* CASET: column range */
+    lcd_write_commandn(0x2Bu, row, ARRAY_SIZE(row)); /* RASET: row range */
+    lcd_write_command(0x2Cu);                        /* RAMWR: pixel data follows */
 #endif
 }
 
 void lcd_dma_write_rgb565_async(const WORD *buf, int n_pixels) {
+    /*
+     * Convenience path for callers with WORD RGB565 pixels.
+     * The LCD bus wants bytes, so this routine converts into the driver DMA
+     * buffer and then starts lcd_dma_write_bytes_async().
+     */
     if (!buf || n_pixels <= 0 || s_window_pixels <= 0) {
         return;
     }
@@ -974,6 +1029,11 @@ void lcd_dma_write_rgb565_async(const WORD *buf, int n_pixels) {
 }
 
 BYTE *lcd_dma_acquire_buffer(void) {
+    /*
+     * Return the currently free driver DMA buffer for callers that already
+     * pack RGB565 as high-byte/low-byte pairs. The returned pointer is valid
+     * until the next lcd_dma_write_*_async() call.
+     */
 #ifdef PICO_BUILD
     return s_lcd_dma_buf[s_lcd_dma_buf_idx];
 #else
@@ -982,6 +1042,11 @@ BYTE *lcd_dma_acquire_buffer(void) {
 }
 
 void lcd_dma_write_bytes_async(const BYTE *buf, int n_bytes) {
+    /*
+     * Start an asynchronous byte transfer to the active LCD window.
+     * This function waits for the previous transfer first, then keeps CS
+     * asserted until lcd_dma_wait() observes completion.
+     */
     if (!buf || n_bytes <= 0 || s_window_pixels <= 0) {
         return;
     }
