@@ -10,6 +10,50 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.26 sprite active list 採用 (2026-07-19)
+
+- 背景:
+  - `1.1.15` の shadow 計測で、scanline ごとの 64 sprite 固定走査に対し、
+    active list 構築コストが十分小さいことを確認していた
+  - 今回、実際の描画に使う scanline ごとの sprite index list を実装し、実機 A/B
+    計測で採用可否を判断した
+- 実装:
+  - `SCAN_TOP_OFF_SCREEN` の frame 先頭で、SPRRAM の 64 entries から各 visible
+    scanline の sprite index list を構築する
+  - 既存の描画優先順を保つため、index は sprite 63 から 0 の順で格納する
+  - `InfoNES_DrawLine()` は list が有効な scanline では登録済み sprite だけを走査する
+  - OAM の `$2004` write、`$4014` DMA、sprite size に影響する `$2000` write、reset
+    では list を invalid にし、次の再構築まで従来の 64 sprite 走査へ fallback する
+  - `NESCO_SPRITE_ACTIVE_LIST` CMake option を追加し、通常 build では `ON` を既定にした
+  - `NESCO_SPRITE_ACTIVE_LIST_METRICS=ON` の計測 build では、`[SPR_ACTIVE]` に list
+    構築時間、entries、利用 scanline 数、fallback 数、実際に走査した候補数を 1 秒ごとに出す
+- 互換性確認:
+  - Mesen2 で初期 180 frames を確認し、`LodeRunner` と `Project DART` の OAM DMA は
+    vblank 中に行われ、描画中の direct OAM write は観測しなかった
+  - 実機の active-list 計測 log
+    `/home/fuyuki/pico_dvl/codex/log/20260719_174109.log` でも、3 ROM の全 sample で
+    `fallback_scanlines=0` を確認した
+- 実機 A/B 結果:
+  - active-list ON:
+    `PicoCalc NESco Ver. 1.1.26 Build Jul 19 2026 17:21:34`
+    (`20260719_174109.log`)
+  - active-list OFF / 同一メトリクス形式:
+    `PicoCalc NESco Ver. 1.1.26 Build Jul 19 2026 17:52:21`
+    (`/home/fuyuki/pico_dvl/codex/log/20260719_181658.log`)
+  - sprite 描画がある sample の FPS 平均:
+    - `LodeRunner.nes`: `47.99` vs `45.24` fps (`+6.1%`)
+    - `Project_DART_V1.0.nes`: `45.68` vs `43.22` fps (`+5.7%`)
+    - `Xevious.nes`: `55.50` vs `52.98` fps (`+4.8%`)
+  - 厳密に同一入力・同一局面ではないため差分は近似値として扱うが、3 ROM 全てで同じ方向の
+    約 5〜6% 改善を確認した
+- 採用状態:
+  - 通常版は active list を有効にする
+  - 通常版では runtime / performance metrics は無効で、起動 banner 以外の UART log は出さない
+  - 通常 build 確認:
+    `PicoCalc NESco Ver. 1.1.26 Build Jul 19 2026 18:22:44`
+  - size:
+    `text=278844 data=0 bss=98548`
+
 ## Source comment review / comment cleanup (2026-05-02)
 
 - PicoCalc_NESco 側で構築・変更してきた source comment

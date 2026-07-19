@@ -65,6 +65,8 @@
     - `docs/design/SPRITE_ACTIVE_LIST_SHADOW_METRICS_PLAN_20260429.md`
   - 結果: `docs/project/Picocalc_NESco_HISTORY.md`
   - `1.1.21` で BG full tile path direct args 化、sprite composite range 最適化、軽量 FPS log の状態に整理した。
+  - `1.1.26` で sprite active list を実描画へ採用した。実機 A/B では
+    `LodeRunner`、`Project DART`、`Xevious` で約 `5〜6%` の FPS 改善を確認した。
   - `Xevious` の低再現な背景崩れは再現待ちで、現時点では採用候補を維持する。
 - Background tile hot path optimization
   - 計画: `docs/design/BG_TILE_HOTPATH_OPTIMIZATION_PLAN_20260429.md`

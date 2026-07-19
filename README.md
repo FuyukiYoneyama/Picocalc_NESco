@@ -3,7 +3,7 @@
 `Picocalc_NESco` は、PicoCalc 向けに調整している NES エミュレーター firmware です。
 現在の実装は `infones` ベースで、PicoCalc の LCD、I2C keyboard、PWM audio、SD / flash ROM 選択 menu に接続しています。
 
-現在の埋め込み version は `1.1.24` です。
+現在の埋め込み version は `1.1.26` です。
 このプロジェクトは PicoCalc 専用 firmware を対象にしています。
 PicoCalc 向け以外の build は未検証なので、現在は明示的に無効化しています。
 `infones` 側にある他環境向け build は、このプロジェクトの対象外です。
@@ -37,6 +37,7 @@ PicoCalc 向け以外の build は未検証なので、現在は明示的に無�
 - `Mapper30` ROM の起動と表示を実機確認済みです。ただし `*.m30` 保存 / 復元は未確認です
 - `Map6` `Map19` `Map185` `Map188` `Map235` は dynamic 化済みです。ただし対象 mapper ROM での実機確認は未完です
 - runtime log は default では banner 1 行目以外 disable です
+- sprite 描画は scanline ごとの active list を使い、描画対象外の OAM entry の固定走査を削減しています
 - PicoCalc debug console の UART は `921600 bps` で初期化します
 
 ## すぐ使うには
