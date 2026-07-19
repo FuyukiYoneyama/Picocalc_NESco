@@ -11,7 +11,7 @@ PicoCalc 向け以外の build は未検証なので、現在は明示的に無�
 ## 概要
 
 現状は「日常的に試せる build」ができていて、ROM menu、通常表示、stretch 表示、基本的なセーブデータ保存 / 復元まで動作確認が進んでいます。
-一方、特殊 mapper ROM の互換性確認など、継続して確認中の項目があります。
+一方で、特殊 mapper ROM の互換性確認など、継続して確認中の項目があります。
 
 ![ROM menu](docs/images/rom_menu.png)
 
