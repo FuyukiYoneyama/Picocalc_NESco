@@ -223,6 +223,9 @@ extern WORD WorkFrameIdx;
 
 extern BYTE ChrBuf[];
 
+/* Invalidate the scanline sprite prefilter after an OAM or sprite-size update. */
+void InfoNES_InvalidateSpriteActiveList(void);
+
 
 extern BYTE ChrBufUpdate;
 

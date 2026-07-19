@@ -669,6 +669,8 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
     switch (wAddr & 0x7)
     {
     case 0: /* 0x2000 */
+      if ((PPU_R0 ^ byData) & R0_SP_SIZE)
+        InfoNES_InvalidateSpriteActiveList();
       PPU_R0 = byData;
       PPU_Increment = (PPU_R0 & R0_INC_ADDR) ? 32 : 1;
       PPU_NameTableBank = NAME_TABLE0 + (PPU_R0 & R0_NAME_ADDR);
@@ -730,6 +732,7 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
     case 4: /* 0x2004 */
       // Write data to Sprite RAM
       SPRRAM[PPU_R3++] = byData;
+      InfoNES_InvalidateSpriteActiveList();
       break;
 
     case 5: /* 0x2005 */
@@ -940,6 +943,7 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
         InfoNES_MemoryCopy(SPRRAM, &ROMBANK3[((WORD)byData << 8) & 0x1fff], SPRRAM_SIZE);
         break;
       }
+      InfoNES_InvalidateSpriteActiveList();
       break;
 
     case 0x15: /* 0x4015 */

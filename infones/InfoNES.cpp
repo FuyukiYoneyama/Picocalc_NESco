@@ -180,6 +180,11 @@ namespace
 uint8_t g_bg_tile_pair_idx4[256];
 uint8_t g_bg_tile_pair_opaque4[256];
 
+constexpr int kSpriteActiveListMaxEntries = 64 * 16;
+BYTE g_sprite_active_indices[kSpriteActiveListMaxEntries];
+uint16_t g_sprite_active_offsets[NES_DISP_HEIGHT + 1];
+bool g_sprite_active_list_valid = false;
+
 inline void initBgTileRenderLut()
 {
   for (int pl0 = 0; pl0 < 16; ++pl0)
@@ -810,6 +815,7 @@ void InfoNES_SetupPPU()
   // Clear PPU and Sprite Memory
   InfoNES_MemorySet(PPURAM, 0, PPURAM_SIZE);
   InfoNES_MemorySet(SPRRAM, 0, SPRRAM_SIZE);
+  InfoNES_InvalidateSpriteActiveList();
 
   // Reset PPU Register
   PPU_R0 = PPU_R1 = PPU_R2 = PPU_R3 = PPU_R7 = 0;
@@ -992,57 +998,95 @@ void __not_in_flash_func(InfoNES_Cycle)()
   }
 }
 
-inline void measureSpriteActiveListShadow()
+void InfoNES_InvalidateSpriteActiveList(void)
 {
-  if constexpr (!kDetailedPerfLogToSerial)
+  g_sprite_active_list_valid = false;
+}
+
+inline void buildSpriteActiveList()
+{
+  g_sprite_active_list_valid = false;
+
+  BYTE line_counts[NES_DISP_HEIGHT] = {};
+  for (int sprite_index = 0; sprite_index < 64; ++sprite_index)
+  {
+    const int sprite_offset = sprite_index << 2;
+    const int y0 = static_cast<int>(SPRRAM[sprite_offset + SPR_Y]) + 1;
+    const int y1 = y0 + static_cast<int>(PPU_SP_Height);
+    const int begin = y0 < 0 ? 0 : y0;
+    const int end = y1 > NES_DISP_HEIGHT ? NES_DISP_HEIGHT : y1;
+    for (int y = begin; y < end; ++y)
+    {
+      ++line_counts[y];
+    }
+  }
+
+  uint16_t entries = 0;
+  for (int y = 0; y < NES_DISP_HEIGHT; ++y)
+  {
+    g_sprite_active_offsets[y] = entries;
+    entries += line_counts[y];
+  }
+  g_sprite_active_offsets[NES_DISP_HEIGHT] = entries;
+  if (entries > kSpriteActiveListMaxEntries)
   {
     return;
   }
 
-  const uint64_t start_us = time_us_64();
-  BYTE line_counts[NES_DISP_HEIGHT] = {};
-  uint32_t entries = 0;
-
-  for (int sprite_offset = 0; sprite_offset < SPRRAM_SIZE; sprite_offset += 4)
-  {
-    const int y0 = static_cast<int>(SPRRAM[sprite_offset + SPR_Y]) + 1;
-    const int y1 = y0 + static_cast<int>(PPU_SP_Height);
-    if (y1 <= 0 || y0 >= NES_DISP_HEIGHT)
-    {
-      continue;
-    }
-
-    const int clamped_y0 = (y0 < 0) ? 0 : y0;
-    const int clamped_y1 = (y1 > NES_DISP_HEIGHT) ? NES_DISP_HEIGHT : y1;
-    for (int y = clamped_y0; y < clamped_y1; ++y)
-    {
-      ++line_counts[y];
-      ++entries;
-    }
-  }
-
-  uint32_t active_lines = 0;
-  uint32_t max_per_line = 0;
+  uint16_t write_offsets[NES_DISP_HEIGHT];
   for (int y = 0; y < NES_DISP_HEIGHT; ++y)
   {
-    const uint32_t count = line_counts[y];
-    if (count != 0)
+    write_offsets[y] = g_sprite_active_offsets[y];
+  }
+
+  // Preserve the existing OAM priority order: sprite 63 down to sprite 0.
+  for (int sprite_index = 63; sprite_index >= 0; --sprite_index)
+  {
+    const int sprite_offset = sprite_index << 2;
+    const int y0 = static_cast<int>(SPRRAM[sprite_offset + SPR_Y]) + 1;
+    const int y1 = y0 + static_cast<int>(PPU_SP_Height);
+    const int begin = y0 < 0 ? 0 : y0;
+    const int end = y1 > NES_DISP_HEIGHT ? NES_DISP_HEIGHT : y1;
+    for (int y = begin; y < end; ++y)
     {
-      ++active_lines;
-      if (count > max_per_line)
-      {
-        max_per_line = count;
-      }
+      g_sprite_active_indices[write_offsets[y]++] = static_cast<BYTE>(sprite_index);
     }
   }
 
-  g_perf_ppu_sprite_active_build_us += time_us_64() - start_us;
-  g_perf_ppu_sprite_active_entries += entries;
-  g_perf_ppu_sprite_active_lines += active_lines;
-  if (max_per_line > g_perf_ppu_sprite_active_max_per_line)
+  g_sprite_active_list_valid = true;
+}
+
+inline bool spriteActiveListAvailableForScanline(int scanline)
+{
+  return g_sprite_active_list_valid &&
+         scanline >= 0 &&
+         scanline < NES_DISP_HEIGHT;
+}
+
+inline void measureSpriteActiveListBuild()
+{
+  if constexpr (kDetailedPerfLogToSerial)
   {
-    g_perf_ppu_sprite_active_max_per_line = max_per_line;
+    const uint64_t start_us = time_us_64();
+    buildSpriteActiveList();
+    g_perf_ppu_sprite_active_build_us += time_us_64() - start_us;
+    g_perf_ppu_sprite_active_entries += g_sprite_active_offsets[NES_DISP_HEIGHT];
+    for (int y = 0; y < NES_DISP_HEIGHT; ++y)
+    {
+      const uint32_t count = g_sprite_active_offsets[y + 1] - g_sprite_active_offsets[y];
+      if (count != 0)
+      {
+        ++g_perf_ppu_sprite_active_lines;
+      }
+      if (count > g_perf_ppu_sprite_active_max_per_line)
+      {
+        g_perf_ppu_sprite_active_max_per_line = count;
+      }
+    }
+    return;
   }
+
+  buildSpriteActiveList();
 }
 
 /*===================================================================*/
@@ -1152,12 +1196,9 @@ int __not_in_flash_func(InfoNES_HSync)()
     if (NesHeader.byVRomSize == 0 && FrameCnt == 0)
       InfoNES_SetupChr();
 
-    if constexpr (kDetailedPerfLogToSerial)
+    if (FrameCnt == 0 && (PPU_R1 & R1_SHOW_SP))
     {
-      if (FrameCnt == 0 && (PPU_R1 & R1_SHOW_SP))
-      {
-        measureSpriteActiveListShadow();
-      }
+      measureSpriteActiveListBuild();
     }
 
     // Get position of sprite #0
@@ -1798,8 +1839,17 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     int sprite_min_x = NES_DISP_WIDTH;
     int sprite_max_x_exclusive = 0;
     uint32_t sprite_scan_skip_count = 0;
-    for (pSPRRAM = SPRRAM + (63 << 2); pSPRRAM >= SPRRAM; pSPRRAM -= 4)
+    const bool use_active_list = spriteActiveListAvailableForScanline(PPU_Scanline);
+    const BYTE *active_indices = use_active_list
+                                     ? g_sprite_active_indices + g_sprite_active_offsets[PPU_Scanline]
+                                     : nullptr;
+    const int sprite_count = use_active_list
+                                 ? g_sprite_active_offsets[PPU_Scanline + 1] - g_sprite_active_offsets[PPU_Scanline]
+                                 : 64;
+    for (int sprite_pos = 0; sprite_pos < sprite_count; ++sprite_pos)
     {
+      const int sprite_index = active_indices ? active_indices[sprite_pos] : 63 - sprite_pos;
+      pSPRRAM = SPRRAM + (sprite_index << 2);
       nY = pSPRRAM[SPR_Y] + 1;
       if (nY > PPU_Scanline || nY + PPU_SP_Height <= PPU_Scanline)
       {
