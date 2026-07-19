@@ -25,6 +25,7 @@ option(NESCO_RUNTIME_LOGS "Enable verbose runtime logging on device" OFF)
 option(NESCO_INPUT_IO_LOGS "Enable focused $4016/$4017 input I/O logging" OFF)
 option(NESCO_BOKOSUKA_STATE_LOGS "Enable focused Bokosuka state logging" OFF)
 option(NESCO_CORE1_BASELINE_LOG "Enable one-second baseline performance logs for core1 planning" OFF)
+option(NESCO_SPRITE_ACTIVE_LIST_METRICS "Enable one-second sprite active-list metrics" OFF)
 
 # Probe slightly larger linker-reserved heap without modifying the Pico SDK.
 # Disable malloc panic so heap diagnostics can measure allocation ceilings safely.
@@ -117,6 +118,13 @@ if(PICO_BUILD)
     if(NESCO_CORE1_BASELINE_LOG)
         target_compile_definitions(Picocalc_NESco PRIVATE
             NESCO_CORE1_BASELINE_LOG=1
+        )
+    endif()
+
+    if(NESCO_SPRITE_ACTIVE_LIST_METRICS)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_CORE1_BASELINE_LOG=1
+            NESCO_SPRITE_ACTIVE_LIST_METRICS=1
         )
     endif()
 

@@ -41,3 +41,10 @@ if(NESCO_CORE1_BASELINE_LOG)
         NESCO_CORE1_BASELINE_LOG=1
     )
 endif()
+
+if(NESCO_SPRITE_ACTIVE_LIST_METRICS)
+    target_compile_definitions(infones PUBLIC
+        NESCO_CORE1_BASELINE_LOG=1
+        NESCO_SPRITE_ACTIVE_LIST_METRICS=1
+    )
+endif()

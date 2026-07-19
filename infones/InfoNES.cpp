@@ -215,6 +215,12 @@ constexpr bool kPerfLogToSerial =
     false;
 #endif
 constexpr bool kDetailedPerfLogToSerial = false;
+constexpr bool kSpriteActiveListMetrics =
+#if defined(NESCO_SPRITE_ACTIVE_LIST_METRICS)
+    true;
+#else
+    false;
+#endif
 constexpr uint64_t kPerfWindowUs = 1000000;
 constexpr int kNesViewScaleStretch320x300 = 1;
 
@@ -257,6 +263,9 @@ uint64_t g_perf_ppu_sprite_active_build_us = 0;
 uint32_t g_perf_ppu_sprite_active_entries = 0;
 uint32_t g_perf_ppu_sprite_active_lines = 0;
 uint32_t g_perf_ppu_sprite_active_max_per_line = 0;
+uint32_t g_perf_sprite_active_list_scanlines = 0;
+uint32_t g_perf_sprite_active_list_fallback_scanlines = 0;
+uint32_t g_perf_sprite_active_list_candidates = 0;
 uint64_t g_perf_ppu_sprite_comp_us = 0;
 uint64_t g_perf_ppu_sprite_clip_us = 0;
 uint32_t g_perf_ppu_sprite_visible_count = 0;
@@ -277,6 +286,13 @@ inline void perf_reset()
 {
   g_perf_window_start_us = time_us_64();
   g_perf_frames = 0;
+  g_perf_ppu_sprite_active_build_us = 0;
+  g_perf_ppu_sprite_active_entries = 0;
+  g_perf_ppu_sprite_active_lines = 0;
+  g_perf_ppu_sprite_active_max_per_line = 0;
+  g_perf_sprite_active_list_scanlines = 0;
+  g_perf_sprite_active_list_fallback_scanlines = 0;
+  g_perf_sprite_active_list_candidates = 0;
 }
 
 inline void perf_note_frame(uint64_t now_us)
@@ -338,6 +354,18 @@ inline void perf_log_if_due(uint64_t now_us)
                  static_cast<unsigned long>(g_perf_frames),
                  static_cast<unsigned long long>(fps_x100),
                  view_mode);
+
+  if constexpr (kSpriteActiveListMetrics)
+  {
+    NESCO_LOG_PERF("[SPR_ACTIVE] build_us=%llu entries=%lu active_lines=%lu max_per_line=%lu list_scanlines=%lu fallback_scanlines=%lu candidates=%lu\n",
+                   static_cast<unsigned long long>(g_perf_ppu_sprite_active_build_us),
+                   static_cast<unsigned long>(g_perf_ppu_sprite_active_entries),
+                   static_cast<unsigned long>(g_perf_ppu_sprite_active_lines),
+                   static_cast<unsigned long>(g_perf_ppu_sprite_active_max_per_line),
+                   static_cast<unsigned long>(g_perf_sprite_active_list_scanlines),
+                   static_cast<unsigned long>(g_perf_sprite_active_list_fallback_scanlines),
+                   static_cast<unsigned long>(g_perf_sprite_active_list_candidates));
+  }
 
   perf_reset();
 }
@@ -1065,7 +1093,7 @@ inline bool spriteActiveListAvailableForScanline(int scanline)
 
 inline void measureSpriteActiveListBuild()
 {
-  if constexpr (kDetailedPerfLogToSerial)
+  if constexpr (kDetailedPerfLogToSerial || kSpriteActiveListMetrics)
   {
     const uint64_t start_us = time_us_64();
     buildSpriteActiveList();
@@ -1846,6 +1874,18 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     const int sprite_count = use_active_list
                                  ? g_sprite_active_offsets[PPU_Scanline + 1] - g_sprite_active_offsets[PPU_Scanline]
                                  : 64;
+    if constexpr (kSpriteActiveListMetrics)
+    {
+      if (use_active_list)
+      {
+        ++g_perf_sprite_active_list_scanlines;
+        g_perf_sprite_active_list_candidates += sprite_count;
+      }
+      else
+      {
+        ++g_perf_sprite_active_list_fallback_scanlines;
+      }
+    }
     for (int sprite_pos = 0; sprite_pos < sprite_count; ++sprite_pos)
     {
       const int sprite_index = active_indices ? active_indices[sprite_pos] : 63 - sprite_pos;
