@@ -221,6 +221,12 @@ constexpr bool kSpriteActiveListMetrics =
 #else
     false;
 #endif
+constexpr bool kSpriteActiveListEnabled =
+#if defined(NESCO_SPRITE_ACTIVE_LIST)
+    true;
+#else
+    false;
+#endif
 constexpr uint64_t kPerfWindowUs = 1000000;
 constexpr int kNesViewScaleStretch320x300 = 1;
 
@@ -1086,13 +1092,20 @@ inline void buildSpriteActiveList()
 
 inline bool spriteActiveListAvailableForScanline(int scanline)
 {
-  return g_sprite_active_list_valid &&
+  return kSpriteActiveListEnabled &&
+         g_sprite_active_list_valid &&
          scanline >= 0 &&
          scanline < NES_DISP_HEIGHT;
 }
 
 inline void measureSpriteActiveListBuild()
 {
+  if constexpr (!kSpriteActiveListEnabled)
+  {
+    g_sprite_active_list_valid = false;
+    return;
+  }
+
   if constexpr (kDetailedPerfLogToSerial || kSpriteActiveListMetrics)
   {
     const uint64_t start_us = time_us_64();

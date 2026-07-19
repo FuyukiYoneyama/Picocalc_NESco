@@ -48,3 +48,9 @@ if(NESCO_SPRITE_ACTIVE_LIST_METRICS)
         NESCO_SPRITE_ACTIVE_LIST_METRICS=1
     )
 endif()
+
+if(NESCO_SPRITE_ACTIVE_LIST)
+    target_compile_definitions(infones PUBLIC
+        NESCO_SPRITE_ACTIVE_LIST=1
+    )
+endif()
