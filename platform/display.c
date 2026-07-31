@@ -130,6 +130,7 @@ enum {
 
 enum {
     DISPLAY_LCD_WORKER_QUEUE_DEPTH = 4,
+    DISPLAY_LCD_WORKER_QUEUE_RETRY_US = 10,
 };
 
 typedef enum {
@@ -871,7 +872,7 @@ static bool display_lcd_worker_submit_line(int scanline, const BYTE *src) {
             s_perf_lcd_queue_wait_episodes++;
         }
         s_perf_lcd_queue_wait_count++;
-        sleep_us(100);
+        sleep_us(DISPLAY_LCD_WORKER_QUEUE_RETRY_US);
 #endif
     }
 #ifdef PICO_BUILD
@@ -899,7 +900,7 @@ static bool display_lcd_worker_submit_line(int scanline, const BYTE *src) {
                 s_perf_lcd_queue_wait_episodes++;
             }
             s_perf_lcd_queue_wait_count++;
-            sleep_us(100);
+            sleep_us(DISPLAY_LCD_WORKER_QUEUE_RETRY_US);
 #endif
         }
 #ifdef PICO_BUILD
