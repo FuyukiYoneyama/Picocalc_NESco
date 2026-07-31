@@ -10,6 +10,36 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.29 BG palette index 段階2 合格 (2026-07-31)
+
+- 実装:
+  - `WorkLine` とLCD worker queueのpixelをRGB565 `WORD[256]`からpalette index `BYTE[256]`へ変更した
+  - backgroundはpalette baseと2-bit indexを格納し、spriteは`0x10..0x1f`、black clearは`0x20`を使う
+  - `BackgroundOpaqueLine`とopaque LUTを削除し、sprite優先度をbackground indexの下位2 bitから導出する
+  - core1/fallbackは共通の256-entry LUTとnormal/stretch packerでRGB565へ変換する
+  - `0x21..0xff`とprotocol fault用LUTはblackに固定し、範囲外readとbackdrop色clearを防いだ
+  - `display_perf_reset()`は`InfoNES_Init()` / `InfoNES_Reset()`からのみ呼ぶ
+  - versionを`1.1.29`へ更新した。実装commitは`791ee86 Implement BG palette index pipeline`
+- build:
+  - 通常版: ARM EABI5、`text=278820 data=0 bss=97544`
+  - 計測版: ARM EABI5、`text=283616 data=0 bss=97888`
+  - queue `0x580`、line buffer `0x100`、core1 LUT `0x200`、black LUT read-only `0x200`
+  - 計測UF2 SHA-256: `2508444d39375e766f9d7410089f9efc4d9415074d0e674885764e7db5d5f6ad`
+- 実機A/B:
+  - log: `/home/fuyuki/pico_dvl/codex/log/pico20260731_214523.log`
+  - 固定30窓の`frame_us_avg / p95_us` baseline比:
+    - LodeRunner: `-13.17% / -37.85%`
+    - Project_DART: `-17.80% / -34.85%`
+    - Xevious: `-1.85% / -3.91%`、実値`16596 / 16668 us`で60 fps pacing上限へ到達
+  - 全90採用窓と、normal/stretchの追加実プレイを含むログ全412窓でpalette protocol fault 0
+  - 実機プレイで色化け、左端clip、sprite優先度、normal/stretchを含む問題は見られなかった
+- 判定:
+  - 段階2を採用する
+  - Xeviousの旧3%条件は新baselineに対して60 fps上限より速い値を要求していたため、
+    平均・p95とも16,700 us以下を上限到達合格として明文化した
+  - normal 3 ROMすべてが上限到達したためnormal向け段階3は実装しない
+  - stretchのqueue waitは100 us polling改善を先に検討する別課題として残す
+
 ## 1.1.28 段階2 A/B baseline (2026-07-31)
 
 - 計測版:

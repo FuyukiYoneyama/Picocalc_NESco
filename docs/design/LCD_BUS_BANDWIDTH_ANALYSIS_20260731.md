@@ -4,14 +4,16 @@
 
 対象 branch: `docs/lcd-bus-bandwidth-analysis`
 
-対象 version: `1.1.26`
+初回分析対象 version: `1.1.26`
+
+実測更新 version: `1.1.29`
 
 ## 目的
 
 現在の LCD 転送が 60fps 予算に対してどれだけ余裕がないかを、コードから確認できる事実だけで数値化する。
 
 そのうえで、転送量を減らす候補を効果順に並べ、`docs/project/TASKS.md` の
-`[deferred] 256 表示で平均 60fps を目指す追加高速化` を再開するときの判断材料にする。
+`[deferred] stretch 表示の追加高速化` を再開するときの判断材料にする。
 
 この文書は分析と候補整理までを範囲とする。実装と実機確認は含まない。
 
@@ -286,6 +288,10 @@ stretch view を 60fps に近づけられるのは COLMOD 12 bit のみで、
 1 と 2 を入れた場合、normal view は予算比 70% 前後、stretch view は 110% 前後になる。
 4 は表示内容が変わるため最後に置き、設定項目として実装する。
 
+ただし `1.1.29` の stretch 実測では、queue-full待ち1回が現行の
+`sleep_us(100)` とほぼ一致した。stretchの次の実験は上表のLCD形式変更より先に、
+polling幅短縮または通知方式を独立A/Bする。COLMODはその結果を見て判断する。
+
 なお 1 を入れて予算比 70% まで下がれば、
 sysclk を 200 MHz へ落として規格超過を一段解消する選択肢が現実的になる。
 これは予算比 94.4% の現状では取れない手である。
@@ -301,7 +307,7 @@ sysclk を 200 MHz へ落として規格超過を一段解消する選択肢が�
 | `LodeRunner.nes` | 47.99 | 20.84 ms | +5.11 ms |
 | `Project_DART_V1.0.nes` | 45.68 | 21.89 ms | +6.16 ms |
 
-3 ROM とも frame time がバス下限を上回っている。
+これは `1.1.26` 時点の値であり、3 ROM とも frame time がバス下限を上回っていた。
 したがって normal view の平均 fps を決めているのは core0 の emulation であり、
 LCD バスではない。バス下限を下げても、上に乗っている 18〜22 ms は動かない。
 
@@ -309,6 +315,10 @@ LCD バスではない。バス下限を下げても、上に乗っている 18�
 1 frame あたり `552 µs` であり、core0 が LCD を待つ時間は frame の 3% 程度である。
 
 これは transfer が DMA と PIO で非同期に走っているためで、設計どおりの結果である。
+
+その後、BG palette index化を行った `1.1.29` ではnormal 3 ROMすべてが
+`frame_us_avg` / `p95_us` とも `16,700 us` 以下へ到達した。
+したがってnormal向けのpolling変更、queue depth変更、LCD帯域変更は行わない。
 
 ### 予測される効果
 
@@ -352,16 +362,20 @@ stretch が core1 律速へ移る可能性がある。
 
 ## 実測状況
 
-stretch 実測は完了し、queue wait だけが窓単位化後の再計測待ちである。詳細は
-`docs/project/TASKS.md` の該当項目を正本とする。
+`1.1.29` の実機log `/home/fuyuki/pico_dvl/codex/log/pico20260731_214523.log` で、
+normal/stretchの追加実プレイを含む窓を取得した。目視・プレイ上の問題はなく、
+全412窓でpalette protocol fault 0だった。stretch値は固定A/B区間ではなく、
+入力を含む追加プレイ区間の参考値である。現在タスクの正本は `docs/project/TASKS.md` とする。
 
-1. `1.1.27` の stretch 実測 fps (`Xevious.nes` stretch) — **完了**
-   - 実測は約 `36.7 fps` (`27.3 ms/frame`) で、バス下限 `24.58 ms` / `40.7 fps` に達していない
-   - 現状は core0 律速と判断し、COLMOD 12 bit/pixel は BG line buffer index 化の採否後に判断する
-2. `lcd_queue_wait_us` / `lcd_queue_wait_count`
-   - `NESCO_CORE1_BASELINE_LOG=ON` の `[CORE1_BASE]` から取得する
-   - 計測機構は `1.1.1` で追加済みだが実測値が履歴に残っていない
-   - normal 側の二次効果の大きさがこれで決まる
+| ROM | stretch窓数 | `frame_us_avg` 中央値 | queue wait比率中央値 | 1 waitあたり |
+|---|---:|---:|---:|---:|
+| LodeRunner | 46 | 29.02 ms | 37.89% | 100.45 us |
+| Project_DART | 37 | 30.23 ms | 34.28% | 100.72 us |
+| Xevious | 28 | 27.22 ms | 48.41% | 100.43 us |
+
+queue waitは十分大きいが、1 waitあたりが全ROMで約100 usであり、
+queue-full loopの`sleep_us(100)`量子化と一致する。queue depthを増やす前に、
+polling幅または通知方式の効果を独立して測る。
 
 ## 未確認事項
 
@@ -371,4 +385,4 @@ stretch 実測は完了し、queue wait だけが窓単位化後の再計測待�
 - RAMWR 途中の CS deassert で GRAM address pointer が保持されるか
 - `lcd_wait_idle()` 1 回あたりの実費用と、1 frame 180 回の合計
   - 既存 `wait_us` では取れない。候補 2 着手時に worker/driver 側の専用 counter を追加する
-- `lcd_queue_wait_us` の実測値
+- stretchでpolling幅短縮または通知方式がframe time / p95 / queue waitへ与える効果

@@ -993,9 +993,10 @@ rg -n "BackgroundOpaqueLine|g_bg_tile_pair_opaque4|WORD \*WorkLine|InfoNES_SetLi
 queue item の byte 化を将来の queue depth 変更と分けるのは、
 段階 2 の測定に queue traffic 削減が含まれるかどうかを曖昧にしないためである。
 これにより段階 2 は「描画の削減 + queue traffic 削減」、
-段階 3 は「純粋に queue depth の効果」に分かれ、
+段階 3 候補は「polling / queue depthだけの効果」に分かれ、
 理論小計 (tile 内側 1.54 ms + clear 0.15 ms = 約 1.69 ms) と、独立には cycle 化しない
 queue traffic 削減分を含む段階 2 の実測を比較できる。
+実測ではnormalが60 fps上限へ到達したため、この候補は実装しなかった。
 
 ### fallback 経路も index 化が必要である
 
@@ -1113,17 +1114,30 @@ cmake --build "$NESCO_BUILD_DIR" --clean-first -j4
 | Project_DART | 20,183.0 | 19,577.51 | 25,584.0 | 25,839.84 | 0.0211% | 23,214.0 |
 | Xevious | 16,909.5 | 16,402.22 | 17,346.0 | 17,519.46 | 8.9331% | 13,153.5 |
 
+段階 2 `1.1.29` は `pico20260731_214523.log` で同じ30窓を取得し、実機合格した。
+
+| ROM | `frame_us_avg` 中央値 | baseline 比 | `p95_us` 中央値 | baseline 比 | queue wait 比率中央値 | `lcd_empty_polls` 中央値 |
+|---|---:|---:|---:|---:|---:|---:|
+| LodeRunner | 16,597.0 | -13.17% | 16,668.0 | -37.85% | 19.8120% | 7,381.5 |
+| Project_DART | 16,590.5 | -17.80% | 16,668.0 | -34.85% | 15.6850% | 8,140.5 |
+| Xevious | 16,596.0 | -1.85% | 16,668.0 | -3.91% | 34.2722% | 6,017.5 |
+
+全90採用窓と、追加のnormal/stretchプレイを含むログ全412窓で
+`palette_protocol_faults=0` だった。実機プレイでも色、左端clip、sprite優先度、normal/stretchに
+問題は見られなかった。
+
 窓や plateau を目視で選ばない。attract demo の場面によって LodeRunner の frame time が
 約 7% 移動し、3 窓では採用閾値 3% より位相差が大きいためである。既存 `1.1.27` / `1.1.28`
 ログには 30 窓中の操作入力が多数あり、この新規約の baseline には流用しない。
 次をすべて満たせば採用する。
 
-新しい無操作 Xevious normal baseline は 16.91 ms/frame で、LCD バス下限 15.73 ms までの余地は
-約 1.18 ms しかない。core0 の削減が LCD 下限へ近づくほど frame time 改善は頭打ちになるため、
-Xevious の結果はこの上限を踏まえて読む。ただし 3% 条件はこの余地より十分小さく、
-本案の採否基準は変えない。
+新しい無操作 Xevious normal baseline は 16.91 ms/frame で、60 fps frame pacing の
+16.667 ms に対して3%短縮値は16.402 msとなり、実現不能な条件だった。baseline更新時に
+旧18.02 ms用の条件を補正しなかった設計上の誤りなので、上限到達条件を次へ明記する。
 
-1. 各 ROM の `[CORE1_BASE] frame_us_avg` 中央値が baseline より **3% 以上短い**
+1. 各 ROM の `[CORE1_BASE] frame_us_avg` 中央値が baseline より **3% 以上短い**、または
+   `frame_us_avg` 中央値と `[FRAME_STATS] p95_us` 中央値がともに **16,700 us以下**で
+   60 fps frame pacing 上限へ到達している
 2. 各 ROM の `[FRAME_STATS] p95_us` 中央値が baseline より **1% 超悪化しない**
 3. 全 90 窓で `[CORE1_BASE] palette_protocol_faults=0`
 4. sprite 優先度、左端 clip、palette 途中変更で目視回帰がない
@@ -1158,6 +1172,8 @@ core0 側の buffer 形式とは独立である。
 この段階の trigger と採否は **normal 3 ROM のみ**で決め、stretch の値を混ぜない。
 段階 2 の A/B で得た各 30 窓について、窓ごとに
 `lcd_queue_wait_us / (frames * frame_us_avg)` を計算し、ROM ごとの中央値を depth 4 基準とする。
+ただし `frame_us_avg` と `p95_us` の両中央値が16,700 us以下なら、queue wait は60 fps pacing中の
+待ちでありnormalの高速化余地を示さないため、polling/depth段階を実装しない。
 3 ROM すべてが 1% 未満なら、この段階は実装せず version も予約しない。いずれかが 1% 以上なら、
 queue-full loop の polling 粒度を先に調べる。`lcd_queue_wait_us / lcd_queue_wait_count` が
 約 100 us なら `sleep_us(100)` の量子化が支配しているため、depth 6 を自動的には実装せず、
@@ -1188,6 +1204,8 @@ queue depth を増やす前に sleep 幅または通知方式を独立に比較�
 「4.5 ms の overlap を必ず回収できる」とは断定せず、現時点では改善候補として記録する。
 同じ 100 us 量子化は新しい baseline の Xevious normal でも確認され、queue wait 比率中央値は
 8.9331%、1 wait は約 102.6 us だった。したがって normal でも上記の polling-first 規約を使う。
+段階 2 後は3 ROMすべてが平均・p95とも16,700 us以下になったため、normal向け段階 3 は実装しない。
+stretchの約27--30 ms/frameは別課題として残す。
 
 ### 段階 4 以降 (任意、別課題)
 
@@ -1196,7 +1214,7 @@ queue depth を増やす前に sleep 幅または通知方式を独立に比較�
 - `InfoNES_SetLineBuffer()` へ queue slot を直接渡して copy を廃止する
 - 4 px 1 word store 化
 
-段階 4 以降は、段階 3 までの実測を見てから個別に判断する。
+段階 4 以降は、段階 2 の実測と別課題のstretch結果を見て個別に判断する。
 
 ## 未確認事項
 
@@ -1211,6 +1229,13 @@ queue depth を増やす前に sleep 幅または通知方式を独立に比較�
   queue depth を超える回数の palette 変更が起きる ROM があるか
 
 ## この文書の改訂
+
+### 第 9 版から第 10 版へ (`perf/bg-tile-share-log`)
+
+- 段階 2 の固定30窓、追加プレイ、normal/stretchの実機合格結果を記録した
+- Xevious baselineに3%を適用すると60 fps pacing上限より速い値を要求する誤りを訂正し、
+  平均・p95とも16,700 us以下を上限到達として採用できる条件を追加した
+- 段階 2 後はnormal 3 ROMすべてが上限到達したため、normal向け段階 3を実装しないと決定した
 
 ### 第 8 版から第 9 版へ (`perf/bg-tile-share-log`)
 
