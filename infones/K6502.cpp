@@ -13,6 +13,7 @@
 #include "K6502.h"
 #include "InfoNES.h"
 #include "InfoNES_System.h"
+#include "display.h"
 #include "InfoNES_StructuredLog.h"
 #include "boko_flash_trace.h"
 

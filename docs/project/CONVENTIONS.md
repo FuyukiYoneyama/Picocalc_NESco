@@ -72,13 +72,21 @@
   2. `git pull`
   3. `git switch -c <branch-name>`
 - 作業 branch 上で実装、build、必要な文書更新を行う。
-- 実機確認用 UF2 は試作品名にする。
-  - 例: `Picocalc_NESco-test.uf2`
-  - 実機確認前に release 名の UF2 として扱わない。
+- ローカルの実機確認用、release candidate、SD cardへ置くUF2のbasenameは常に
+  `Picocalc_NESco.uf2`とする。
+  - version、用途、実験名をUF2 filenameへ付けない。
+  - SD card上では同じ`Picocalc_NESco.uf2`を上書きし、複数名のUF2を増やさない。
+  - buildの区別はbuild directory、ELF bannerのversion / build ID、SHA-256で行う。
+- GitHub Releaseのasset管理はローカル／SD card管理と分ける。
+  - GitHub Releaseへ添付する公開assetは既存releaseと同じ
+    `Picocalc_NESco-<version>.uf2`形式にする。
+  - version付きassetはGitHub公開用にだけ作り、SD cardへ置く検証用fileとして使わない。
 - 現在進行中の実機確認用 UF2 は `build/` に置いてよい。
 - release 作業や特別な実機試験で使い終わった UF2 は、
   project root 直下へ散らばらせず `local_uf2_archive/` に集約する。
   - `local_uf2_archive/` は管理外の退避場所であり、公開 artifact ではない。
+  - 複数版を保存する場合はversionごとのsubdirectoryへ分け、basenameは
+    `Picocalc_NESco.uf2`のまま維持する。
 - 実機確認が必要な変更では、確認完了前に `main` へ merge / push しない。
 - 実機確認で問題があれば、同じ作業 branch 上で修正し、build と確認を繰り返す。
 - 実機確認と CI が通った後に、必要なら version、README、HISTORY、TASKS を最終更新する。
@@ -124,6 +132,32 @@
   - 例: `500 us/frame` 以上改善なら継続、`200 us/frame` 未満なら不採用寄り、など。
 - 危険な実装ほど、実機検証回数と手戻り回数が増える前提で見積もる。
   - 互換性に触れる変更では、fallback や無効化手段を用意してから実機確認へ進む。
+
+### 速度の判断基準を書くときの注意
+
+- 判断基準を決める前に、**baseline 側が既に上限へ張り付いていないか**を確認する。
+  - `InfoNES_LoadFrame()` は `frame_target_us = 16667` まで sleep するため、
+    60 fps に達した ROM の `frame_us` は core0 の負荷を反映しない。
+  - `fps_x100` が `6000` 付近、`frame_us_avg` が `16,6xx`、
+    `p95_us` が `16,668` 付近なら上限到達とみなす。
+- 上限に達した ROM に「`frame_us` を N% 短縮」という条件を課さない。
+  - どれだけ速くしても満たせないため、正しい実装を不採用にする。
+  - `1.1.29`ではXeviousがこれに該当し、`frame_us`は`-1.85%`に留まった。
+    pacing sleepを出していなかったため、同版のcore0実働改善量は確定できない
+- 上限到達 ROM では、`frame_pacing_sleep_us / frames` の増加を主判定にする。
+  - 現在の`frame_pacing_sleep_us`は`sleep_us()`へ渡した要求時間であり、実経過時間の計測値ではない
+  - `frame_us_avg - queue wait/frame - pacing sleep/frame`はaudio waitなどを含み得るため、
+    **非pacing・非LCD queue時間の診断用推定値**としてだけ扱う
+  - この推定値を純粋なcore0実働時間や、その改善量の確定値として記録しない
+- 無操作でタイトル画面を測る場合も、attract demo が始まると frame time が段状に動く。
+  - 各計画で最低連続窓数を先に固定し、その窓数を満たす最初の区間を機械的に選ぶ
+  - 安定区間は`max(frame_us_avg) / min(frame_us_avg) <= 1.015`を採用条件とする
+  - 中央値からの固定幅は、Project_DARTのような正常な2値振動を排除するため併用しない
+  - `frames`は窓時間が一定なら`frame_us_avg`とほぼ従属するため、全測定区間の中央値に対する
+    狭い許容幅で窓を除外しない。必要なら診断値として記録する
+  - 条件を満たす区間がなければ取り直し、後ろの都合のよいplateauを目視で選ばない
+  - `1.1.28` の実測では LodeRunner が窓 29、Xevious が窓 43 付近で demo に入り、
+    `4` 〜 `5%` の段差が出た。
 
 ## 実装時の注意
 

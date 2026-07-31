@@ -25,6 +25,8 @@ option(NESCO_RUNTIME_LOGS "Enable verbose runtime logging on device" OFF)
 option(NESCO_INPUT_IO_LOGS "Enable focused $4016/$4017 input I/O logging" OFF)
 option(NESCO_BOKOSUKA_STATE_LOGS "Enable focused Bokosuka state logging" OFF)
 option(NESCO_CORE1_BASELINE_LOG "Enable one-second baseline performance logs for core1 planning" OFF)
+option(NESCO_BG_TILE_SHARE_LOG "Enable low-overhead background tile share measurement" OFF)
+option(NESCO_PALETTE_SNAPSHOT_LOG "Enable palette snapshot protocol verification logs" OFF)
 option(NESCO_SPRITE_ACTIVE_LIST_METRICS "Enable one-second sprite active-list metrics" OFF)
 option(NESCO_SPRITE_ACTIVE_LIST "Use the precomputed per-scanline sprite active list" ON)
 
@@ -116,9 +118,21 @@ if(PICO_BUILD)
         )
     endif()
 
-    if(NESCO_CORE1_BASELINE_LOG)
+    if(NESCO_CORE1_BASELINE_LOG OR NESCO_BG_TILE_SHARE_LOG OR NESCO_PALETTE_SNAPSHOT_LOG)
         target_compile_definitions(Picocalc_NESco PRIVATE
             NESCO_CORE1_BASELINE_LOG=1
+        )
+    endif()
+
+    if(NESCO_BG_TILE_SHARE_LOG)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_BG_TILE_SHARE_LOG=1
+        )
+    endif()
+
+    if(NESCO_PALETTE_SNAPSHOT_LOG)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_PALETTE_SNAPSHOT_LOG=1
         )
     endif()
 

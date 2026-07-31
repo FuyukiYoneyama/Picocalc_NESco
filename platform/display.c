@@ -3,7 +3,7 @@
  *
  * Video path (per scanline):
  *   InfoNES_PreDrawLine points the PPU at s_line_buffer[256].
- *   InfoNES_PostDrawLine either queues a copy of that RGB565 line for the
+ *   InfoNES_PostDrawLine either queues a copy of that palette-index line for the
  *   core1 LCD worker, or packs it directly into the LCD DMA buffer on the
  *   fallback path. Completed strips are flushed to the active NES viewport.
  *
@@ -71,18 +71,27 @@ static int s_strip_line = 0;
 /*
  * Single scanline buffer shared with InfoNES.
  *
- * The PPU writes one 256-pixel RGB565 line here between PreDrawLine and
+ * The PPU writes one 256-pixel NES palette-index line here between PreDrawLine and
  * PostDrawLine. When core1 LCD worker is active, PostDrawLine copies the
  * pixels into a queue item before returning, so the next PPU line can reuse
  * this buffer safely.
  */
-static WORD s_line_buffer[256];
+static BYTE s_line_buffer[256];
 static uint64_t s_perf_lcd_wait_us = 0;
 static uint64_t s_perf_lcd_flush_us = 0;
 static uint64_t s_perf_lcd_queue_wait_us = 0;
 static uint32_t s_perf_lcd_queue_wait_count = 0;
+static uint32_t s_perf_lcd_queue_wait_episodes = 0;
 static uint64_t s_perf_frame_pacing_sleep_us = 0;
 static uint32_t s_perf_frame_pacing_sleep_count = 0;
+static bool s_lcd_worker_palette_dirty = true;
+static bool s_lcd_worker_palette_force = true;
+static uint16_t s_lcd_worker_palette_version = 0;
+#if defined(NESCO_PALETTE_SNAPSHOT_LOG)
+static uint32_t s_perf_palette_line_items = 0;
+static uint32_t s_perf_palette_snapshots = 0;
+static uint32_t s_perf_palette_forced = 0;
+#endif
 
 #ifdef PICO_BUILD
 static uint64_t s_last_frame_us = 0;
@@ -141,8 +150,14 @@ typedef struct {
     int viewport_w;
     int viewport_h;
     nes_view_scale_mode_t scale_mode;
-    WORD pixels[256];
+    BYTE pixels[256];
+    WORD palette[32];
+    uint16_t palette_version;
+    uint8_t palette_valid;
 } display_lcd_worker_item_t;
+
+static_assert(sizeof(display_lcd_worker_item_t) == 352,
+              "display_lcd_worker_item_t must remain 352 bytes");
 
 static display_lcd_worker_item_t s_lcd_worker_queue[DISPLAY_LCD_WORKER_QUEUE_DEPTH];
 static unsigned s_lcd_worker_queue_head = 0;
@@ -150,6 +165,28 @@ static unsigned s_lcd_worker_queue_tail = 0;
 static unsigned s_lcd_worker_queue_count = 0;
 static int s_lcd_worker_strip_line = 0;
 static BYTE *s_lcd_worker_strip = NULL;
+static WORD s_lcd_worker_core1_palette[256];
+static const WORD s_lcd_worker_black_palette[256] = {};
+static uint16_t s_lcd_worker_core1_palette_version = 0;
+static bool s_lcd_worker_core1_palette_valid = false;
+
+#if defined(NESCO_CORE1_BASELINE_LOG)
+typedef struct {
+    uint64_t dma_wait_us;
+    uint64_t window_set_us;
+    uint32_t dma_wait_count;
+    uint32_t window_set_count;
+    uint32_t palette_applied;
+    uint32_t palette_protocol_faults;
+    uint32_t empty_polls;
+} display_lcd_worker_core1_window_t;
+
+static_assert(sizeof(display_lcd_worker_core1_window_t) == 40,
+              "display_lcd_worker_core1_window_t must remain 40 bytes");
+
+static display_lcd_worker_core1_window_t s_lcd_worker_core1_local_window = {};
+static display_lcd_worker_core1_window_t s_lcd_worker_core1_published_window = {};
+#endif
 
 #ifdef PICO_BUILD
 static critical_section_t s_lcd_worker_lock;
@@ -175,7 +212,9 @@ static void display_draw_text_span_scaled_cropped(int x,
                                                   int crop_top_rows);
 static int display_measure_text_width(const char *text, int char_advance, int glyph_w, int scale);
 static void display_apply_nes_viewport(void);
-static void display_pack_line_stretch_320(BYTE *dst, const WORD *src);
+static void display_build_palette_lut256(WORD dst[256], const WORD src[32]);
+static void display_pack_line_normal(BYTE *dst, const BYTE *src, const WORD lut[256]);
+static void display_pack_line_stretch_320(BYTE *dst, const BYTE *src, const WORD lut[256]);
 extern "C" void lcd_dma_wait(void);
 extern "C" void lcd_set_window(int x, int y, int w, int h);
 extern "C" BYTE *lcd_dma_acquire_buffer(void);
@@ -205,6 +244,38 @@ static void display_lcd_worker_unlock(void) {
 #endif
 }
 
+void display_lcd_worker_palette_mark_dirty(void) {
+    s_lcd_worker_palette_dirty = true;
+}
+
+void display_lcd_worker_palette_force_snapshot(void) {
+    s_lcd_worker_palette_dirty = true;
+    s_lcd_worker_palette_force = true;
+    s_lcd_worker_palette_version = 0;
+}
+
+static void display_lcd_worker_publish_core1_window(void) {
+#if defined(NESCO_CORE1_BASELINE_LOG)
+    display_lcd_worker_lock();
+    s_lcd_worker_core1_published_window.dma_wait_us +=
+        s_lcd_worker_core1_local_window.dma_wait_us;
+    s_lcd_worker_core1_published_window.window_set_us +=
+        s_lcd_worker_core1_local_window.window_set_us;
+    s_lcd_worker_core1_published_window.dma_wait_count +=
+        s_lcd_worker_core1_local_window.dma_wait_count;
+    s_lcd_worker_core1_published_window.window_set_count +=
+        s_lcd_worker_core1_local_window.window_set_count;
+    s_lcd_worker_core1_published_window.palette_applied +=
+        s_lcd_worker_core1_local_window.palette_applied;
+    s_lcd_worker_core1_published_window.palette_protocol_faults +=
+        s_lcd_worker_core1_local_window.palette_protocol_faults;
+    s_lcd_worker_core1_published_window.empty_polls +=
+        s_lcd_worker_core1_local_window.empty_polls;
+    s_lcd_worker_core1_local_window = {};
+    display_lcd_worker_unlock();
+#endif
+}
+
 static void display_lcd_worker_reset_queue(void) {
     display_lcd_worker_lock();
     s_lcd_worker_queue_head = 0;
@@ -230,6 +301,7 @@ void display_lcd_worker_prepare_nes_view(void) {
      * Old queued lines must not survive a ROM menu return or scale toggle.
      */
     display_lcd_worker_reset_queue();
+    display_lcd_worker_palette_force_snapshot();
     s_lcd_worker_state = DISPLAY_LCD_WORKER_RUNNING;
 }
 
@@ -250,6 +322,7 @@ void display_lcd_worker_stop_and_drain(void) {
     }
     lcd_dma_wait();
     display_lcd_worker_reset_queue();
+    display_lcd_worker_palette_force_snapshot();
     s_lcd_worker_state = DISPLAY_LCD_WORKER_STOPPED;
 }
 
@@ -541,8 +614,19 @@ void display_perf_reset(void) {
     s_perf_lcd_flush_us = 0;
     s_perf_lcd_queue_wait_us = 0;
     s_perf_lcd_queue_wait_count = 0;
+    s_perf_lcd_queue_wait_episodes = 0;
     s_perf_frame_pacing_sleep_us = 0;
     s_perf_frame_pacing_sleep_count = 0;
+#if defined(NESCO_PALETTE_SNAPSHOT_LOG)
+    s_perf_palette_line_items = 0;
+    s_perf_palette_snapshots = 0;
+    s_perf_palette_forced = 0;
+#endif
+#if defined(NESCO_CORE1_BASELINE_LOG)
+    display_lcd_worker_lock();
+    s_lcd_worker_core1_published_window = {};
+    display_lcd_worker_unlock();
+#endif
 }
 
 void display_reset_frame_pacing(void) {
@@ -554,30 +638,63 @@ void display_reset_frame_pacing(void) {
     FrameSkip = 0;
 }
 
-void display_perf_snapshot(uint64_t *wait_us,
-                           uint64_t *flush_us,
-                           uint64_t *queue_wait_us,
-                           uint32_t *queue_wait_count,
-                           uint64_t *frame_pacing_sleep_us,
-                           uint32_t *frame_pacing_sleep_count) {
-    if (wait_us) {
-        *wait_us = s_perf_lcd_wait_us;
+void display_perf_take_window(display_perf_window_t *window) {
+    if (!window) {
+        return;
     }
-    if (flush_us) {
-        *flush_us = s_perf_lcd_flush_us;
-    }
-    if (queue_wait_us) {
-        *queue_wait_us = s_perf_lcd_queue_wait_us;
-    }
-    if (queue_wait_count) {
-        *queue_wait_count = s_perf_lcd_queue_wait_count;
-    }
-    if (frame_pacing_sleep_us) {
-        *frame_pacing_sleep_us = s_perf_frame_pacing_sleep_us;
-    }
-    if (frame_pacing_sleep_count) {
-        *frame_pacing_sleep_count = s_perf_frame_pacing_sleep_count;
-    }
+
+    window->lcd_wait_us = s_perf_lcd_wait_us;
+    window->lcd_flush_us = s_perf_lcd_flush_us;
+    window->lcd_queue_wait_us = s_perf_lcd_queue_wait_us;
+    window->lcd_queue_wait_count = s_perf_lcd_queue_wait_count;
+    window->lcd_queue_wait_episodes = s_perf_lcd_queue_wait_episodes;
+    window->frame_pacing_sleep_us = s_perf_frame_pacing_sleep_us;
+    window->frame_pacing_sleep_count = s_perf_frame_pacing_sleep_count;
+    window->palette_version = s_lcd_worker_palette_version;
+#if defined(NESCO_PALETTE_SNAPSHOT_LOG)
+    window->palette_line_items = s_perf_palette_line_items;
+    window->palette_snapshots = s_perf_palette_snapshots;
+    window->palette_forced = s_perf_palette_forced;
+#else
+    window->palette_line_items = 0;
+    window->palette_snapshots = 0;
+    window->palette_forced = 0;
+#endif
+
+    s_perf_lcd_wait_us = 0;
+    s_perf_lcd_flush_us = 0;
+    s_perf_lcd_queue_wait_us = 0;
+    s_perf_lcd_queue_wait_count = 0;
+    s_perf_lcd_queue_wait_episodes = 0;
+    s_perf_frame_pacing_sleep_us = 0;
+    s_perf_frame_pacing_sleep_count = 0;
+#if defined(NESCO_PALETTE_SNAPSHOT_LOG)
+    s_perf_palette_line_items = 0;
+    s_perf_palette_snapshots = 0;
+    s_perf_palette_forced = 0;
+#endif
+
+#if defined(NESCO_CORE1_BASELINE_LOG)
+    display_lcd_worker_lock();
+    window->lcd_dma_wait_us = s_lcd_worker_core1_published_window.dma_wait_us;
+    window->lcd_dma_wait_count = s_lcd_worker_core1_published_window.dma_wait_count;
+    window->lcd_window_set_us = s_lcd_worker_core1_published_window.window_set_us;
+    window->lcd_window_set_count = s_lcd_worker_core1_published_window.window_set_count;
+    window->palette_applied = s_lcd_worker_core1_published_window.palette_applied;
+    window->palette_protocol_faults =
+        s_lcd_worker_core1_published_window.palette_protocol_faults;
+    window->lcd_empty_polls = s_lcd_worker_core1_published_window.empty_polls;
+    s_lcd_worker_core1_published_window = {};
+    display_lcd_worker_unlock();
+#else
+    window->lcd_dma_wait_us = 0;
+    window->lcd_dma_wait_count = 0;
+    window->lcd_window_set_us = 0;
+    window->lcd_window_set_count = 0;
+    window->palette_applied = 0;
+    window->palette_protocol_faults = 0;
+    window->lcd_empty_polls = 0;
+#endif
 }
 
 void display_clear_rgb565(WORD color) {
@@ -666,23 +783,28 @@ void InfoNES_PreDrawLine(int scanline) {
     InfoNES_SetLineBuffer(s_line_buffer, 256);
 }
 
-static void display_pack_line_normal(BYTE *dst, const WORD *src) {
+static void display_build_palette_lut256(WORD dst[256], const WORD src[32]) {
+    memcpy(dst, src, 32 * sizeof(WORD));
+    memset(&dst[32], 0, (256 - 32) * sizeof(WORD));
+}
+
+static void display_pack_line_normal(BYTE *dst, const BYTE *src, const WORD lut[256]) {
     for (int x = 0; x < 256; x += 4) {
         WORD px;
 
-        px = src[x + 0];
+        px = lut[src[x + 0]];
         dst[(x + 0) * 2 + 0] = (BYTE)(px >> 8);
         dst[(x + 0) * 2 + 1] = (BYTE)(px & 0xFFu);
 
-        px = src[x + 1];
+        px = lut[src[x + 1]];
         dst[(x + 1) * 2 + 0] = (BYTE)(px >> 8);
         dst[(x + 1) * 2 + 1] = (BYTE)(px & 0xFFu);
 
-        px = src[x + 2];
+        px = lut[src[x + 2]];
         dst[(x + 2) * 2 + 0] = (BYTE)(px >> 8);
         dst[(x + 2) * 2 + 1] = (BYTE)(px & 0xFFu);
 
-        px = src[x + 3];
+        px = lut[src[x + 3]];
         dst[(x + 3) * 2 + 0] = (BYTE)(px >> 8);
         dst[(x + 3) * 2 + 1] = (BYTE)(px & 0xFFu);
     }
@@ -716,7 +838,7 @@ static bool display_lcd_worker_pop_item(display_lcd_worker_item_t *item) {
     return popped;
 }
 
-static bool display_lcd_worker_submit_line(int scanline, const WORD *src) {
+static bool display_lcd_worker_submit_line(int scanline, const BYTE *src) {
     display_lcd_worker_item_t item;
 
     if (s_lcd_worker_state != DISPLAY_LCD_WORKER_RUNNING ||
@@ -731,11 +853,33 @@ static bool display_lcd_worker_submit_line(int scanline, const WORD *src) {
     item.viewport_w = s_lcd_w;
     item.viewport_h = s_lcd_h;
     item.scale_mode = s_nes_view_scale;
+    item.palette_valid = 0;
+    item.palette_version = s_lcd_worker_palette_version;
     /*
      * Copy the line into the queue item. Do not queue s_line_buffer by pointer:
      * InfoNES will reuse that buffer for the next scanline immediately.
      */
     memcpy(item.pixels, src, sizeof(item.pixels));
+
+#if defined(NESCO_PALETTE_SNAPSHOT_LOG)
+    s_perf_palette_line_items++;
+#endif
+    if (s_lcd_worker_palette_dirty) {
+        if (!s_lcd_worker_palette_force) {
+            s_lcd_worker_palette_version++;
+        }
+        memcpy(item.palette, PalTable, sizeof(item.palette));
+        item.palette_valid = 1;
+        item.palette_version = s_lcd_worker_palette_version;
+#if defined(NESCO_PALETTE_SNAPSHOT_LOG)
+        s_perf_palette_snapshots++;
+        if (s_lcd_worker_palette_force) {
+            s_perf_palette_forced++;
+        }
+#endif
+        s_lcd_worker_palette_dirty = false;
+        s_lcd_worker_palette_force = false;
+    }
 
     bool queue_waited = false;
 #ifdef PICO_BUILD
@@ -747,6 +891,7 @@ static bool display_lcd_worker_submit_line(int scanline, const WORD *src) {
         if (!queue_waited) {
             queue_wait_start_us = time_us_64();
             queue_waited = true;
+            s_perf_lcd_queue_wait_episodes++;
         }
         s_perf_lcd_queue_wait_count++;
         sleep_us(100);
@@ -774,6 +919,7 @@ static bool display_lcd_worker_submit_line(int scanline, const WORD *src) {
             if (!queue_waited) {
                 queue_wait_start_us = time_us_64();
                 queue_waited = true;
+                s_perf_lcd_queue_wait_episodes++;
             }
             s_perf_lcd_queue_wait_count++;
             sleep_us(100);
@@ -799,11 +945,23 @@ static void display_lcd_worker_flush_normal_strip(const display_lcd_worker_item_
     }
 
     const int strip_y = last_item->scanline - (s_lcd_worker_strip_line - 1);
+#if defined(NESCO_CORE1_BASELINE_LOG) && defined(PICO_BUILD)
+    const uint64_t dma_wait_start_us = time_us_64();
+#endif
     lcd_dma_wait();
+#if defined(NESCO_CORE1_BASELINE_LOG) && defined(PICO_BUILD)
+    s_lcd_worker_core1_local_window.dma_wait_us += time_us_64() - dma_wait_start_us;
+    s_lcd_worker_core1_local_window.dma_wait_count++;
+    const uint64_t window_set_start_us = time_us_64();
+#endif
     lcd_set_window(last_item->viewport_x,
                    last_item->viewport_y + strip_y,
                    NES_VIEW_NORMAL_W,
                    s_lcd_worker_strip_line);
+#if defined(NESCO_CORE1_BASELINE_LOG) && defined(PICO_BUILD)
+    s_lcd_worker_core1_local_window.window_set_us += time_us_64() - window_set_start_us;
+    s_lcd_worker_core1_local_window.window_set_count++;
+#endif
     lcd_dma_write_bytes_async(s_lcd_worker_strip,
                               NES_VIEW_NORMAL_W * s_lcd_worker_strip_line * 2);
     s_lcd_worker_strip = NULL;
@@ -812,13 +970,14 @@ static void display_lcd_worker_flush_normal_strip(const display_lcd_worker_item_
 
 static void display_lcd_worker_pack_stretch_line(BYTE *strip,
                                                  int src_strip_line,
-                                                 const WORD *src) {
+                                                 const BYTE *src,
+                                                 const WORD lut[256]) {
     const int dst_strip_line = src_strip_line + (src_strip_line / 4);
     const int repeat_count = ((src_strip_line & 3) == 3) ? 2 : 1;
 
     for (int rep = 0; rep < repeat_count; ++rep) {
         BYTE *dst = strip + (dst_strip_line + rep) * NES_VIEW_STRETCH_W * 2;
-        display_pack_line_stretch_320(dst, src);
+        display_pack_line_stretch_320(dst, src, lut);
     }
 }
 
@@ -835,11 +994,23 @@ static void display_lcd_worker_flush_stretch_strip(const display_lcd_worker_item
     const int stretch_y = strip_y + (strip_y / 4);
     const int lcd_lines = s_lcd_worker_strip_line + (s_lcd_worker_strip_line / 4);
 
+#if defined(NESCO_CORE1_BASELINE_LOG) && defined(PICO_BUILD)
+    const uint64_t dma_wait_start_us = time_us_64();
+#endif
     lcd_dma_wait();
+#if defined(NESCO_CORE1_BASELINE_LOG) && defined(PICO_BUILD)
+    s_lcd_worker_core1_local_window.dma_wait_us += time_us_64() - dma_wait_start_us;
+    s_lcd_worker_core1_local_window.dma_wait_count++;
+    const uint64_t window_set_start_us = time_us_64();
+#endif
     lcd_set_window(last_item->viewport_x,
                    last_item->viewport_y + stretch_y,
                    NES_VIEW_STRETCH_W,
                    lcd_lines);
+#if defined(NESCO_CORE1_BASELINE_LOG) && defined(PICO_BUILD)
+    s_lcd_worker_core1_local_window.window_set_us += time_us_64() - window_set_start_us;
+    s_lcd_worker_core1_local_window.window_set_count++;
+#endif
     lcd_dma_write_bytes_async(s_lcd_worker_strip,
                               NES_VIEW_STRETCH_W * lcd_lines * 2);
     s_lcd_worker_strip = NULL;
@@ -855,6 +1026,11 @@ bool display_lcd_worker_poll_once(void) {
     }
 
     if (!display_lcd_worker_pop_item(&item)) {
+#if defined(NESCO_CORE1_BASELINE_LOG)
+        if (s_lcd_worker_state == DISPLAY_LCD_WORKER_RUNNING) {
+            s_lcd_worker_core1_local_window.empty_polls++;
+        }
+#endif
         return false;
     }
 
@@ -864,8 +1040,27 @@ bool display_lcd_worker_poll_once(void) {
          * so pending DMA is complete before a mode change or screenshot can
          * observe the framebuffer.
          */
+        display_lcd_worker_publish_core1_window();
         lcd_dma_wait();
         return true;
+    }
+
+    const WORD *palette_lut = s_lcd_worker_black_palette;
+    if (item.palette_valid) {
+        display_build_palette_lut256(s_lcd_worker_core1_palette, item.palette);
+        s_lcd_worker_core1_palette_version = item.palette_version;
+        s_lcd_worker_core1_palette_valid = true;
+        palette_lut = s_lcd_worker_core1_palette;
+#if defined(NESCO_CORE1_BASELINE_LOG)
+        s_lcd_worker_core1_local_window.palette_applied++;
+#endif
+    } else if (s_lcd_worker_core1_palette_valid &&
+               item.palette_version == s_lcd_worker_core1_palette_version) {
+        palette_lut = s_lcd_worker_core1_palette;
+    } else {
+#if defined(NESCO_CORE1_BASELINE_LOG)
+        s_lcd_worker_core1_local_window.palette_protocol_faults++;
+#endif
     }
 
     if (s_lcd_worker_strip_line == 0) {
@@ -878,14 +1073,16 @@ bool display_lcd_worker_poll_once(void) {
     if (item.scale_mode == NES_VIEW_SCALE_STRETCH_320X300) {
         display_lcd_worker_pack_stretch_line(s_lcd_worker_strip,
                                              s_lcd_worker_strip_line,
-                                             item.pixels);
+                                             item.pixels,
+                                             palette_lut);
         s_lcd_worker_strip_line++;
         if (s_lcd_worker_strip_line >= STRIP_HEIGHT) {
             display_lcd_worker_flush_stretch_strip(&item);
         }
     } else {
         display_pack_line_normal(&s_lcd_worker_strip[s_lcd_worker_strip_line * NES_VIEW_NORMAL_W * 2],
-                                 item.pixels);
+                                 item.pixels,
+                                 palette_lut);
         s_lcd_worker_strip_line++;
         if (s_lcd_worker_strip_line >= STRIP_HEIGHT) {
             display_lcd_worker_flush_normal_strip(&item);
@@ -894,12 +1091,14 @@ bool display_lcd_worker_poll_once(void) {
     return true;
 }
 
-static void display_pack_line_stretch_320(BYTE *dst, const WORD *src) {
+static void display_pack_line_stretch_320(BYTE *dst,
+                                          const BYTE *src,
+                                          const WORD lut[256]) {
     for (int block = 0; block < 64; ++block) {
-        const WORD s0 = src[block * 4 + 0];
-        const WORD s1 = src[block * 4 + 1];
-        const WORD s2 = src[block * 4 + 2];
-        const WORD s3 = src[block * 4 + 3];
+        const WORD s0 = lut[src[block * 4 + 0]];
+        const WORD s1 = lut[src[block * 4 + 1]];
+        const WORD s2 = lut[src[block * 4 + 2]];
+        const WORD s3 = lut[src[block * 4 + 3]];
         WORD out[5] = {s0, s1, s2, s3, s3};
 
         for (int i = 0; i < 5; ++i) {
@@ -923,12 +1122,15 @@ static void display_pack_line_stretch_320(BYTE *dst, const WORD *src) {
  *    used for menu-origin draws (`frommenu`) and if the worker is stopped.
  * ===================================================================== */
 void InfoNES_PostDrawLine(int scanline, bool frommenu) {
-    const WORD *src = s_line_buffer;
+    const BYTE *src = s_line_buffer;
     BYTE *strip = lcd_dma_acquire_buffer();
 
     if (!frommenu && display_lcd_worker_submit_line(scanline, src)) {
         return;
     }
+
+    WORD fallback_lut[256];
+    display_build_palette_lut256(fallback_lut, PalTable);
 
     if (s_nes_view_scale == NES_VIEW_SCALE_STRETCH_320X300) {
         const int src_strip_line = s_strip_line;
@@ -937,11 +1139,11 @@ void InfoNES_PostDrawLine(int scanline, bool frommenu) {
 
         for (int rep = 0; rep < repeat_count; ++rep) {
             BYTE *dst = strip + (dst_strip_line + rep) * NES_VIEW_STRETCH_W * 2;
-            display_pack_line_stretch_320(dst, src);
+            display_pack_line_stretch_320(dst, src, fallback_lut);
         }
     } else {
         BYTE *dst = strip + s_strip_line * NES_VIEW_NORMAL_W * 2;
-        display_pack_line_normal(dst, src);
+        display_pack_line_normal(dst, src, fallback_lut);
     }
 
     s_strip_line++;

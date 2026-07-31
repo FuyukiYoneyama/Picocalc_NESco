@@ -10,6 +10,277 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## `1.2.0` release (2026-08-01)
+
+- release方針:
+  - GitHub最新release `1.1.26`以後に採用したBG palette index pipelineを、公開上の新しい節目として
+    `1.2.0`へまとめる
+  - `1.1.27`--`1.1.32`は計測、段階実装、不採用実験、診断に使用したため、診断version
+    `1.1.32`をそのまま公開番号にはしない
+  - normal表示の代表3 ROMが約60fpsのpacing上限へ到達したことを主なrelease価値とし、
+    stretchを60fps化したとは記載しない
+- 文書:
+  - `platform/version.h`とREADMEを`1.2.0`へ統一した
+  - `docs/release/RELEASE_NOTES_1_2_0.md`と`RELEASE_GATE_1_2_0.md`を追加した
+  - Mapper7 / Mapper9の既知不具合、不採用retry、未実装depth 8、stretchのLCD帯域制約を明記した
+- release candidate build:
+  - `CMAKE_BUILD_TYPE=Release`
+  - runtime / input / state / core1 baseline / BG share / palette snapshot / sprite metricsをすべてOFF
+  - 採用済み`NESCO_SPRITE_ACTIVE_LIST=ON`
+  - clean configure / `--clean-first` buildに成功した
+  - banner: `PicoCalc NESco Ver. 1.2.0 Build Aug  1 2026 08:33:30`
+  - size: `text=278844 data=0 bss=97548`
+  - ELF file size: `2,272,760 byte`
+  - UF2 file size: `553,472 byte`
+  - ELF SHA-256:
+    `41a5639a6b7b9fafe202f087bbc396c7c573090f1e0f729c7a4eaad71c3bdf6a`
+  - UF2 SHA-256:
+    `9413821218af6cadb65102f4dbeac6f06bc1d5dadab225b3fc0ca7786b40b582`
+  - 実機smoke用artifact: `build-release/Picocalc_NESco.uf2`
+- 静的確認:
+  - ELFに`[CORE1_BASE]`、`[FRAME_STATS]`、`[BG_SHARE]`、`[PALETTE_SNAPSHOT]`、
+    `[SPR_ACTIVE]`の文字列が存在しない
+  - tracked fileにROM / save / 圧縮ROM候補の混入なし
+  - README正式画像は既存4 entryだけで、候補画像の混入なし
+  - `git diff --check`合格
+- 状態:
+  - release candidate buildと文書準備は完了
+  - ユーザーが確認済みUF2をrelease artifactとして承認し、pushとGitHub Release作成を指示した
+  - ローカル／SD cardでは`Picocalc_NESco.uf2`を上書きし、GitHub Release assetだけ
+    `Picocalc_NESco-1.2.0.uf2`とする
+  - tagは`v1.2.0`、GitHub Release名は`Picocalc_NESco v1.2.0`とする
+  - 公開URLは`https://github.com/FuyukiYoneyama/Picocalc_NESco/releases/tag/v1.2.0`
+
+## `1.1.32` stretch queue depth Phase 0診断 — depth 8不実施 (2026-08-01)
+
+- 実装:
+  - `8ba265f`を`05e3c2a Revert "Shorten LCD queue retry interval"`でrevertし、queue-full retryを
+    100 usへ戻した。診断追加前の`platform/display.c`と`platform/version.h`は`1f1c093`と一致した
+  - `6bfb1f2 Add LCD strip timing diagnostics`で、core1のstrip flushに
+    `lcd_dma_wait_us/count`と`lcd_window_set_us/count`を追加した
+  - counterは`FRAME_END`で既存queue lock下にhandoffし、`[CORE1_BASE]`末尾に出力する
+  - versionは`1.1.32`。queue depthは4のままであり、depth 8候補`1.1.33`は作成していない
+- build:
+  - 通常build: `text=278844 data=0 bss=97548`
+  - 診断build: ARM EABI5 / RP2040、`text=284088 data=0 bss=97948`、queue symbol `0x580`
+  - 診断build ID: `Aug 1 2026 07:48:14`
+  - 診断UF2 SHA-256:
+    `31ccde5f856a02272673548dedeed8e903453ac0862e76e5c67d887c235abd4d`
+- 実機診断:
+  - log: `/home/fuyuki/pico_dvl/codex/log/pico20260801_075307.log`
+  - 3 ROMのnormal/stretchは各30窓以上あり、入力を含む窓と直後3窓を除いた最初の安定10窓を選定した
+  - 全選定窓で`palette_protocol_faults=0`。DMA wait / window設定のcountは定常状態で30.0回/frameだった
+
+  | stretch ROM | `frame_us_avg` | DMA wait / frame | window設定 / frame | window削減上限 | depth回収上限 |
+  |---|---:|---:|---:|---:|---:|
+  | LodeRunner | 28,888.5 us | 14,900.9 us | 91.3 us | 88.3 us | 4,221.2 us |
+  | Project_DART | 30,051.5 us | 14,852.4 us | 116.5 us | 112.6 us | 5,359.0 us |
+  | Xevious | 26,371.0 us | 16,177.5 us | 91.2 us | 88.2 us | 1,703.8 us |
+
+- 判定:
+  - 3 ROMすべてでDMA waitが`5 ms/frame`を大幅に超えた。core1は次stripを準備済みのまま
+    前DMAの完了を待っており、strip間LCD idle仮説は不支持である
+  - depth 8では次DMAの開始時刻を早められないため、Phase 1 / version `1.1.33`は**実装しない**。
+    queue depth、retry、通知の最適化系列を終了する
+  - window設定の削減上限は最大112.6 us/frameで、250 us/frame gate未満だった。
+    frame単位window設定も後続候補にしない
+  - `depth_recovery_upper_us`は非pixel時間から得る上限に過ぎず、DMA wait直接計測が
+    「その大部分はcore1到着遅れではない」と確定した。上限値だけでdepth候補を採用しない
+- 診断buildの注意:
+  - stretchの既存`1.1.30`比較値との差は`+0.25% / +0.73% / +0.34%`で、いずれも1%未満だった
+  - normalでは`p95_us`が約16,668 usのまま、各1秒窓に約10 msの単発maxが入った
+    （`max_us`約26.8--27.1 ms）。追加した長い`[CORE1_BASE]`出力によるserial logging負荷と判断する
+  - したがって診断buildを通常性能のA/B baselineには使わない。Phase 1は不実施なので、この制約は
+    depth候補の比較には影響しない
+
+## `1.1.30` / `1.1.31` stretch queue retry実験は不採用 (2026-07-31)
+
+- 実装:
+  - `1.1.30`で`lcd_queue_wait_episodes`とframe pacing fieldを`[CORE1_BASE]`へ追加した
+  - Phase 0 commitは`1f1c093 Add stretch queue retry baseline metrics`
+  - `1.1.31`でframe hot pathのqueue-full retry 2箇所だけを100 usから10 usへ変更した
+  - Phase 1 commitは`8ba265f Shorten LCD queue retry interval`
+- build:
+  - 通常buildは両Phaseとも`text=278844 data=0 bss=97548`
+  - 計測buildは両Phaseとも`text=283776 data=0 bss=97892`
+  - baseline計測UF2 SHA-256:
+    `f4588e39fa0ceb403e1d55f7c3c94765b6ebc2b8322227d2c804959096c04046`
+  - candidate計測UF2 SHA-256:
+    `767a914c32add132edaa2a7c2b42fe9fa390a5a128eb0e4375fc5ec3b70ac2bc`
+- 実機A/B:
+  - baseline log: `/home/fuyuki/pico_dvl/codex/log/old/pico20260731_230528.log`
+  - candidate log: `/home/fuyuki/pico_dvl/codex/log/pico20260731_231422.log`
+  - 各ROM/modeで最初の適格な10連続窓を選び、6測定すべてで比較区間を取得できた
+  - 全log 606対で`palette_protocol_faults=0`
+  - candidateの実プレイでも表示、入力、音、normal/stretch切替、menu復帰に問題は見られなかった
+- stretch結果:
+
+  | ROM | `frame_us_avg` baseline | candidate | 差 | `p95_us`差 |
+  |---|---:|---:|---:|---:|
+  | LodeRunner | 28,816.0 us | 28,803.5 us | -12.5 us (-0.04%) | -0.26% |
+  | Project_DART | 29,834.5 us | 29,894.0 us | +59.5 us (+0.20%) | -0.30% |
+  | Xevious | 26,282.5 us | 26,241.5 us | -41.0 us (-0.16%) | -0.31% |
+
+- normal結果:
+  - 3 ROMとも`frame_us_avg`は16,576--16,582 us、`p95_us=16,668 us`、
+    `fps_x100`約6035を維持した
+  - normalの速度・機能回帰はない
+- 機構確認:
+  - retry 1回は約100.5 usから約10.1 usへ短縮し、retry/frameは約10倍になった
+  - queue wait/frameはLodeRunner約11.14→11.22 ms、Project_DART約11.02→11.00 ms、
+    Xevious約14.59→14.56 msで、ほぼ変わらなかった
+  - queue閉塞は約29--31 episode/frameのままで、1 stripごとの閉塞構造も変わらなかった
+- 判定:
+  - 3 ROM中0本しか`500 us/frame`改善条件を満たさなかったため、10 us候補は不採用
+  - retry量子化は主な損失原因ではなく、queue waitの大部分はLCD DMA完了を実際に待つ時間だった
+  - Phase 1 commit `8ba265f`だけを次実装開始時にrevertする。Phase 0の計測commitは残す
+  - `1.1.31`は不採用実験の識別versionとして再利用しない
+  - 次は`docs/design/STRETCH_QUEUE_DEPTH_OPTIMIZATION_PLAN_20260731.md`に従い、
+    depth 4でDMA waitを直接計測し、仮説を支持した場合だけdepth 8を独立A/Bする
+
+## 1.1.29 BG palette index 段階2 合格 (2026-07-31)
+
+- 実装:
+  - `WorkLine` とLCD worker queueのpixelをRGB565 `WORD[256]`からpalette index `BYTE[256]`へ変更した
+  - backgroundはpalette baseと2-bit indexを格納し、spriteは`0x10..0x1f`、black clearは`0x20`を使う
+  - `BackgroundOpaqueLine`とopaque LUTを削除し、sprite優先度をbackground indexの下位2 bitから導出する
+  - core1/fallbackは共通の256-entry LUTとnormal/stretch packerでRGB565へ変換する
+  - `0x21..0xff`とprotocol fault用LUTはblackに固定し、範囲外readとbackdrop色clearを防いだ
+  - `display_perf_reset()`は`InfoNES_Init()` / `InfoNES_Reset()`からのみ呼ぶ
+  - versionを`1.1.29`へ更新した。実装commitは`791ee86 Implement BG palette index pipeline`
+- build:
+  - 通常版: ARM EABI5、`text=278820 data=0 bss=97544`
+  - 計測版: ARM EABI5、`text=283616 data=0 bss=97888`
+  - queue `0x580`、line buffer `0x100`、core1 LUT `0x200`、black LUT read-only `0x200`
+  - 計測UF2 SHA-256: `2508444d39375e766f9d7410089f9efc4d9415074d0e674885764e7db5d5f6ad`
+- 実機A/B:
+  - log: `/home/fuyuki/pico_dvl/codex/log/pico20260731_214523.log`
+  - 固定30窓の`frame_us_avg / p95_us` baseline比:
+    - LodeRunner: `-13.17% / -37.85%`
+    - Project_DART: `-17.80% / -34.85%`
+    - Xevious: `-1.85% / -3.91%`、実値`16596 / 16668 us`で60 fps pacing上限へ到達
+  - 全90採用窓と、normal/stretchの追加実プレイを含むログ全412窓でpalette protocol fault 0
+  - 実機プレイで色化け、左端clip、sprite優先度、normal/stretchを含む問題は見られなかった
+- 判定:
+  - 段階2を採用する
+  - Xeviousの旧3%条件は新baselineに対して60 fps上限より速い値を要求していたため、
+    平均・p95とも16,700 us以下を上限到達合格として明文化した
+  - normal 3 ROMすべてが上限到達したためnormal向け段階3は実装しない
+  - stretchのqueue waitは100 us polling改善を先に検討する別課題として残す
+- 合格後レビュー:
+  - LodeRunnerとProject_DARTの観測frame time短縮はそれぞれ`2.517 ms`、`3.592 ms`で、
+    理論小計`1.69 ms/frame`を上回った。Xeviousはpacing上限へ到達したためframe timeでは全効果を測れない
+  - normal固定30窓から`frame_us_avg - queue wait/frame`を計算すると次になる。
+    この値には未出力のpacing sleepとaudio waitなどが残るため、core0実働時間ではなく暫定参考値である。
+
+    | ROM | `1.1.28` 暫定値 | `1.1.29` 暫定値 | pacing未控除の差 |
+    |---|---:|---:|---:|
+    | LodeRunner | 19,114 us | 13,309 us | 5,805 us |
+    | Project_DART | 20,179 us | 13,988 us | 6,190 us |
+    | Xevious | 15,399 us | 10,908 us | 4,491 us |
+
+  - `frame_us`の3%条件を落としたXeviousでも上表の暫定差は4.491 msあるが、
+    pacing sleep未控除なのでcore0削減量の確定値には使わない。
+    旧条件が実装の質ではなくpacer上限までの残り距離に制約されていたという結論は変わらない
+  - 理論値との差は、`renderBgTileFull()` 内側だけを数えたモデルに、
+    partial tile、sprite 合成の byte 化、queue traffic 半減、
+    core0/core1 の SRAM 競合低下が含まれていなかったためと考えられる。個別の内訳は未計測
+  - normal 3 ROM が pacing 上限へ張り付いたため、
+    **normal view では `frame_us` による以降の改善も小さな劣化も検出できない**。
+    当時の次計測基準は`docs/design/STRETCH_QUEUE_RETRY_OPTIMIZATION_PLAN_20260731.md`を正本とした。
+    このretry実験の完了結果は本文書冒頭に記録済みである
+
+## 1.1.28 段階2 A/B baseline (2026-07-31)
+
+- 計測版:
+  - `build-bg-index-baseline/Picocalc_NESco.uf2`
+  - ARM EABI5、`text=283552 data=0 bss=99296`
+  - SHA-256: `48e9642a946dcf7ddcbd8c921413693c8478d3a8cba0581165c06777f7cd79cf`
+- 実機 log: `/home/fuyuki/pico_dvl/codex/log/pico20260731_212613.log`
+- 固定区間:
+  - 各 ROM の `ROM_START` 後の最初の 1 窓を除き、続く30窓を使用した
+  - LodeRunner、Project_DART、Xevious の全区間が normal、入力0、palette protocol fault 0、
+    `[CORE1_BASE]` / `[FRAME_STATS]` の対欠落なしだった
+- 比較基準:
+  - LodeRunner: `frame_us_avg=19114.0`、`p95_us=26817.5`
+  - Project_DART: `frame_us_avg=20183.0`、`p95_us=25584.0`
+  - Xevious: `frame_us_avg=16909.5`、`p95_us=17346.0`
+- queue 観測:
+  - queue wait 比率中央値は LodeRunner `0.0000%`、Project_DART `0.0211%`、Xevious `8.9331%`
+  - Xevious の 1 wait は約 `102.6 us` で `sleep_us(100)` の量子化と一致するため、
+    将来の queue 段階では depth より先に polling 幅を比較する
+
+## 1.1.28 palette snapshot 段階1 合格 (2026-07-31)
+
+- 実装:
+  - palette RAM の dirty/version を core0 専用状態として管理し、変更後の最初の
+    LCD worker LINE item に `PalTable[32]` snapshot を同梱する protocol を追加した
+  - reset、NES view prepare、worker stop/drain 後の最初の line では version 0 snapshot を強制する
+  - core1 は LINE item だけを検査し、`FRAME_END` は palette protocol の対象外とした
+  - core1 由来の applied、protocol fault、empty poll は frame end で queue lock 下に handoff し、
+    `display_perf_take_window()` から同じ lock 下で take-and-zero する
+  - `NESCO_PALETTE_SNAPSHOT_LOG` と `[PALETTE_SNAPSHOT]` を追加し、version を `1.1.28` に更新した
+  - 実装 commit は `7ab3a19 Implement palette snapshot stage` である
+- build:
+  - 通常版、baseline 版、palette snapshot 計測版の ARM build に成功した
+  - 計測版 size は `text=283864 data=0 bss=99308`
+  - 計測版 UF2 SHA-256 は
+    `57c64169a82d98387ee3d61b1eb3eb39bf317c15c5e2346b3336a79d417a72a2`
+- 実機確認:
+  - log: `/home/fuyuki/pico_dvl/codex/log/pico20260731_203816.log`
+  - `LodeRunner.nes` の開始、reset、stretch 切替、normal 復帰、menu 経由の
+    `Project_DART_V1.0.nes` 開始を確認した
+  - 追加で Project DART の stretch / normal 往復も記録された
+  - `[PALETTE_SNAPSHOT]` は 202 窓あり、全窓で `protocol_faults=0` だった
+  - snapshot と applied の全窓合計はともに `1739`、`forced>=1` の窓は 7 個で、
+    上記の開始・reset・表示切替の各境界に存在した
+  - 実機プレイで気になる画面の乱れや不具合はなかった
+- 判定:
+  - 段階 1 の protocol fault、強制 snapshot、目視の合格条件をすべて満たした
+  - palette snapshot 段階 1 を採用し、段階 2 の index 描画実装へ進む
+- 合格後レビュー:
+  - LodeRunner の同じ plateau を `1.1.27` と比較した差は `-0.09%`、`-0.03%`、`0.00%` で、
+    snapshot 判定と 64 byte copy の費用は frame time の測定限界以下だった
+  - `display_perf_reset()` に呼び出し元がなく、ROM/reset を含む窓だけ display counter と
+    InfoNES の `frames` がずれることを確認した。palette protocol の合格判定には影響しないが、
+    段階 2 で Init/Reset 境界から reset し、A/B では遷移直後の 1 窓を捨てる
+  - LodeRunner stretch は遷移直後の 1 窓を除く 35 窓で queue wait が frame time の約 22.1%、
+    1 wait 約 101.2 us だった。Xevious の値ではなく、normal の queue depth 判定とは分離する
+
+## 1.1.27 計測 build 段階0 (2026-07-31)
+
+- 実装:
+  - `NESCO_BG_TILE_SHARE_LOG` CMake option を追加した
+  - `[CORE1_BASE]` に frame、LCD queue wait、入力、表示 mode の summary を追加した
+  - `[FRAME_STATS]` に frame time の平均、中央値、95 percentile、最大値を追加した
+  - `[BG_SHARE]` に background tile、background、sprite の実時間を追加した
+  - BG share option では必要な scanline 計測だけを有効にし、既存の詳細計測全体は有効化しない
+- build:
+  - 通常版、baseline 版、BG share 版の clean configure / build に成功した
+  - 通常版 size は `text=278844 data=0 bss=98548` で、1.1.26 の通常版履歴値と一致した
+- 実機計測:
+  - baseline log:
+    `/home/fuyuki/pico_dvl/codex/log/pico20260731_192451.log`
+    - `LodeRunner.nes`、`Project_DART_V1.0.nes`、`Xevious.nes` の normal を取得した
+    - `[CORE1_BASE]` と `[FRAME_STATS]` を確認した
+  - BG share log:
+    `/home/fuyuki/pico_dvl/codex/log/pico20260731_193201.log`
+    - 同じ 3 ROM の normal と、`Xevious.nes` の stretch を取得した
+    - `[BG_SHARE]` を確認した
+- 評価:
+  - `bg_tile_us_per_frame` は 3 ROM で概ね `6.6`〜`6.9 ms` だった
+  - background tile の判定基準 `4 ms 以上 8 ms 未満` に入るため、
+    palette index 化を段階 1、段階 2 の順に実装する
+  - 段階 2 では、3 ROM すべてで平均 `frame_us` の改善が `3%` 未満なら不採用とする
+  - `Xevious.nes` stretch は約 `36.7 fps` (`27.3 ms/frame`) であり、
+    LCD バス上限 `40.7 fps` には貼り付いていない。当時はCOLMOD 12 bit/pixelを後続候補としたが、
+    後日のST7365P仕様確認で`0x63`は未定義と判明したため候補から破棄した
+  - `lcd_queue_wait_us` / `lcd_queue_wait_count` は 1 秒窓ごとに reset されず累積して見える。
+    queue depth の判断に使う前に計測を修正し、baseline build だけを再計測する
+- 状態:
+  - version は `1.1.27` とした
+  - 実機計測は完了した。BG line buffer index 化は未実装である
+
 ## 1.1.26 sprite active list 採用 (2026-07-19)
 
 - 背景:

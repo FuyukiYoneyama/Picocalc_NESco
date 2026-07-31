@@ -4,7 +4,8 @@
 
 ## 対象成果物
 
-- `Picocalc_NESco-<version>.uf2`
+- ローカル／SD card検証用: `build/Picocalc_NESco.uf2`
+- GitHub Release添付用: `Picocalc_NESco-<version>.uf2`
 - GitHub tag 由来の source archive
 - 必要な場合のみ `git archive` 由来の `Picocalc_NESco-<version>-source.zip`
 - release note
@@ -64,19 +65,23 @@ sha256sum build/Picocalc_NESco.uf2 build/Picocalc_NESco.elf
 
 ## UF2 artifact
 
-Release 用 UF2 は、build 出力を version 付きの名前でコピーする。
+ローカルの実機確認とSD cardでは、build出力`Picocalc_NESco.uf2`を同じ名前のまま上書きする。
+versionとbuildの識別はbanner、build ID、SHA-256で行う。
+
+```sh
+test -f build/Picocalc_NESco.uf2
+sha256sum build/Picocalc_NESco.uf2
+```
+
+GitHub Releaseのassetはローカル管理と分け、既存releaseと同じversion付き名称へcopyする。
+このcopyは最終実機smokeとrelease commit確定後にだけ作る。
 
 ```sh
 cp build/Picocalc_NESco.uf2 Picocalc_NESco-<version>.uf2
 sha256sum Picocalc_NESco-<version>.uf2
 ```
 
-例:
-
-```sh
-cp build/Picocalc_NESco.uf2 Picocalc_NESco-1.0.0.uf2
-sha256sum Picocalc_NESco-1.0.0.uf2
-```
+version付きGitHub assetをSD card上の検証fileとして使わない。
 
 ## local UF2 archive
 
@@ -88,12 +93,11 @@ project root 直下や各所に残さず `local_uf2_archive/` に集約する。
 現在進行中の build / 実機試験で使っている UF2 は、従来どおり `build/` に置いてよい。
 使い終わった時点で、必要なら `local_uf2_archive/` へ移動する。
 
-例:
+複数版を退避する場合もfilenameへsuffixを付けず、directoryで分ける。
 
 ```sh
-mkdir -p local_uf2_archive
-mv Picocalc_NESco-<old-version>.uf2 local_uf2_archive/
-mv Picocalc_NESco-test-*.uf2 local_uf2_archive/
+mkdir -p local_uf2_archive/<version>
+cp build/Picocalc_NESco.uf2 local_uf2_archive/<version>/Picocalc_NESco.uf2
 ```
 
 ## source archive

@@ -38,19 +38,11 @@
 
 #include "InfoNES.h"
 #include "InfoNES_System.h"
+#include "display.h"
 #include "runtime_log.h"
 
 #include <cstdint>
 
-extern "C" void display_toggle_nes_view_scale(void);
-extern "C" int display_get_nes_view_scale(void);
-extern "C" void display_perf_reset(void);
-extern "C" void display_perf_snapshot(uint64_t *wait_us,
-                                      uint64_t *flush_us,
-                                      uint64_t *queue_wait_us,
-                                      uint32_t *queue_wait_count,
-                                      uint64_t *frame_pacing_sleep_us,
-                                      uint32_t *frame_pacing_sleep_count);
 #include "input.h"
 #include "InfoNES_Mapper.h"
 #include "InfoNES_StructuredLog.h"
@@ -178,7 +170,6 @@ enum
 namespace
 {
 uint8_t g_bg_tile_pair_idx4[256];
-uint8_t g_bg_tile_pair_opaque4[256];
 
 constexpr int kSpriteActiveListMaxEntries = 64 * 16;
 BYTE g_sprite_active_indices[kSpriteActiveListMaxEntries];
@@ -192,24 +183,27 @@ inline void initBgTileRenderLut()
     for (int pl1 = 0; pl1 < 16; ++pl1)
     {
       BYTE packed = 0;
-      BYTE opaque = 0;
       for (int i = 0; i < 4; ++i)
       {
         const BYTE idx =
             (BYTE)(((pl0 >> (3 - i)) & 1u) | (((pl1 >> (3 - i)) & 1u) << 1));
         packed |= (BYTE)(idx << (6 - (i << 1)));
-        opaque |= (BYTE)((idx != 0) << (3 - i));
       }
 
       const int key = (pl0 << 4) | pl1;
       g_bg_tile_pair_idx4[key] = packed;
-      g_bg_tile_pair_opaque4[key] = opaque;
     }
   }
 }
 
 constexpr bool kPerfLogToSerial =
-#if defined(NESCO_CORE1_BASELINE_LOG)
+#if defined(NESCO_CORE1_BASELINE_LOG) || defined(NESCO_BG_TILE_SHARE_LOG)
+    true;
+#else
+    false;
+#endif
+constexpr bool kBgTileShareTiming =
+#if defined(NESCO_BG_TILE_SHARE_LOG)
     true;
 #else
     false;
@@ -228,6 +222,7 @@ constexpr bool kSpriteActiveListEnabled =
     false;
 #endif
 constexpr uint64_t kPerfWindowUs = 1000000;
+constexpr uint32_t kPerfFrameSampleCapacity = 64;
 constexpr int kNesViewScaleStretch320x300 = 1;
 
 uint64_t g_perf_window_start_us = 0;
@@ -235,6 +230,7 @@ uint64_t g_perf_last_frame_us = 0;
 uint64_t g_perf_frame_us_total = 0;
 uint64_t g_perf_frame_us_max = 0;
 uint32_t g_perf_frame_samples = 0;
+uint32_t g_perf_frame_us_samples[kPerfFrameSampleCapacity];
 uint64_t g_perf_last_pad_us = 0;
 uint64_t g_perf_pad_interval_us_total = 0;
 uint64_t g_perf_pad_interval_us_max = 0;
@@ -243,7 +239,6 @@ uint32_t g_perf_frames = 0;
 uint32_t g_perf_scanlines = 0;
 uint64_t g_perf_cpu_us = 0;
 uint64_t g_perf_apu_us = 0;
-uint64_t g_perf_draw_us = 0;
 uint64_t g_perf_ppu_bg_us = 0;
 uint64_t g_perf_ppu_bg_mapper_us = 0;
 uint64_t g_perf_ppu_bg_clear_us = 0;
@@ -283,15 +278,24 @@ uint64_t g_perf_lcd_wait_us = 0;
 uint64_t g_perf_lcd_flush_us = 0;
 uint64_t g_perf_lcd_queue_wait_us = 0;
 uint32_t g_perf_lcd_queue_wait_count = 0;
-uint64_t g_perf_frame_pacing_sleep_us = 0;
-uint32_t g_perf_frame_pacing_sleep_count = 0;
 uint64_t g_perf_audio_wait_us = 0;
 uint32_t g_perf_audio_wait_count = 0;
 
 inline void perf_reset()
 {
   g_perf_window_start_us = time_us_64();
+  g_perf_last_frame_us = 0;
+  g_perf_frame_us_total = 0;
+  g_perf_frame_us_max = 0;
+  g_perf_frame_samples = 0;
+  g_perf_last_pad_us = 0;
+  g_perf_pad_interval_us_total = 0;
+  g_perf_pad_interval_us_max = 0;
+  g_perf_pad_interval_samples = 0;
   g_perf_frames = 0;
+  g_perf_ppu_bg_us = 0;
+  g_perf_ppu_bg_tile_us = 0;
+  g_perf_ppu_sprite_us = 0;
   g_perf_ppu_sprite_active_build_us = 0;
   g_perf_ppu_sprite_active_entries = 0;
   g_perf_ppu_sprite_active_lines = 0;
@@ -311,7 +315,11 @@ inline void perf_note_frame(uint64_t now_us)
     {
       g_perf_frame_us_max = frame_us;
     }
-    ++g_perf_frame_samples;
+    if (g_perf_frame_samples < kPerfFrameSampleCapacity)
+    {
+      g_perf_frame_us_samples[g_perf_frame_samples] = static_cast<uint32_t>(frame_us);
+      ++g_perf_frame_samples;
+    }
   }
   g_perf_last_frame_us = now_us;
 }
@@ -329,6 +337,57 @@ inline void perf_note_pad_poll(uint64_t now_us)
     ++g_perf_pad_interval_samples;
   }
   g_perf_last_pad_us = now_us;
+}
+
+inline void perf_sort_frame_samples()
+{
+  for (uint32_t i = 1; i < g_perf_frame_samples; ++i)
+  {
+    const uint32_t value = g_perf_frame_us_samples[i];
+    uint32_t j = i;
+    while (j > 0 && g_perf_frame_us_samples[j - 1] > value)
+    {
+      g_perf_frame_us_samples[j] = g_perf_frame_us_samples[j - 1];
+      --j;
+    }
+    g_perf_frame_us_samples[j] = value;
+  }
+}
+
+inline uint64_t perf_frame_avg_us()
+{
+  return g_perf_frame_samples != 0
+             ? g_perf_frame_us_total / g_perf_frame_samples
+             : 0;
+}
+
+inline uint64_t perf_frame_median_us()
+{
+  if (g_perf_frame_samples == 0)
+  {
+    return 0;
+  }
+
+  const uint32_t middle = g_perf_frame_samples / 2;
+  if ((g_perf_frame_samples & 1u) != 0)
+  {
+    return g_perf_frame_us_samples[middle];
+  }
+
+  return (static_cast<uint64_t>(g_perf_frame_us_samples[middle - 1]) +
+          g_perf_frame_us_samples[middle]) /
+         2;
+}
+
+inline uint64_t perf_frame_p95_us()
+{
+  if (g_perf_frame_samples == 0)
+  {
+    return 0;
+  }
+
+  const uint32_t rank = (g_perf_frame_samples * 95u + 99u) / 100u;
+  return g_perf_frame_us_samples[rank - 1u];
 }
 
 inline void perf_log_if_due(uint64_t now_us)
@@ -355,6 +414,76 @@ inline void perf_log_if_due(uint64_t now_us)
           ? "stretch"
           : "normal";
 
+  perf_sort_frame_samples();
+
+  display_perf_window_t display_window = {};
+  display_perf_take_window(&display_window);
+
+  const uint64_t pad_interval_us_avg =
+      g_perf_pad_interval_samples != 0
+          ? g_perf_pad_interval_us_total / g_perf_pad_interval_samples
+          : 0;
+  const unsigned input_events = input_consume_event_count();
+
+  NESCO_LOG_PERF("[CORE1_BASE] t_us=%llu frames=%lu fps_x100=%llu frame_us_avg=%llu frame_us_max=%llu lcd_wait_us=%llu lcd_flush_us=%llu lcd_queue_wait_us=%llu lcd_queue_wait_count=%lu lcd_empty_polls=%lu palette_protocol_faults=%lu pad_interval_us_avg=%llu pad_interval_us_max=%llu input_events=%u view_mode=%s lcd_queue_wait_episodes=%lu frame_pacing_sleep_us=%llu frame_pacing_sleep_count=%lu lcd_dma_wait_us=%llu lcd_dma_wait_count=%lu lcd_window_set_us=%llu lcd_window_set_count=%lu\n",
+                 static_cast<unsigned long long>(now_us),
+                 static_cast<unsigned long>(g_perf_frames),
+                 static_cast<unsigned long long>(fps_x100),
+                 static_cast<unsigned long long>(perf_frame_avg_us()),
+                 static_cast<unsigned long long>(g_perf_frame_us_max),
+                 static_cast<unsigned long long>(display_window.lcd_wait_us),
+                 static_cast<unsigned long long>(display_window.lcd_flush_us),
+                 static_cast<unsigned long long>(display_window.lcd_queue_wait_us),
+                 static_cast<unsigned long>(display_window.lcd_queue_wait_count),
+                 static_cast<unsigned long>(display_window.lcd_empty_polls),
+                 static_cast<unsigned long>(display_window.palette_protocol_faults),
+                 static_cast<unsigned long long>(pad_interval_us_avg),
+                 static_cast<unsigned long long>(g_perf_pad_interval_us_max),
+                 input_events,
+                 view_mode,
+                 static_cast<unsigned long>(display_window.lcd_queue_wait_episodes),
+                 static_cast<unsigned long long>(display_window.frame_pacing_sleep_us),
+                 static_cast<unsigned long>(display_window.frame_pacing_sleep_count),
+                 static_cast<unsigned long long>(display_window.lcd_dma_wait_us),
+                 static_cast<unsigned long>(display_window.lcd_dma_wait_count),
+                 static_cast<unsigned long long>(display_window.lcd_window_set_us),
+                 static_cast<unsigned long>(display_window.lcd_window_set_count));
+
+#if defined(NESCO_PALETTE_SNAPSHOT_LOG)
+  NESCO_LOG_PERF("[PALETTE_SNAPSHOT] frames=%lu line_items=%lu snapshots=%lu forced=%lu applied=%lu protocol_faults=%lu version=%u\n",
+                 static_cast<unsigned long>(g_perf_frames),
+                 static_cast<unsigned long>(display_window.palette_line_items),
+                 static_cast<unsigned long>(display_window.palette_snapshots),
+                 static_cast<unsigned long>(display_window.palette_forced),
+                 static_cast<unsigned long>(display_window.palette_applied),
+                 static_cast<unsigned long>(display_window.palette_protocol_faults),
+                 static_cast<unsigned>(display_window.palette_version));
+#endif
+
+  NESCO_LOG_PERF("[FRAME_STATS] avg_us=%llu median_us=%llu p95_us=%llu max_us=%llu\n",
+                 static_cast<unsigned long long>(perf_frame_avg_us()),
+                 static_cast<unsigned long long>(perf_frame_median_us()),
+                 static_cast<unsigned long long>(perf_frame_p95_us()),
+                 static_cast<unsigned long long>(g_perf_frame_us_max));
+
+  if constexpr (kBgTileShareTiming)
+  {
+    const uint64_t bg_tile_us_per_frame =
+        g_perf_frames != 0 ? g_perf_ppu_bg_tile_us / g_perf_frames : 0;
+    const uint64_t bg_tile_pct_x100 =
+        g_perf_frame_us_total != 0
+            ? (g_perf_ppu_bg_tile_us * 10000ull) / g_perf_frame_us_total
+            : 0;
+    NESCO_LOG_PERF("[BG_SHARE] frames=%lu bg_tile_us=%llu bg_us=%llu sprite_us=%llu bg_tile_us_per_frame=%llu bg_tile_pct_x100=%llu view_mode=%s\n",
+                   static_cast<unsigned long>(g_perf_frames),
+                   static_cast<unsigned long long>(g_perf_ppu_bg_tile_us),
+                   static_cast<unsigned long long>(g_perf_ppu_bg_us),
+                   static_cast<unsigned long long>(g_perf_ppu_sprite_us),
+                   static_cast<unsigned long long>(bg_tile_us_per_frame),
+                   static_cast<unsigned long long>(bg_tile_pct_x100),
+                   view_mode);
+  }
+
   NESCO_LOG_PERF("[FPS_SUMMARY] t_us=%llu frames=%lu fps_x100=%llu view_mode=%s\n",
                  static_cast<unsigned long long>(now_us),
                  static_cast<unsigned long>(g_perf_frames),
@@ -373,6 +502,7 @@ inline void perf_log_if_due(uint64_t now_us)
                    static_cast<unsigned long>(g_perf_sprite_active_list_candidates));
   }
 
+  std::fflush(stdout);
   perf_reset();
 }
 }
@@ -529,9 +659,8 @@ WORD *WorkFrame;
 WORD WorkFrameIdx;
 #else
 // WORD WorkFrame[ NES_DISP_WIDTH * NES_DISP_HEIGHT ];
-WORD *WorkLine = nullptr;
-BYTE BackgroundOpaqueLine[NES_DISP_WIDTH];
-void __not_in_flash_func(InfoNES_SetLineBuffer)(WORD *p, WORD size)
+BYTE *WorkLine = nullptr;
+void __not_in_flash_func(InfoNES_SetLineBuffer)(BYTE *p, WORD size)
 {
   assert(size >= NES_DISP_WIDTH);
   WorkLine = p;
@@ -648,6 +777,7 @@ void InfoNES_Init()
   }
 
   initBgTileRenderLut();
+  display_perf_reset();
   perf_reset();
 }
 
@@ -769,6 +899,7 @@ int InfoNES_Reset()
   // Reset frame skip and frame count
   FrameSkip = 0;
   FrameCnt = 0;
+  display_perf_reset();
   perf_reset();
 
 #if 0
@@ -782,6 +913,7 @@ int InfoNES_Reset()
 
   // Reset palette table
   InfoNES_MemorySet(PalTable, 0, sizeof PalTable);
+  display_lcd_worker_palette_force_snapshot();
 
   // Reset APU register
   InfoNES_MemorySet(APU_Reg, 0, sizeof APU_Reg);
@@ -1167,9 +1299,7 @@ int __not_in_flash_func(InfoNES_HSync)()
       InfoNES_DrawLine();
      
     } else {
-      // Array out of bounds, WorkLine size is equals to NES_DISP_WIDTH << 1 = 512
-      //InfoNES_MemorySet(WorkLine, 0, 640);
-      InfoNES_MemorySet(WorkLine, 0, NES_DISP_WIDTH << 1);
+      InfoNES_MemorySet(WorkLine, 0x20, NES_DISP_WIDTH);
     }
      InfoNES_PostDrawLine(PPU_Scanline, false);
     //  if (PPU_Scanline >=240) {
@@ -1251,8 +1381,13 @@ int __not_in_flash_func(InfoNES_HSync)()
     {
       // Transfer the contents of work frame on the screen
       InfoNES_LoadFrame();
+      const uint64_t frame_now_us = time_us_64();
+      if constexpr (kPerfLogToSerial)
+      {
+        perf_note_frame(frame_now_us);
+      }
       ++g_perf_frames;
-      perf_log_if_due(time_us_64());
+      perf_log_if_due(frame_now_us);
 
 #if 0
         // Switching of the double buffer
@@ -1282,6 +1417,10 @@ int __not_in_flash_func(InfoNES_HSync)()
 
     // Get the condition of the joypad
     InfoNES_PadState(&PAD1_Latch, &PAD2_Latch, &PAD_System);
+    if constexpr (kPerfLogToSerial)
+    {
+      perf_note_pad_poll(time_us_64());
+    }
 #if INFONES_ENABLE_BOKOSUKA_STATE_LOG
     InfoNES_BokosukaHeartbeat();
 #endif
@@ -1338,18 +1477,15 @@ namespace
   struct BgTileDescriptor
   {
     const BYTE *pattern_row;
-    const WORD *pal;
-    WORD *dst;
-    BYTE *dst_opaque;
+    BYTE palette_base;
+    BYTE *dst;
     BYTE clip_left;
     BYTE clip_right;
   };
 
-  static inline void __not_in_flash_func(renderPacked4)(WORD *dst,
-                                                        BYTE *dst_opaque,
-                                                        const WORD *pal,
+  static inline void __not_in_flash_func(renderPacked4)(BYTE *dst,
+                                                        BYTE palette_base,
                                                         BYTE packed,
-                                                        BYTE opaque_mask,
                                                         int base_sx,
                                                         int clip_left,
                                                         int clip_right,
@@ -1362,124 +1498,64 @@ namespace
     {
       const int local = sx - base_sx;
       const int idx_shift = 6 - (local << 1);
-      const int opaque_shift = 3 - local;
       const BYTE idx = (BYTE)((packed >> idx_shift) & 0x03u);
-      dst[*out] = pal[idx];
-      dst_opaque[*out] = (BYTE)((opaque_mask >> opaque_shift) & 0x01u);
+      dst[*out] = (BYTE)(palette_base | idx);
     }
   }
 
-  static inline void __not_in_flash_func(renderBgTileFull)(const WORD *pal,
-                                                           WORD *dst,
-                                                           BYTE *dst_opaque,
+  static inline void __not_in_flash_func(renderBgTileFull)(BYTE palette_base,
+                                                           BYTE *dst,
                                                            BYTE packed_hi,
-                                                           BYTE packed_lo,
-                                                           BYTE opaque_hi,
-                                                           BYTE opaque_lo) __attribute__((always_inline));
+                                                           BYTE packed_lo) __attribute__((always_inline));
 
-  static inline void __not_in_flash_func(renderBgTileFull)(const WORD *pal,
-                                                           WORD *dst,
-                                                           BYTE *dst_opaque,
+  static inline void __not_in_flash_func(renderBgTileFull)(BYTE palette_base,
+                                                           BYTE *dst,
                                                            BYTE packed_hi,
-                                                           BYTE packed_lo,
-                                                           BYTE opaque_hi,
-                                                           BYTE opaque_lo)
+                                                           BYTE packed_lo)
   {
-    dst[0] = pal[(packed_hi >> 6) & 0x03u];
-    dst[1] = pal[(packed_hi >> 4) & 0x03u];
-    dst[2] = pal[(packed_hi >> 2) & 0x03u];
-    dst[3] = pal[packed_hi & 0x03u];
-    dst[4] = pal[(packed_lo >> 6) & 0x03u];
-    dst[5] = pal[(packed_lo >> 4) & 0x03u];
-    dst[6] = pal[(packed_lo >> 2) & 0x03u];
-    dst[7] = pal[packed_lo & 0x03u];
-
-    dst_opaque[0] = (BYTE)((opaque_hi >> 3) & 0x01u);
-    dst_opaque[1] = (BYTE)((opaque_hi >> 2) & 0x01u);
-    dst_opaque[2] = (BYTE)((opaque_hi >> 1) & 0x01u);
-    dst_opaque[3] = (BYTE)(opaque_hi & 0x01u);
-    dst_opaque[4] = (BYTE)((opaque_lo >> 3) & 0x01u);
-    dst_opaque[5] = (BYTE)((opaque_lo >> 2) & 0x01u);
-    dst_opaque[6] = (BYTE)((opaque_lo >> 1) & 0x01u);
-    dst_opaque[7] = (BYTE)(opaque_lo & 0x01u);
+    dst[0] = (BYTE)(palette_base | ((packed_hi >> 6) & 0x03u));
+    dst[1] = (BYTE)(palette_base | ((packed_hi >> 4) & 0x03u));
+    dst[2] = (BYTE)(palette_base | ((packed_hi >> 2) & 0x03u));
+    dst[3] = (BYTE)(palette_base | (packed_hi & 0x03u));
+    dst[4] = (BYTE)(palette_base | ((packed_lo >> 6) & 0x03u));
+    dst[5] = (BYTE)(palette_base | ((packed_lo >> 4) & 0x03u));
+    dst[6] = (BYTE)(palette_base | ((packed_lo >> 2) & 0x03u));
+    dst[7] = (BYTE)(palette_base | (packed_lo & 0x03u));
   }
 
   static inline void __not_in_flash_func(renderBgTile)(const BgTileDescriptor &desc)
   {
     const BYTE pl0 = desc.pattern_row[0];
     const BYTE pl1 = desc.pattern_row[8];
-    WORD *dst = desc.dst;
-    BYTE *dst_opaque = desc.dst_opaque;
+    BYTE *dst = desc.dst;
     const BYTE packed_hi = g_bg_tile_pair_idx4[((pl0 & 0xF0u)) | (pl1 >> 4)];
-    const BYTE opaque_hi = g_bg_tile_pair_opaque4[((pl0 & 0xF0u)) | (pl1 >> 4)];
     const BYTE packed_lo = g_bg_tile_pair_idx4[((pl0 & 0x0Fu) << 4) | (pl1 & 0x0Fu)];
-    const BYTE opaque_lo = g_bg_tile_pair_opaque4[((pl0 & 0x0Fu) << 4) | (pl1 & 0x0Fu)];
 
     if (desc.clip_left == 0 && desc.clip_right == 8)
     {
-      renderBgTileFull(desc.pal, dst, dst_opaque, packed_hi, packed_lo, opaque_hi, opaque_lo);
+      renderBgTileFull(desc.palette_base, dst, packed_hi, packed_lo);
       return;
     }
 
     int out = 0;
     renderPacked4(dst,
-                  dst_opaque,
-                  desc.pal,
+                  desc.palette_base,
                   packed_hi,
-                  opaque_hi,
                   0,
                   desc.clip_left,
                   desc.clip_right,
                   &out);
     renderPacked4(dst,
-                  dst_opaque,
-                  desc.pal,
+                  desc.palette_base,
                   packed_lo,
-                  opaque_lo,
                   4,
                   desc.clip_left,
                   desc.clip_right,
                   &out);
   }
 
-  void __not_in_flash_func(compositeSprite)(const uint16_t *pal,
-                                            const uint8_t *spr,
-                                            const uint8_t *bgOpaque,
-                                            uint16_t *buf)
-  {
-    auto sprEnd = spr + NES_DISP_WIDTH;
-    do
-    {
-      auto proc = [=](int i) __attribute__((always_inline))
-      {
-        int v = spr[i];
-        if (v && ((v >> 7) || !bgOpaque[i]))
-        {
-          buf[i] = pal[v & 0xf];
-        }
-      };
-
-#if 1
-      proc(0);
-      proc(1);
-      proc(2);
-      proc(3);
-      buf += 4;
-      spr += 4;
-      bgOpaque += 4;
-#else
-      proc(0);
-      buf += 1;
-      spr += 1;
-      bgOpaque += 1;
-#endif
-    } while (spr < sprEnd);
-  }
-
-  void __not_in_flash_func(compositeSpriteRange)(const uint16_t *pal,
-                                                 const uint8_t *spr,
-                                                 const uint8_t *bgOpaque,
-                                                 uint16_t *buf,
+  void __not_in_flash_func(compositeSpriteRange)(const BYTE *spr,
+                                                 BYTE *buf,
                                                  int begin,
                                                  int end)
   {
@@ -1487,7 +1563,6 @@ namespace
       return;
 
     spr += begin;
-    bgOpaque += begin;
     buf += begin;
 
     auto sprEnd = spr + (end - begin);
@@ -1496,9 +1571,9 @@ namespace
       auto proc = [=](int i) __attribute__((always_inline))
       {
         int v = spr[i];
-        if (v && ((v >> 7) || !bgOpaque[i]))
+        if (v && ((v & 0x80) != 0 || (buf[i] & 3) == 0))
         {
-          buf[i] = pal[v & 0xf];
+          buf[i] = (BYTE)(0x10 | (v & 0x0f));
         }
       };
 
@@ -1508,7 +1583,6 @@ namespace
       proc(3);
       buf += 4;
       spr += 4;
-      bgOpaque += 4;
     } while (spr < sprEnd);
   }
 }
@@ -1529,10 +1603,8 @@ void __not_in_flash_func(InfoNES_DrawLine)()
   int nY;
   int nY4;
   int nYBit;
-  WORD *pPalTbl;
   BYTE *pAttrBase;
-  WORD *pPoint;
-  BYTE *pOpaquePoint;
+  BYTE *pPoint;
   int nNameTable;
   BYTE *pbyNameTable;
   BYTE *pbyChrData;
@@ -1556,7 +1628,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
   /*  Render Background                                                */
   /*-------------------------------------------------------------------*/
 
-  if constexpr (kDetailedPerfLogToSerial)
+  if constexpr (kBgTileShareTiming)
   {
     bg_start_us = time_us_64();
   }
@@ -1576,16 +1648,6 @@ void __not_in_flash_func(InfoNES_DrawLine)()
   //  pPoint = &WorkFrame[PPU_Scanline * NES_DISP_WIDTH];
   assert(WorkLine);
   pPoint = WorkLine;
-  pOpaquePoint = BackgroundOpaqueLine;
-  if constexpr (kDetailedPerfLogToSerial)
-  {
-    bg_clear_start_us = time_us_64();
-  }
-  InfoNES_MemorySet(BackgroundOpaqueLine, 0, NES_DISP_WIDTH);
-  if constexpr (kDetailedPerfLogToSerial)
-  {
-    g_perf_ppu_bg_clear_us += time_us_64() - bg_clear_start_us;
-  }
 
   // Clear a scanline if screen is off
   if (!(PPU_R1 & R1_SHOW_SCR))
@@ -1594,7 +1656,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     {
       bg_clear_start_us = time_us_64();
     }
-    InfoNES_MemorySet(pPoint, 0, NES_DISP_WIDTH << 1);
+    InfoNES_MemorySet(pPoint, 0x20, NES_DISP_WIDTH);
     if constexpr (kDetailedPerfLogToSerial)
     {
       g_perf_ppu_bg_clear_us += time_us_64() - bg_clear_start_us;
@@ -1642,10 +1704,10 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     BYTE *pCachedAttrBase = nullptr;
     int nCachedAttrGroup = -1;
     int nCachedAttrHalf = -1;
-    pPalTbl = nullptr;
+    BYTE cachedPaletteBase = 0;
 
-    auto resolveBgPal = [&](BYTE *attrBase,
-                            int tileX) -> WORD *
+    auto resolveBgPaletteBase = [&](BYTE *attrBase,
+                                    int tileX) -> BYTE
     {
       const int attrGroup = tileX >> 2;
       const int attrHalf = tileX & 2;
@@ -1656,15 +1718,14 @@ void __not_in_flash_func(InfoNES_DrawLine)()
         pCachedAttrBase = attrBase;
         nCachedAttrGroup = attrGroup;
         nCachedAttrHalf = attrHalf;
-        pPalTbl = &PalTable[(((attrBase[attrGroup] >> (attrHalf + nY4)) & 3) << 2)];
+        cachedPaletteBase = (BYTE)(((attrBase[attrGroup] >> (attrHalf + nY4)) & 3) << 2);
       }
-      return pPalTbl;
+      return cachedPaletteBase;
     };
 
     auto buildBgTile = [&](BYTE *nameTablePtr,
-                           WORD *pal,
-                           WORD *dst,
-                           BYTE *dstOpaque,
+                           BYTE paletteBase,
+                           BYTE *dst,
                            int clipLeft,
                            int clipRight) -> BgTileDescriptor
     {
@@ -1674,9 +1735,8 @@ void __not_in_flash_func(InfoNES_DrawLine)()
       const int addrOfs = ((ch & 63) << 4) + yOfsModBG;
 
       desc.pattern_row = PPUBANK[bank] + addrOfs;
-      desc.pal = pal;
+      desc.palette_base = paletteBase;
       desc.dst = dst;
-      desc.dst_opaque = dstOpaque;
       desc.clip_left = (BYTE)clipLeft;
       desc.clip_right = (BYTE)clipRight;
       return desc;
@@ -1685,8 +1745,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     auto emitBgTile = [&](BYTE *nameTablePtr,
                           BYTE *attrBase,
                           int tileX,
-                          WORD *dst,
-                          BYTE *dstOpaque,
+                          BYTE *dst,
                           int clipLeft,
                           int clipRight)
     {
@@ -1703,8 +1762,8 @@ void __not_in_flash_func(InfoNES_DrawLine)()
         }
       }
 
-      WORD *pal = resolveBgPal(attrBase, tileX);
-      BgTileDescriptor desc = buildBgTile(nameTablePtr, pal, dst, dstOpaque, clipLeft, clipRight);
+      const BYTE paletteBase = resolveBgPaletteBase(attrBase, tileX);
+      BgTileDescriptor desc = buildBgTile(nameTablePtr, paletteBase, dst, clipLeft, clipRight);
 
       renderBgTile(desc);
 
@@ -1721,17 +1780,18 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     if constexpr (kDetailedPerfLogToSerial)
     {
       g_perf_ppu_bg_setup_us += time_us_64() - bg_setup_start_us;
+    }
+    if constexpr (kBgTileShareTiming)
+    {
       bg_tile_start_us = time_us_64();
     }
     emitBgTile(pbyNameTable,
                pAttrBase,
                nX,
                pPoint,
-               pOpaquePoint,
                PPU_Scr_H_Bit,
                8);
     pPoint += 8 - PPU_Scr_H_Bit;
-    pOpaquePoint += 8 - PPU_Scr_H_Bit;
 
     ++nX;
     ++pbyNameTable;
@@ -1746,11 +1806,9 @@ void __not_in_flash_func(InfoNES_DrawLine)()
                  pAttrBase,
                  nX,
                  pPoint,
-                 pOpaquePoint,
                  0,
                  8);
       pPoint += 8;
-      pOpaquePoint += 8;
 
       ++pbyNameTable;
     }
@@ -1763,7 +1821,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     pCachedAttrBase = nullptr;
     nCachedAttrGroup = -1;
     nCachedAttrHalf = -1;
-    pPalTbl = nullptr;
+    cachedPaletteBase = 0;
 
     /*-------------------------------------------------------------------*/
     /*  Rendering of the right table                                     */
@@ -1775,11 +1833,9 @@ void __not_in_flash_func(InfoNES_DrawLine)()
                  pAttrBase,
                  nX,
                  pPoint,
-                 pOpaquePoint,
                  0,
                  8);
       pPoint += 8;
-      pOpaquePoint += 8;
 
       ++pbyNameTable;
     }
@@ -1792,12 +1848,14 @@ void __not_in_flash_func(InfoNES_DrawLine)()
                pAttrBase,
                nX,
                pPoint,
-               pOpaquePoint,
                0,
                PPU_Scr_H_Bit);
-    if constexpr (kDetailedPerfLogToSerial)
+    if constexpr (kBgTileShareTiming)
     {
       g_perf_ppu_bg_tile_us += time_us_64() - bg_tile_start_us;
+    }
+    if constexpr (kDetailedPerfLogToSerial)
+    {
       bg_clip_start_us = time_us_64();
     }
 
@@ -1806,12 +1864,11 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     /*-------------------------------------------------------------------*/
     if (!(PPU_R1 & R1_CLIP_BG))
     {
-      WORD *pPointTop;
+      BYTE *pPointTop;
 
       // pPointTop = &WorkFrame[PPU_Scanline * NES_DISP_WIDTH];
       pPointTop = WorkLine;
-      InfoNES_MemorySet(pPointTop, 0, 8 << 1);
-      InfoNES_MemorySet(BackgroundOpaqueLine, 0, 8);
+      InfoNES_MemorySet(pPointTop, 0x20, 8);
     }
 
     /*-------------------------------------------------------------------*/
@@ -1820,12 +1877,11 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     if (PPU_UpDown_Clip &&
         (SCAN_ON_SCREEN_START > PPU_Scanline || PPU_Scanline > SCAN_BOTTOM_OFF_SCREEN_START))
     {
-      WORD *pPointTop;
+      BYTE *pPointTop;
 
       // pPointTop = &WorkFrame[PPU_Scanline * NES_DISP_WIDTH];
       pPointTop = WorkLine;
-      InfoNES_MemorySet(pPointTop, 0, NES_DISP_WIDTH << 1);
-      InfoNES_MemorySet(BackgroundOpaqueLine, 0, NES_DISP_WIDTH);
+      InfoNES_MemorySet(pPointTop, 0x20, NES_DISP_WIDTH);
     }
     if constexpr (kDetailedPerfLogToSerial)
     {
@@ -1834,7 +1890,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
   }
 
   //util::WorkMeterMark(MARKER_BG);
-  if constexpr (kDetailedPerfLogToSerial)
+  if constexpr (kBgTileShareTiming)
   {
     g_perf_ppu_bg_us += time_us_64() - bg_start_us;
     sprite_start_us = time_us_64();
@@ -2136,7 +2192,6 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     pPoint = WorkLine;
     //   pPoint -= (NES_DISP_WIDTH - PPU_Scr_H_Bit);
 
-#if 1
     if (sprite_min_x < 0)
       sprite_min_x = 0;
     if (sprite_max_x_exclusive > NES_DISP_WIDTH)
@@ -2151,41 +2206,8 @@ void __not_in_flash_func(InfoNES_DrawLine)()
 
     if (comp_begin < comp_end)
     {
-      compositeSpriteRange(PalTable + 0x10, pSprBuf, BackgroundOpaqueLine, pPoint, comp_begin, comp_end);
+      compositeSpriteRange(pSprBuf, pPoint, comp_begin, comp_end);
     }
-#else
-    {
-      const auto *pal = &PalTable[0x10];
-      const auto *spr = pSprBuf;
-      const auto *sprEnd = spr + NES_DISP_WIDTH;
-      // for (nX = 0; nX < NES_DISP_WIDTH; ++nX)
-      while (spr != sprEnd)
-      {
-        // nSprData = pSprBuf[nX];
-        auto proc = [=](int i) __attribute__((always_inline))
-        {
-          int v = spr[i];
-          if (v && ((v >> 7) || (pPoint[i] >> 15)))
-          {
-            pPoint[i] = pal[v & 0xf];
-          }
-        };
-
-#if 1
-        proc(0);
-        proc(1);
-        proc(2);
-        proc(3);
-        pPoint += 4;
-        spr += 4;
-#else
-        proc(0);
-        pPoint += 1;
-        spr += 1;
-#endif
-      }
-    }
-#endif
     if constexpr (kDetailedPerfLogToSerial)
     {
       g_perf_ppu_sprite_comp_us += time_us_64() - sprite_block_start_us;
@@ -2197,11 +2219,11 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     /*-------------------------------------------------------------------*/
     if (!(PPU_R1 & R1_CLIP_SP))
     {
-      WORD *pPointTop;
+      BYTE *pPointTop;
 
       // pPointTop = &WorkFrame[PPU_Scanline * NES_DISP_WIDTH];
       pPointTop = WorkLine;
-      InfoNES_MemorySet(pPointTop, 0, 8 << 1);
+      InfoNES_MemorySet(pPointTop, 0x20, 8);
     }
 
     if (nSprCnt >= 8)
@@ -2214,7 +2236,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     }
   }
 
-  if constexpr (kDetailedPerfLogToSerial)
+  if constexpr (kBgTileShareTiming)
   {
     g_perf_ppu_sprite_us += time_us_64() - sprite_start_us;
   }

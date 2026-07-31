@@ -10,7 +10,7 @@
  * panel.
  *
  * InfoNES integration:
- *   - InfoNES_PreDrawLine() gives the PPU a 256-pixel RGB565 line buffer.
+ *   - InfoNES_PreDrawLine() gives the PPU a 256-pixel palette-index line buffer.
  *   - InfoNES_PostDrawLine() is called after the PPU has filled that line.
  *   - Lines are batched into 8-source-line strips before being sent to LCD.
  *   - In normal view, 8 NES lines become 8 LCD lines at 256 pixels wide.
@@ -37,9 +37,6 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
-
-/* NES palette lookup source data (64 entries) */
-extern const WORD NesPalette[64];
 
 /*
  * 8 source NES lines are the batching unit.
@@ -90,6 +87,8 @@ void display_lcd_worker_prepare_nes_view(void);
 void display_lcd_worker_stop_and_drain(void);
 bool display_lcd_worker_is_running(void);
 bool display_lcd_worker_poll_once(void);
+void display_lcd_worker_palette_mark_dirty(void);
+void display_lcd_worker_palette_force_snapshot(void);
 
 /**
  * display_clear_rgb565(color) — Fill the current active display mode region.
@@ -112,17 +111,33 @@ void display_show_loading_screen(void);
 void display_perf_reset(void);
 void display_reset_frame_pacing(void);
 
+typedef struct {
+    uint64_t lcd_wait_us;
+    uint64_t lcd_flush_us;
+    uint64_t lcd_queue_wait_us;
+    uint32_t lcd_queue_wait_count;
+    uint32_t lcd_queue_wait_episodes;
+    uint64_t frame_pacing_sleep_us;
+    uint32_t frame_pacing_sleep_count;
+    uint32_t palette_line_items;
+    uint32_t palette_snapshots;
+    uint32_t palette_forced;
+    uint32_t palette_applied;
+    uint32_t palette_protocol_faults;
+    uint32_t lcd_empty_polls;
+    uint16_t palette_version;
+    uint64_t lcd_dma_wait_us;
+    uint32_t lcd_dma_wait_count;
+    uint64_t lcd_window_set_us;
+    uint32_t lcd_window_set_count;
+} display_perf_window_t;
+
 /**
- * display_perf_snapshot(wait_us, flush_us, queue_wait_us, queue_wait_count,
- * frame_pacing_sleep_us, frame_pacing_sleep_count) — Read current LCD-side timing
- * accumulators without resetting them.
+ * display_perf_take_window(window) — Copy and reset one logging window.
+ * Core1-published fields are taken under the LCD worker queue lock; core0-only
+ * fields need no lock.
  */
-void display_perf_snapshot(uint64_t *wait_us,
-                           uint64_t *flush_us,
-                           uint64_t *queue_wait_us,
-                           uint32_t *queue_wait_count,
-                           uint64_t *frame_pacing_sleep_us,
-                           uint32_t *frame_pacing_sleep_count);
+void display_perf_take_window(display_perf_window_t *window);
 
 #ifdef __cplusplus
 }

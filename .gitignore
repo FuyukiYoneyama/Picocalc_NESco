@@ -1,5 +1,15 @@
 # Build output
 build/
+build-baseline/
+build-bg-share/
+build-bg-index/
+build-bg-index-baseline/
+build-palette-snapshot/
+build-palette-snapshot-arm/
+build-stretch-retry-baseline/
+build-stretch-retry-10us/
+build-stretch-depth-diagnostic/
+build-release/
 *.elf
 *.uf2
 *.bin

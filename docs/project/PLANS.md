@@ -27,12 +27,29 @@
    - 電源 ON 時 1 回 init による音声 pop 抑制設計。
 10. `docs/design/GITHUB_ACTIONS_BUILD_CI_PLAN_20260426.md`
    - GitHub Actions による最小 build CI 導入設計。
-
-## 現在必要な計画
-
-- 現時点で、実装開始前レビュー中の計画はなし。
-
 ## 完了済み計画 / 結果
+
+- `1.2.0` release
+  - gate: `docs/release/RELEASE_GATE_1_2_0.md`
+  - notes: `docs/release/RELEASE_NOTES_1_2_0.md`
+  - build check: `docs/release/RELEASE_BUILD_CHECK_1_2_0_RC.md`
+  - 計測logなしの通常buildを公開artifactとして承認し、GitHub Release assetだけ
+    `Picocalc_NESco-1.2.0.uf2`のversion付き名称にする
+
+- Stretch LCD worker queue depth optimization
+  - 計画: `docs/design/STRETCH_QUEUE_DEPTH_OPTIMIZATION_PLAN_20260731.md`
+  - 結果: `docs/project/Picocalc_NESco_HISTORY.md`
+  - `1.1.32`でdepth 4のDMA wait/window設定時間を3 ROMで直接計測した
+  - DMA waitは全ROMで14.85--16.18 ms/frameとなり、core1は前DMA完了待ちだった
+  - depth 8候補`1.1.33`は実装しない。window設定の削減上限も最大112.6 us/frameで後続候補にしない
+
+- Stretch LCD queue retry optimization
+  - 計画: `docs/design/STRETCH_QUEUE_RETRY_OPTIMIZATION_PLAN_20260731.md`
+  - 結果: `docs/project/Picocalc_NESco_HISTORY.md`
+  - `1.1.30` baselineと`1.1.31` 10 us候補を3 ROMのnormal/stretchでA/Bした
+  - retry 1回は約100.5 usから約10.1 usへ短縮したが、stretch改善は
+    `-12.5 / +59.5 / -41.0 us`で、500 us採用条件へ届かなかった
+  - polling量子の短縮は不採用。Phase 0計測fieldは残し、Phase 1だけを次実装開始時にrevertする
 
 - Compile-time logging cleanup / source comment cleanup
   - 結果: `docs/project/Picocalc_NESco_HISTORY.md`
