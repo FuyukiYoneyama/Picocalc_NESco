@@ -36,9 +36,15 @@ if(NESCO_RUNTIME_LOGS)
     )
 endif()
 
-if(NESCO_CORE1_BASELINE_LOG OR NESCO_BG_TILE_SHARE_LOG)
+if(NESCO_CORE1_BASELINE_LOG OR NESCO_BG_TILE_SHARE_LOG OR NESCO_PALETTE_SNAPSHOT_LOG)
     target_compile_definitions(infones PUBLIC
         NESCO_CORE1_BASELINE_LOG=1
+    )
+endif()
+
+if(NESCO_PALETTE_SNAPSHOT_LOG)
+    target_compile_definitions(infones PUBLIC
+        NESCO_PALETTE_SNAPSHOT_LOG=1
     )
 endif()
 

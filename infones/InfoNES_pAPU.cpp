@@ -10,6 +10,7 @@
 /*  Include files                                                    */
 /*-------------------------------------------------------------------*/
 #include "K6502.h"
+#include "display.h"
 #include "K6502_rw.h"
 #include "InfoNES_System.h"
 #include "InfoNES_pAPU.h"

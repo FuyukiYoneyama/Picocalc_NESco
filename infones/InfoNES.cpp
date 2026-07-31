@@ -38,19 +38,11 @@
 
 #include "InfoNES.h"
 #include "InfoNES_System.h"
+#include "display.h"
 #include "runtime_log.h"
 
 #include <cstdint>
 
-extern "C" void display_toggle_nes_view_scale(void);
-extern "C" int display_get_nes_view_scale(void);
-extern "C" void display_perf_reset(void);
-extern "C" void display_perf_snapshot(uint64_t *wait_us,
-                                      uint64_t *flush_us,
-                                      uint64_t *queue_wait_us,
-                                      uint32_t *queue_wait_count,
-                                      uint64_t *frame_pacing_sleep_us,
-                                      uint32_t *frame_pacing_sleep_count);
 #include "input.h"
 #include "InfoNES_Mapper.h"
 #include "InfoNES_StructuredLog.h"
@@ -430,18 +422,8 @@ inline void perf_log_if_due(uint64_t now_us)
 
   perf_sort_frame_samples();
 
-  uint64_t lcd_wait_us = 0;
-  uint64_t lcd_flush_us = 0;
-  uint64_t lcd_queue_wait_us = 0;
-  uint32_t lcd_queue_wait_count = 0;
-  uint64_t frame_pacing_sleep_us = 0;
-  uint32_t frame_pacing_sleep_count = 0;
-  display_perf_snapshot(&lcd_wait_us,
-                        &lcd_flush_us,
-                        &lcd_queue_wait_us,
-                        &lcd_queue_wait_count,
-                        &frame_pacing_sleep_us,
-                        &frame_pacing_sleep_count);
+  display_perf_window_t display_window = {};
+  display_perf_take_window(&display_window);
 
   const uint64_t pad_interval_us_avg =
       g_perf_pad_interval_samples != 0
@@ -449,20 +431,33 @@ inline void perf_log_if_due(uint64_t now_us)
           : 0;
   const unsigned input_events = input_consume_event_count();
 
-  NESCO_LOG_PERF("[CORE1_BASE] t_us=%llu frames=%lu fps_x100=%llu frame_us_avg=%llu frame_us_max=%llu lcd_wait_us=%llu lcd_flush_us=%llu lcd_queue_wait_us=%llu lcd_queue_wait_count=%lu pad_interval_us_avg=%llu pad_interval_us_max=%llu input_events=%u view_mode=%s\n",
+  NESCO_LOG_PERF("[CORE1_BASE] t_us=%llu frames=%lu fps_x100=%llu frame_us_avg=%llu frame_us_max=%llu lcd_wait_us=%llu lcd_flush_us=%llu lcd_queue_wait_us=%llu lcd_queue_wait_count=%lu lcd_empty_polls=%lu palette_protocol_faults=%lu pad_interval_us_avg=%llu pad_interval_us_max=%llu input_events=%u view_mode=%s\n",
                  static_cast<unsigned long long>(now_us),
                  static_cast<unsigned long>(g_perf_frames),
                  static_cast<unsigned long long>(fps_x100),
                  static_cast<unsigned long long>(perf_frame_avg_us()),
                  static_cast<unsigned long long>(g_perf_frame_us_max),
-                 static_cast<unsigned long long>(lcd_wait_us),
-                 static_cast<unsigned long long>(lcd_flush_us),
-                 static_cast<unsigned long long>(lcd_queue_wait_us),
-                 static_cast<unsigned long>(lcd_queue_wait_count),
+                 static_cast<unsigned long long>(display_window.lcd_wait_us),
+                 static_cast<unsigned long long>(display_window.lcd_flush_us),
+                 static_cast<unsigned long long>(display_window.lcd_queue_wait_us),
+                 static_cast<unsigned long>(display_window.lcd_queue_wait_count),
+                 static_cast<unsigned long>(display_window.lcd_empty_polls),
+                 static_cast<unsigned long>(display_window.palette_protocol_faults),
                  static_cast<unsigned long long>(pad_interval_us_avg),
                  static_cast<unsigned long long>(g_perf_pad_interval_us_max),
                  input_events,
                  view_mode);
+
+#if defined(NESCO_PALETTE_SNAPSHOT_LOG)
+  NESCO_LOG_PERF("[PALETTE_SNAPSHOT] frames=%lu line_items=%lu snapshots=%lu forced=%lu applied=%lu protocol_faults=%lu version=%u\n",
+                 static_cast<unsigned long>(g_perf_frames),
+                 static_cast<unsigned long>(display_window.palette_line_items),
+                 static_cast<unsigned long>(display_window.palette_snapshots),
+                 static_cast<unsigned long>(display_window.palette_forced),
+                 static_cast<unsigned long>(display_window.palette_applied),
+                 static_cast<unsigned long>(display_window.palette_protocol_faults),
+                 static_cast<unsigned>(display_window.palette_version));
+#endif
 
   NESCO_LOG_PERF("[FRAME_STATS] avg_us=%llu median_us=%llu p95_us=%llu max_us=%llu\n",
                  static_cast<unsigned long long>(perf_frame_avg_us()),
@@ -506,8 +501,8 @@ inline void perf_log_if_due(uint64_t now_us)
                    static_cast<unsigned long>(g_perf_sprite_active_list_candidates));
   }
 
-  (void)frame_pacing_sleep_us;
-  (void)frame_pacing_sleep_count;
+  (void)display_window.frame_pacing_sleep_us;
+  (void)display_window.frame_pacing_sleep_count;
   std::fflush(stdout);
   perf_reset();
 }
@@ -918,6 +913,7 @@ int InfoNES_Reset()
 
   // Reset palette table
   InfoNES_MemorySet(PalTable, 0, sizeof PalTable);
+  display_lcd_worker_palette_force_snapshot();
 
   // Reset APU register
   InfoNES_MemorySet(APU_Reg, 0, sizeof APU_Reg);

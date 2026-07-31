@@ -873,6 +873,7 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
         PalTable[0x00] = PalTable[0x04] = PalTable[0x08] = PalTable[0x0c] =
             PalTable[0x10] = PalTable[0x14] = PalTable[0x18] = PalTable[0x1c] =
                 InfoNES_Palette444ToRgb565(NesPalette[vramData]);
+        display_lcd_worker_palette_mark_dirty();
       }
       else if (addr & 3)
       {
@@ -880,6 +881,7 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
         // Palette
         PPURAM[addr] = vramData;
         PalTable[addr & 0x1f] = InfoNES_Palette444ToRgb565(NesPalette[vramData]);
+        display_lcd_worker_palette_mark_dirty();
       }
     }
     break;

@@ -2,6 +2,8 @@
 build/
 build-baseline/
 build-bg-share/
+build-palette-snapshot/
+build-palette-snapshot-arm/
 *.elf
 *.uf2
 *.bin

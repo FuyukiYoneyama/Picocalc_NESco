@@ -136,6 +136,15 @@
   - 正本は `docs/design/BG_LINE_BUFFER_INDEX_REDESIGN_20260731.md`
   - 段階 0 は完了済み。段階 1 を `1.1.28`、段階 2 を `1.1.29` として、
     各段階を個別 commit・実機確認する。段階 3 は queue wait の再計測が 1% 以上のときだけ計画する
+  - 段階 1 の実装状態 (2026-07-31): **source 実装と ARM build は完了、実機確認待ち**
+    - 通常 build: `build/Picocalc_NESco.uf2`
+      - size: `text=279228 data=0 bss=98952`
+    - palette snapshot 計測 build: `build-palette-snapshot-arm/Picocalc_NESco.uf2`
+      - size: `text=283864 data=0 bss=99308`
+      - UF2 SHA-256: `57c64169a82d98387ee3d61b1eb3eb39bf317c15c5e2346b3336a79d417a72a2`
+    - 計測 build は `PICO_SDK_PATH=/home/fuyuki/pico/pico-sdk` と
+      `arm-none-eabi-gcc/g++` を明示した configure で作成した
+    - 実機で下記の固定手順と合格条件を確認するまで段階 2 へ進まない
   - 段階 1 の固定契約:
     - `display_lcd_worker_palette_mark_dirty()` と
       `display_lcd_worker_palette_force_snapshot()` を core0 API とする

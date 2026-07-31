@@ -786,6 +786,11 @@ fps 比では削減された実時間が分からない。
 
 ### 段階 1: palette snapshot 機構 (動作不変)
 
+実装状態 (2026-07-31): source 実装と通常版・計測版の ARM build は完了した。
+実機確認は未完了であり、下記の固定手順に合格するまで段階 2 へ進まない。
+実機投入用の計測 artifact は
+`build-palette-snapshot-arm/Picocalc_NESco.uf2` である。
+
 - version は **`1.1.28`** に更新する
 - 前節「snapshot の実装契約（固定）」の API、状態、呼び出し箇所、handoff をそのまま実装する
 - `infones/K6502_rw.h` の 2 分岐へ `mark_dirty()` を各 1 回追加する

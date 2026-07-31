@@ -83,6 +83,14 @@ static uint64_t s_perf_lcd_queue_wait_us = 0;
 static uint32_t s_perf_lcd_queue_wait_count = 0;
 static uint64_t s_perf_frame_pacing_sleep_us = 0;
 static uint32_t s_perf_frame_pacing_sleep_count = 0;
+static bool s_lcd_worker_palette_dirty = true;
+static bool s_lcd_worker_palette_force = true;
+static uint16_t s_lcd_worker_palette_version = 0;
+#if defined(NESCO_PALETTE_SNAPSHOT_LOG)
+static uint32_t s_perf_palette_line_items = 0;
+static uint32_t s_perf_palette_snapshots = 0;
+static uint32_t s_perf_palette_forced = 0;
+#endif
 
 #ifdef PICO_BUILD
 static uint64_t s_last_frame_us = 0;
@@ -142,6 +150,9 @@ typedef struct {
     int viewport_h;
     nes_view_scale_mode_t scale_mode;
     WORD pixels[256];
+    WORD palette[32];
+    uint16_t palette_version;
+    uint8_t palette_valid;
 } display_lcd_worker_item_t;
 
 static display_lcd_worker_item_t s_lcd_worker_queue[DISPLAY_LCD_WORKER_QUEUE_DEPTH];
@@ -150,6 +161,20 @@ static unsigned s_lcd_worker_queue_tail = 0;
 static unsigned s_lcd_worker_queue_count = 0;
 static int s_lcd_worker_strip_line = 0;
 static BYTE *s_lcd_worker_strip = NULL;
+static WORD s_lcd_worker_core1_palette[64];
+static uint16_t s_lcd_worker_core1_palette_version = 0;
+static bool s_lcd_worker_core1_palette_valid = false;
+
+#if defined(NESCO_CORE1_BASELINE_LOG)
+typedef struct {
+    uint32_t palette_applied;
+    uint32_t palette_protocol_faults;
+    uint32_t empty_polls;
+} display_lcd_worker_core1_window_t;
+
+static display_lcd_worker_core1_window_t s_lcd_worker_core1_local_window = {};
+static display_lcd_worker_core1_window_t s_lcd_worker_core1_published_window = {};
+#endif
 
 #ifdef PICO_BUILD
 static critical_section_t s_lcd_worker_lock;
@@ -205,6 +230,30 @@ static void display_lcd_worker_unlock(void) {
 #endif
 }
 
+void display_lcd_worker_palette_mark_dirty(void) {
+    s_lcd_worker_palette_dirty = true;
+}
+
+void display_lcd_worker_palette_force_snapshot(void) {
+    s_lcd_worker_palette_dirty = true;
+    s_lcd_worker_palette_force = true;
+    s_lcd_worker_palette_version = 0;
+}
+
+static void display_lcd_worker_publish_core1_window(void) {
+#if defined(NESCO_CORE1_BASELINE_LOG)
+    display_lcd_worker_lock();
+    s_lcd_worker_core1_published_window.palette_applied +=
+        s_lcd_worker_core1_local_window.palette_applied;
+    s_lcd_worker_core1_published_window.palette_protocol_faults +=
+        s_lcd_worker_core1_local_window.palette_protocol_faults;
+    s_lcd_worker_core1_published_window.empty_polls +=
+        s_lcd_worker_core1_local_window.empty_polls;
+    s_lcd_worker_core1_local_window = {};
+    display_lcd_worker_unlock();
+#endif
+}
+
 static void display_lcd_worker_reset_queue(void) {
     display_lcd_worker_lock();
     s_lcd_worker_queue_head = 0;
@@ -230,6 +279,7 @@ void display_lcd_worker_prepare_nes_view(void) {
      * Old queued lines must not survive a ROM menu return or scale toggle.
      */
     display_lcd_worker_reset_queue();
+    display_lcd_worker_palette_force_snapshot();
     s_lcd_worker_state = DISPLAY_LCD_WORKER_RUNNING;
 }
 
@@ -250,6 +300,7 @@ void display_lcd_worker_stop_and_drain(void) {
     }
     lcd_dma_wait();
     display_lcd_worker_reset_queue();
+    display_lcd_worker_palette_force_snapshot();
     s_lcd_worker_state = DISPLAY_LCD_WORKER_STOPPED;
 }
 
@@ -543,6 +594,16 @@ void display_perf_reset(void) {
     s_perf_lcd_queue_wait_count = 0;
     s_perf_frame_pacing_sleep_us = 0;
     s_perf_frame_pacing_sleep_count = 0;
+#if defined(NESCO_PALETTE_SNAPSHOT_LOG)
+    s_perf_palette_line_items = 0;
+    s_perf_palette_snapshots = 0;
+    s_perf_palette_forced = 0;
+#endif
+#if defined(NESCO_CORE1_BASELINE_LOG)
+    display_lcd_worker_lock();
+    s_lcd_worker_core1_published_window = {};
+    display_lcd_worker_unlock();
+#endif
 }
 
 void display_reset_frame_pacing(void) {
@@ -554,30 +615,53 @@ void display_reset_frame_pacing(void) {
     FrameSkip = 0;
 }
 
-void display_perf_snapshot(uint64_t *wait_us,
-                           uint64_t *flush_us,
-                           uint64_t *queue_wait_us,
-                           uint32_t *queue_wait_count,
-                           uint64_t *frame_pacing_sleep_us,
-                           uint32_t *frame_pacing_sleep_count) {
-    if (wait_us) {
-        *wait_us = s_perf_lcd_wait_us;
+void display_perf_take_window(display_perf_window_t *window) {
+    if (!window) {
+        return;
     }
-    if (flush_us) {
-        *flush_us = s_perf_lcd_flush_us;
-    }
-    if (queue_wait_us) {
-        *queue_wait_us = s_perf_lcd_queue_wait_us;
-    }
-    if (queue_wait_count) {
-        *queue_wait_count = s_perf_lcd_queue_wait_count;
-    }
-    if (frame_pacing_sleep_us) {
-        *frame_pacing_sleep_us = s_perf_frame_pacing_sleep_us;
-    }
-    if (frame_pacing_sleep_count) {
-        *frame_pacing_sleep_count = s_perf_frame_pacing_sleep_count;
-    }
+
+    window->lcd_wait_us = s_perf_lcd_wait_us;
+    window->lcd_flush_us = s_perf_lcd_flush_us;
+    window->lcd_queue_wait_us = s_perf_lcd_queue_wait_us;
+    window->lcd_queue_wait_count = s_perf_lcd_queue_wait_count;
+    window->frame_pacing_sleep_us = s_perf_frame_pacing_sleep_us;
+    window->frame_pacing_sleep_count = s_perf_frame_pacing_sleep_count;
+    window->palette_version = s_lcd_worker_palette_version;
+#if defined(NESCO_PALETTE_SNAPSHOT_LOG)
+    window->palette_line_items = s_perf_palette_line_items;
+    window->palette_snapshots = s_perf_palette_snapshots;
+    window->palette_forced = s_perf_palette_forced;
+#else
+    window->palette_line_items = 0;
+    window->palette_snapshots = 0;
+    window->palette_forced = 0;
+#endif
+
+    s_perf_lcd_wait_us = 0;
+    s_perf_lcd_flush_us = 0;
+    s_perf_lcd_queue_wait_us = 0;
+    s_perf_lcd_queue_wait_count = 0;
+    s_perf_frame_pacing_sleep_us = 0;
+    s_perf_frame_pacing_sleep_count = 0;
+#if defined(NESCO_PALETTE_SNAPSHOT_LOG)
+    s_perf_palette_line_items = 0;
+    s_perf_palette_snapshots = 0;
+    s_perf_palette_forced = 0;
+#endif
+
+#if defined(NESCO_CORE1_BASELINE_LOG)
+    display_lcd_worker_lock();
+    window->palette_applied = s_lcd_worker_core1_published_window.palette_applied;
+    window->palette_protocol_faults =
+        s_lcd_worker_core1_published_window.palette_protocol_faults;
+    window->lcd_empty_polls = s_lcd_worker_core1_published_window.empty_polls;
+    s_lcd_worker_core1_published_window = {};
+    display_lcd_worker_unlock();
+#else
+    window->palette_applied = 0;
+    window->palette_protocol_faults = 0;
+    window->lcd_empty_polls = 0;
+#endif
 }
 
 void display_clear_rgb565(WORD color) {
@@ -731,11 +815,33 @@ static bool display_lcd_worker_submit_line(int scanline, const WORD *src) {
     item.viewport_w = s_lcd_w;
     item.viewport_h = s_lcd_h;
     item.scale_mode = s_nes_view_scale;
+    item.palette_valid = 0;
+    item.palette_version = s_lcd_worker_palette_version;
     /*
      * Copy the line into the queue item. Do not queue s_line_buffer by pointer:
      * InfoNES will reuse that buffer for the next scanline immediately.
      */
     memcpy(item.pixels, src, sizeof(item.pixels));
+
+#if defined(NESCO_PALETTE_SNAPSHOT_LOG)
+    s_perf_palette_line_items++;
+#endif
+    if (s_lcd_worker_palette_dirty) {
+        if (!s_lcd_worker_palette_force) {
+            s_lcd_worker_palette_version++;
+        }
+        memcpy(item.palette, PalTable, sizeof(item.palette));
+        item.palette_valid = 1;
+        item.palette_version = s_lcd_worker_palette_version;
+#if defined(NESCO_PALETTE_SNAPSHOT_LOG)
+        s_perf_palette_snapshots++;
+        if (s_lcd_worker_palette_force) {
+            s_perf_palette_forced++;
+        }
+#endif
+        s_lcd_worker_palette_dirty = false;
+        s_lcd_worker_palette_force = false;
+    }
 
     bool queue_waited = false;
 #ifdef PICO_BUILD
@@ -855,6 +961,11 @@ bool display_lcd_worker_poll_once(void) {
     }
 
     if (!display_lcd_worker_pop_item(&item)) {
+#if defined(NESCO_CORE1_BASELINE_LOG)
+        if (s_lcd_worker_state == DISPLAY_LCD_WORKER_RUNNING) {
+            s_lcd_worker_core1_local_window.empty_polls++;
+        }
+#endif
         return false;
     }
 
@@ -864,8 +975,29 @@ bool display_lcd_worker_poll_once(void) {
          * so pending DMA is complete before a mode change or screenshot can
          * observe the framebuffer.
          */
+        display_lcd_worker_publish_core1_window();
         lcd_dma_wait();
         return true;
+    }
+
+    if (item.palette_valid) {
+        memcpy(s_lcd_worker_core1_palette,
+               item.palette,
+               sizeof(item.palette));
+        memset(&s_lcd_worker_core1_palette[32],
+               0,
+               sizeof(s_lcd_worker_core1_palette) - sizeof(item.palette));
+        s_lcd_worker_core1_palette_version = item.palette_version;
+        s_lcd_worker_core1_palette_valid = true;
+#if defined(NESCO_CORE1_BASELINE_LOG)
+        s_lcd_worker_core1_local_window.palette_applied++;
+#endif
+    } else if (!s_lcd_worker_core1_palette_valid ||
+               item.palette_version != s_lcd_worker_core1_palette_version) {
+#if defined(NESCO_CORE1_BASELINE_LOG)
+        s_lcd_worker_core1_local_window.palette_protocol_faults++;
+#endif
+        memset(item.pixels, 0, sizeof(item.pixels));
     }
 
     if (s_lcd_worker_strip_line == 0) {
