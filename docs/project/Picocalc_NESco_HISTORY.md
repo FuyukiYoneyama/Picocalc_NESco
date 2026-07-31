@@ -10,6 +10,48 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## `1.1.32` stretch queue depth Phase 0診断 — depth 8不実施 (2026-08-01)
+
+- 実装:
+  - `8ba265f`を`05e3c2a Revert "Shorten LCD queue retry interval"`でrevertし、queue-full retryを
+    100 usへ戻した。診断追加前の`platform/display.c`と`platform/version.h`は`1f1c093`と一致した
+  - `6bfb1f2 Add LCD strip timing diagnostics`で、core1のstrip flushに
+    `lcd_dma_wait_us/count`と`lcd_window_set_us/count`を追加した
+  - counterは`FRAME_END`で既存queue lock下にhandoffし、`[CORE1_BASE]`末尾に出力する
+  - versionは`1.1.32`。queue depthは4のままであり、depth 8候補`1.1.33`は作成していない
+- build:
+  - 通常build: `text=278844 data=0 bss=97548`
+  - 診断build: ARM EABI5 / RP2040、`text=284088 data=0 bss=97948`、queue symbol `0x580`
+  - 診断build ID: `Aug 1 2026 07:48:14`
+  - 診断UF2 SHA-256:
+    `31ccde5f856a02272673548dedeed8e903453ac0862e76e5c67d887c235abd4d`
+- 実機診断:
+  - log: `/home/fuyuki/pico_dvl/codex/log/pico20260801_075307.log`
+  - 3 ROMのnormal/stretchは各30窓以上あり、入力を含む窓と直後3窓を除いた最初の安定10窓を選定した
+  - 全選定窓で`palette_protocol_faults=0`。DMA wait / window設定のcountは定常状態で30.0回/frameだった
+
+  | stretch ROM | `frame_us_avg` | DMA wait / frame | window設定 / frame | window削減上限 | depth回収上限 |
+  |---|---:|---:|---:|---:|---:|
+  | LodeRunner | 28,888.5 us | 14,900.9 us | 91.3 us | 88.3 us | 4,221.2 us |
+  | Project_DART | 30,051.5 us | 14,852.4 us | 116.5 us | 112.6 us | 5,359.0 us |
+  | Xevious | 26,371.0 us | 16,177.5 us | 91.2 us | 88.2 us | 1,703.8 us |
+
+- 判定:
+  - 3 ROMすべてでDMA waitが`5 ms/frame`を大幅に超えた。core1は次stripを準備済みのまま
+    前DMAの完了を待っており、strip間LCD idle仮説は不支持である
+  - depth 8では次DMAの開始時刻を早められないため、Phase 1 / version `1.1.33`は**実装しない**。
+    queue depth、retry、通知の最適化系列を終了する
+  - window設定の削減上限は最大112.6 us/frameで、250 us/frame gate未満だった。
+    frame単位window設定も後続候補にしない
+  - `depth_recovery_upper_us`は非pixel時間から得る上限に過ぎず、DMA wait直接計測が
+    「その大部分はcore1到着遅れではない」と確定した。上限値だけでdepth候補を採用しない
+- 診断buildの注意:
+  - stretchの既存`1.1.30`比較値との差は`+0.25% / +0.73% / +0.34%`で、いずれも1%未満だった
+  - normalでは`p95_us`が約16,668 usのまま、各1秒窓に約10 msの単発maxが入った
+    （`max_us`約26.8--27.1 ms）。追加した長い`[CORE1_BASE]`出力によるserial logging負荷と判断する
+  - したがって診断buildを通常性能のA/B baselineには使わない。Phase 1は不実施なので、この制約は
+    depth候補の比較には影響しない
+
 ## `1.1.30` / `1.1.31` stretch queue retry実験は不採用 (2026-07-31)
 
 - 実装:
@@ -25,7 +67,7 @@
   - candidate計測UF2 SHA-256:
     `767a914c32add132edaa2a7c2b42fe9fa390a5a128eb0e4375fc5ec3b70ac2bc`
 - 実機A/B:
-  - baseline log: `/home/fuyuki/pico_dvl/codex/log/pico20260731_230528.log`
+  - baseline log: `/home/fuyuki/pico_dvl/codex/log/old/pico20260731_230528.log`
   - candidate log: `/home/fuyuki/pico_dvl/codex/log/pico20260731_231422.log`
   - 各ROM/modeで最初の適格な10連続窓を選び、6測定すべてで比較区間を取得できた
   - 全log 606対で`palette_protocol_faults=0`

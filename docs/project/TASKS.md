@@ -43,43 +43,14 @@
   - 未確認なのは PRG flash overlay の書き込み / 復元
 - `[pending]` Mapper87 / Choplifter 系の確認を、別の Mapper87 ROM 入手後に再開する
 
-## 次に実装する高速化
-
-- `[next]` stretch LCD bus idleを計測し、queue depth 8の実装可否をgateする
-  - 詳細計画の正本は
-    `docs/design/STRETCH_QUEUE_DEPTH_OPTIMIZATION_PLAN_20260731.md` とする
-  - 前提として、不採用になった10 us retryのcommit `8ba265f`だけをrevertする
-    - Phase 0 commit `1f1c093`のepisode/pacing計測fieldは残す
-    - `1.1.31`は不採用実験のversionとして再利用しない
-  - 既存`1.1.30`性能logは再取得しない
-    - revert直後の対象sourceが`1f1c093`と同一であることをgit diffで確認する
-    - build IDが日時を含むため、再build UF2の旧SHA-256一致は要求しない
-  - Phase 0 (`1.1.32`): depth 4のままstrip単位で次を計測する
-    - `lcd_dma_wait_us/count`: core1が前strip DMA完了を実際に待った時間
-    - `lcd_window_set_us/count`: command byteとdrainを含むwindow設定全体
-    - 計測build `.bss`期待値は`97948`、queue symbolは`0x580`
-    - 3 ROMのnormal/stretchを各最低30窓取り、既存baselineにない診断値を得る
-    - stretchでは`frame_us_avg - 24576 - window_set_us_per_frame`をdepthによる
-      回収可能量の上限として算出する。これは期待改善量や保証値ではない
-  - 回収上限が500 us以上のROMが2本未満なら、採用条件を構造上満たせないためdepth 8を実装しない
-  - Phase 0で3 ROMともDMA waitが5 ms/frame以上ならdepth 8を実装しない
-  - Phase 1 (`1.1.33`、gate通過時のみ): depthだけを4から8へ変更する
-    - queue symbol期待値は`0xb00`
-    - 通常build `.bss=98956`、同一計測付きbuild `.bss=99356`
-    - Project_DARTのMapper30最大確保とscreenshot同時確保後も単純計算21,592 byte残る
-  - Phase 1へ進んだ場合、`1.1.32`診断logをdepth 4 baselineとして流用し、再取得しない
-  - stretch 2/3 ROMで500 us以上改善し、全modeで非退行・fault 0・機能回帰なしなら採用する
-
 ## 保留中の改善候補
 
 - `[deferred]` audio ring size を `4096` から `2048` へ下げられるか再評価する
   - 現時点では RAM に余裕があるため、今すぐの課題ではない
 - `[deferred]` 音量調整は `docs/audio/AUDIO_OUTPUT_GAIN_REDESIGN_20260422.md` を正本として必要時に再開する
-- `[deferred]` Phase 0 bus診断とdepth 8 A/B結果に応じてLCD側追加高速化を再計画する
-  - frame単位window設定をdepthとは混ぜず、独立候補とする
-    - ST7365P仕様は画素byte境界でCSXを解除したData Transfer Pauseからの継続を保証する
-    - command byte削減は約40.8 us/frame。Phase 0でdrainを含むwindow設定全体を測り、
-      削減上限が250 us/frame以上の場合だけ後続候補にする
+- `[deferred]` LCD側追加高速化は、新しい実測根拠がある場合だけ再計画する
+  - queue depth / retry / 通知の系列は`1.1.32` Phase 0で終了した。depth 8は不実施
+  - frame単位window設定の削減上限は最大112.6 us/frameで、250 us/frame gate未満だった
   - DMA 32 bit化はLCDバス下限を変えずcore1/SRAM負荷だけを下げるため、実測根拠が出た場合だけ行う
   - 224-line cropは表示内容が変わるため、必要なら設定項目として別計画にする
   - ST7365PのCOLMODはcontrol interfaceで16/18/24 bitだけを定義し、`0x63`の12 bitは未対応。

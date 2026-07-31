@@ -12,6 +12,8 @@ Phase 0診断version: `1.1.32`
 
 Phase 1候補version: `1.1.33`
 
+状態: **完了。Phase 0はdepth 8仮説を不支持とし、Phase 1は実装しない。**
+
 関連文書:
 
 - `docs/design/STRETCH_QUEUE_RETRY_OPTIMIZATION_PLAN_20260731.md`
@@ -29,6 +31,31 @@ depth 8を先に実装しない。まずdepth 4のまま、strip flush時にcore
 
 既存`1.1.30`性能logは再取得しない。新しい`1.1.32`実機作業は、既存logにない
 `lcd_dma_wait_*`と`lcd_window_set_*`を取る診断作業である。
+
+## 実測結果 (2026-08-01)
+
+実機logは`/home/fuyuki/pico_dvl/codex/log/pico20260801_075307.log`である。
+3 ROMのnormal/stretchを各30窓以上取得し、入力を含む窓と直後3窓を除いた最初の安定10窓を選定した。
+全選定窓で`palette_protocol_faults=0`、DMA wait / window設定のcountは30.0回/frameだった。
+
+| stretch ROM | `frame_us_avg` | DMA wait / frame | window設定 / frame | `removable_window_us` | `depth_recovery_upper_us` |
+|---|---:|---:|---:|---:|---:|
+| LodeRunner | 28,888.5 us | 14,900.9 us | 91.3 us | 88.3 us | 4,221.2 us |
+| Project_DART | 30,051.5 us | 14,852.4 us | 116.5 us | 112.6 us | 5,359.0 us |
+| Xevious | 26,371.0 us | 16,177.5 us | 91.2 us | 88.2 us | 1,703.8 us |
+
+3 ROMすべてのDMA waitが`5,000 us/frame`を大幅に超えた。core1は次stripを準備済みのまま
+前DMAの完了を待っており、queue depthを4から8へ増やしても次DMAの開始時刻は早まらない。
+従って**Phase 1 / version `1.1.33`は実装しない**。depth、retry、通知の最適化系列はここで終了する。
+
+window設定の削減上限も最大112.6 us/frameで250 us/frame gate未満だったため、frame単位window設定は
+後続候補にしない。`depth_recovery_upper_us`は非pixel時間から得る上限に過ぎず、DMA wait直接計測により
+その大部分がcore1到着遅れではないことを確認した。
+
+診断buildのstretch `frame_us_avg`は既存`1.1.30`比較値に対し`+0.25% / +0.73% / +0.34%`で、
+いずれも1%未満だった。一方normalでは`p95_us`が約16,668 usのまま各1秒窓に約10 msの単発maxが入った。
+追加した長い`[CORE1_BASE]`のserial logging負荷と判断し、診断buildを通常性能のA/B baselineには使わない。
+Phase 1は不実施なので、この制約はdepth候補の比較へ影響しない。
 
 ## retry実験から確定したこと
 
@@ -65,7 +92,7 @@ depth変更はLCDの純転送下限を変えない。stretch RGB565の下限は2
 - version/build ID: `1.1.30` / `Jul 31 2026 22:56:39`
 - artifact: `build-stretch-retry-baseline/Picocalc_NESco.uf2`
 - UF2 SHA-256: `f4588e39fa0ceb403e1d55f7c3c94765b6ebc2b8322227d2c804959096c04046`
-- log: `/home/fuyuki/pico_dvl/codex/log/pico20260731_230528.log`
+- log: `/home/fuyuki/pico_dvl/codex/log/old/pico20260731_230528.log`
 
 このlogにはLodeRunner、Project_DART、Xeviousのnormal/stretchが各30窓を超えて含まれ、
 選定済みのstretch中央値は28,816.0 / 29,834.5 / 26,282.5 usである。

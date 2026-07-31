@@ -28,17 +28,14 @@
 10. `docs/design/GITHUB_ACTIONS_BUILD_CI_PLAN_20260426.md`
    - GitHub Actions による最小 build CI 導入設計。
 
-## 現在必要な計画
+## 完了済み計画 / 結果
 
 - Stretch LCD worker queue depth optimization
   - 計画: `docs/design/STRETCH_QUEUE_DEPTH_OPTIMIZATION_PLAN_20260731.md`
-  - 不採用の`1.1.31` 10 us retryだけをrevertし、`1.1.30`の計測fieldを残す
-  - 既存`1.1.30`性能logは再取得せず、`1.1.32` depth 4診断buildでDMA waitとwindow設定時間を測る
-  - stretch非pixel時間からwindow設定時間を引いた値をdepth回収量の上限として算出し、
-    500 us以上のROMが2本以上ある場合だけ`1.1.33`でqueue depthを4から8へ変更する
-  - Phase 1へ進んだ場合も`1.1.32`診断logをbaselineとして流用し、人的な再測定を増やさない
-
-## 完了済み計画 / 結果
+  - 結果: `docs/project/Picocalc_NESco_HISTORY.md`
+  - `1.1.32`でdepth 4のDMA wait/window設定時間を3 ROMで直接計測した
+  - DMA waitは全ROMで14.85--16.18 ms/frameとなり、core1は前DMA完了待ちだった
+  - depth 8候補`1.1.33`は実装しない。window設定の削減上限も最大112.6 us/frameで後続候補にしない
 
 - Stretch LCD queue retry optimization
   - 計画: `docs/design/STRETCH_QUEUE_RETRY_OPTIMIZATION_PLAN_20260731.md`
