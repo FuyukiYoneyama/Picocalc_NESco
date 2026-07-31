@@ -172,10 +172,17 @@ static bool s_lcd_worker_core1_palette_valid = false;
 
 #if defined(NESCO_CORE1_BASELINE_LOG)
 typedef struct {
+    uint64_t dma_wait_us;
+    uint64_t window_set_us;
+    uint32_t dma_wait_count;
+    uint32_t window_set_count;
     uint32_t palette_applied;
     uint32_t palette_protocol_faults;
     uint32_t empty_polls;
 } display_lcd_worker_core1_window_t;
+
+static_assert(sizeof(display_lcd_worker_core1_window_t) == 40,
+              "display_lcd_worker_core1_window_t must remain 40 bytes");
 
 static display_lcd_worker_core1_window_t s_lcd_worker_core1_local_window = {};
 static display_lcd_worker_core1_window_t s_lcd_worker_core1_published_window = {};
@@ -250,6 +257,14 @@ void display_lcd_worker_palette_force_snapshot(void) {
 static void display_lcd_worker_publish_core1_window(void) {
 #if defined(NESCO_CORE1_BASELINE_LOG)
     display_lcd_worker_lock();
+    s_lcd_worker_core1_published_window.dma_wait_us +=
+        s_lcd_worker_core1_local_window.dma_wait_us;
+    s_lcd_worker_core1_published_window.window_set_us +=
+        s_lcd_worker_core1_local_window.window_set_us;
+    s_lcd_worker_core1_published_window.dma_wait_count +=
+        s_lcd_worker_core1_local_window.dma_wait_count;
+    s_lcd_worker_core1_published_window.window_set_count +=
+        s_lcd_worker_core1_local_window.window_set_count;
     s_lcd_worker_core1_published_window.palette_applied +=
         s_lcd_worker_core1_local_window.palette_applied;
     s_lcd_worker_core1_published_window.palette_protocol_faults +=
@@ -661,6 +676,10 @@ void display_perf_take_window(display_perf_window_t *window) {
 
 #if defined(NESCO_CORE1_BASELINE_LOG)
     display_lcd_worker_lock();
+    window->lcd_dma_wait_us = s_lcd_worker_core1_published_window.dma_wait_us;
+    window->lcd_dma_wait_count = s_lcd_worker_core1_published_window.dma_wait_count;
+    window->lcd_window_set_us = s_lcd_worker_core1_published_window.window_set_us;
+    window->lcd_window_set_count = s_lcd_worker_core1_published_window.window_set_count;
     window->palette_applied = s_lcd_worker_core1_published_window.palette_applied;
     window->palette_protocol_faults =
         s_lcd_worker_core1_published_window.palette_protocol_faults;
@@ -668,6 +687,10 @@ void display_perf_take_window(display_perf_window_t *window) {
     s_lcd_worker_core1_published_window = {};
     display_lcd_worker_unlock();
 #else
+    window->lcd_dma_wait_us = 0;
+    window->lcd_dma_wait_count = 0;
+    window->lcd_window_set_us = 0;
+    window->lcd_window_set_count = 0;
     window->palette_applied = 0;
     window->palette_protocol_faults = 0;
     window->lcd_empty_polls = 0;
@@ -922,11 +945,23 @@ static void display_lcd_worker_flush_normal_strip(const display_lcd_worker_item_
     }
 
     const int strip_y = last_item->scanline - (s_lcd_worker_strip_line - 1);
+#if defined(NESCO_CORE1_BASELINE_LOG) && defined(PICO_BUILD)
+    const uint64_t dma_wait_start_us = time_us_64();
+#endif
     lcd_dma_wait();
+#if defined(NESCO_CORE1_BASELINE_LOG) && defined(PICO_BUILD)
+    s_lcd_worker_core1_local_window.dma_wait_us += time_us_64() - dma_wait_start_us;
+    s_lcd_worker_core1_local_window.dma_wait_count++;
+    const uint64_t window_set_start_us = time_us_64();
+#endif
     lcd_set_window(last_item->viewport_x,
                    last_item->viewport_y + strip_y,
                    NES_VIEW_NORMAL_W,
                    s_lcd_worker_strip_line);
+#if defined(NESCO_CORE1_BASELINE_LOG) && defined(PICO_BUILD)
+    s_lcd_worker_core1_local_window.window_set_us += time_us_64() - window_set_start_us;
+    s_lcd_worker_core1_local_window.window_set_count++;
+#endif
     lcd_dma_write_bytes_async(s_lcd_worker_strip,
                               NES_VIEW_NORMAL_W * s_lcd_worker_strip_line * 2);
     s_lcd_worker_strip = NULL;
@@ -959,11 +994,23 @@ static void display_lcd_worker_flush_stretch_strip(const display_lcd_worker_item
     const int stretch_y = strip_y + (strip_y / 4);
     const int lcd_lines = s_lcd_worker_strip_line + (s_lcd_worker_strip_line / 4);
 
+#if defined(NESCO_CORE1_BASELINE_LOG) && defined(PICO_BUILD)
+    const uint64_t dma_wait_start_us = time_us_64();
+#endif
     lcd_dma_wait();
+#if defined(NESCO_CORE1_BASELINE_LOG) && defined(PICO_BUILD)
+    s_lcd_worker_core1_local_window.dma_wait_us += time_us_64() - dma_wait_start_us;
+    s_lcd_worker_core1_local_window.dma_wait_count++;
+    const uint64_t window_set_start_us = time_us_64();
+#endif
     lcd_set_window(last_item->viewport_x,
                    last_item->viewport_y + stretch_y,
                    NES_VIEW_STRETCH_W,
                    lcd_lines);
+#if defined(NESCO_CORE1_BASELINE_LOG) && defined(PICO_BUILD)
+    s_lcd_worker_core1_local_window.window_set_us += time_us_64() - window_set_start_us;
+    s_lcd_worker_core1_local_window.window_set_count++;
+#endif
     lcd_dma_write_bytes_async(s_lcd_worker_strip,
                               NES_VIEW_STRETCH_W * lcd_lines * 2);
     s_lcd_worker_strip = NULL;

@@ -126,6 +126,10 @@ typedef struct {
     uint32_t palette_protocol_faults;
     uint32_t lcd_empty_polls;
     uint16_t palette_version;
+    uint64_t lcd_dma_wait_us;
+    uint32_t lcd_dma_wait_count;
+    uint64_t lcd_window_set_us;
+    uint32_t lcd_window_set_count;
 } display_perf_window_t;
 
 /**
