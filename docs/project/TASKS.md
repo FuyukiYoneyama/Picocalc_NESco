@@ -134,13 +134,15 @@
     - core0 側の判断基準は上記の計測 3 に記載する
 - `[in_progress]` BG line buffer を palette index の byte 化する
   - 正本は `docs/design/BG_LINE_BUFFER_INDEX_REDESIGN_20260731.md`
-  - 段階 0 は完了済み。段階 1 を `1.1.28`、段階 2 を `1.1.29`、
-    段階 3 を `1.1.30` として、各段階を個別 commit・実機確認する
+  - 段階 0 は完了済み。段階 1 を `1.1.28`、段階 2 を `1.1.29` として、
+    各段階を個別 commit・実機確認する。段階 3 は queue wait の再計測が 1% 以上のときだけ計画する
   - 段階 1 の固定契約:
     - `display_lcd_worker_palette_mark_dirty()` と
       `display_lcd_worker_palette_force_snapshot()` を core0 API とする
     - snapshot は queue item 内に持ち、core1 のローカル状態へ core0 から直接書かない
     - reset、NES view の prepare、worker の stop/drain の 3 箇所で version 0 snapshot を強制する
+    - `FRAME_END` は palette 規約の対象外とし、protocol fault を増やさない
+    - `K6502_rw.h` を読む `K6502.cpp` と `InfoNES_pAPU.cpp` の両方で `display.h` を先に include する
     - `NESCO_PALETTE_SNAPSHOT_LOG=ON` の protocol fault 0 を確認してから段階 2 へ進む
   - 段階 2 は normal 3 ROM で 3 窓ずつ A/B 比較する
     - 各 ROM の平均 `frame_us` 中央値を `3%` 以上短縮し、p95 中央値を `1%` 超悪化させず、
@@ -152,6 +154,7 @@
     LCD 帯域側と違い normal view の fps に直接効く
   - scanline buffer を RGB565 の色から palette RAM index の byte へ変え、
     色への変換を core1 の packing 時に行う
+    - `0x20` は RGB565 black 専用の予約 index とし、screen off と各 clip clear は必ずこれを書く
   - 同時に `BackgroundOpaqueLine` を廃止できる
     - 読み手は `compositeSpriteRange()` の 1 か所だけであることを確認済み
     - sprite 0 hit 判定は参照していない
@@ -166,17 +169,19 @@
       - これがないと起動直後の scanline で前 ROM の palette を使う
   - 副次効果:
     - queue item が小さくなるため queue depth を増やせる
-      - snapshot 込みでは depth 6 が RAM 中立 (`-48 byte`)、
-        depth 8 は `+656 byte` である。「RAM 増なしで depth 8」は成立しない
-      - まず depth 6 で始め、修正後の窓単位 queue wait の結果次第で depth 8 を検討する
+      - 64 entry core1 LUT 込みでは depth 6 の queue 関連は `+80 byte`、
+        depth 8 は `+784 byte` である。段階 2 の buffer/opaque 配列削減を含めた全体では
+        depth 6 が `-432 byte`、depth 8 が `+272 byte` となる
+      - 修正後の窓単位 queue wait が frame time の 1% 以上なら depth 6 を検討し、
+        depth 6 後も 1% 以上かつ p95 改善なら depth 8 を検討する
     - core1 が index から色への LUT を引く形になるため、
       LCD の COLMOD 12 bit/pixel 化が LUT 出力の差し替えだけで済むようになる
-  - 削減量の理論値は約 `2.0 ms/frame` だが、これは実効値の予測ではない
+  - 削減量の理論値は最大約 `1.9 ms/frame` だが、これは実効値の予測ではない
     - Cortex-M0+ では store 幅を狭めても cycle は減らないため、
       削減は幅ではなく `pal[]` load と `dst_opaque` store を消すことから出る
     - core0 から消えた palette lookup は core1 へ移るため、frame 全体では相殺され得る
-  - 実装は 4 段階に分ける
-    - 段階 0: 計測用コードの追加 (通常 build の動作は変えない)
+  - 実装は段階 0 完了後の 2 段階と、条件付きの queue 段階に分ける
+    - 段階 0: 計測用コードの追加 — 完了
     - 段階 1: palette snapshot 機構 (動作不変)
     - 段階 2: index 描画 + queue item の byte 化 (効果測定ポイント、打ち切り判断あり)
       - queue item の byte 化をここに含めるのは、
@@ -185,6 +190,5 @@
         - 現在は `const WORD *src` 前提であり、対応しないと表示が壊れる
         - この経路は `InfoNES_DrawLine()` の直後に同じ core0 で走るため、
           palette version の持ち回りは不要で現在の `PalTable` を使えばよい
-      - core1 の packing 時間と queue occupancy 最小値も測る
-      - core0 の queue full 待ちだけでは、core1 が枯れる側の問題を検出できない
-    - 段階 3: queue depth の変更のみ (効果測定ポイント)
+      - `lcd_empty_polls` と窓単位の queue wait だけを記録し、line 単位の core1 時刻計測は追加しない
+    - 段階 3: queue wait が frame time の 1% 以上のときだけ depth 6 を別 commit で検討する

@@ -320,8 +320,8 @@ LCD バスではない。バス下限を下げても、上に乗っている 18�
     現在も LCD バスに当たっている可能性が残る
 - stretch view: ここが本命である
   - バス上限 `40.7 fps` は確実に効く位置にある
-  - `1.1.26` の stretch 実測が存在しないため、天井に貼り付いているかは未確認
-  - 貼り付いている場合、上限は `40.7 fps` から `54.3 fps` へ上がる
+  - `1.1.27` の Xevious stretch 実測は `36.7 fps` で、天井には貼り付いていない
+  - COLMOD 導入時の上限は `40.7 fps` から `54.3 fps` へ上がるが、現状は core0 最適化を優先する
 - 将来の core0 最適化に対する天井
   - 現在の天井は `63.6 fps` で、`Xevious.nes` の `55.50 fps` との差は 8 fps しかない
   - COLMOD 12 bit/pixel を入れると天井は `84.8 fps` になる
@@ -341,20 +341,21 @@ stretch が core1 律速へ移る可能性がある。
 - 候補 3 (DMA 32 bit 化) を stretch では同時に入れる。
   packer の store 数が 4 px あたり 8 回から 2 回に減り、12 bit 化の増分を相殺できる
 - palette LUT を RGB444 のまま出す。
-  `display_init()` は現在 RGB444 nibble を bit 複製して RGB565 へ展開しているが、
-  展開せず 12 bit のまま `s_line_buffer` に置けば packer は shift だけで済む。
-  LUT テーブルの差し替えで済み、hot path を触らない。
-  ただし InfoNES 側が `s_line_buffer` の値に対して monochrome bit や
-  color emphasis のような色演算をしていないことが前提になる
+  BG line buffer index 化の後は `s_line_buffer` 自体は palette index のままにし、
+  core1 の palette LUT 出力だけを RGB565 から RGB444 へ差し替える。packer は shift だけで済み、
+  InfoNES hot path を触らない。
+  InfoNES 側が scanline buffer の値に対して monochrome bit や
+  color emphasis のような色演算をしていないことは確認済みである。
+  `R1_MONOCHROME` は定義だけで参照されず、scanline buffer へ色演算を加える経路はない
 
-## 実装前に取る計測
+## 実測状況
 
-上の予測には未確認が 2 つ残っており、これを潰さないと実装の効果を判定できない。
-着手前に以下を取る。詳細は `docs/project/TASKS.md` の該当項目を正本とする。
+stretch 実測は完了し、queue wait だけが窓単位化後の再計測待ちである。詳細は
+`docs/project/TASKS.md` の該当項目を正本とする。
 
-1. `1.1.26` の stretch 実測 fps (`Xevious.nes` stretch)
-   - `40.7 fps` 付近なら stretch はバス律速で、COLMOD 12 bit/pixel の効果が確定する
-   - `35 fps` 前後なら core0 律速で、効果は薄い
+1. `1.1.27` の stretch 実測 fps (`Xevious.nes` stretch) — **完了**
+   - 実測は約 `36.7 fps` (`27.3 ms/frame`) で、バス下限 `24.58 ms` / `40.7 fps` に達していない
+   - 現状は core0 律速と判断し、COLMOD 12 bit/pixel は BG line buffer index 化の採否後に判断する
 2. `lcd_queue_wait_us` / `lcd_queue_wait_count`
    - `NESCO_CORE1_BASELINE_LOG=ON` の `[CORE1_BASE]` から取得する
    - 計測機構は `1.1.1` で追加済みだが実測値が履歴に残っていない
@@ -367,6 +368,4 @@ stretch が core1 律速へ移る可能性がある。
 - COLMOD 12 bit/pixel での panel 側の色展開が、現在の bit 複製展開と一致するか
 - RAMWR 途中の CS deassert で GRAM address pointer が保持されるか
 - `lcd_wait_idle()` 1 回あたりの実費用と、1 frame 180 回の合計
-- `1.1.26` の stretch 実測 fps
 - `lcd_queue_wait_us` の実測値
-- InfoNES 側が `s_line_buffer` の値に色演算をしていないか
