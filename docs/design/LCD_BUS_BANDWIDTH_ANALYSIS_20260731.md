@@ -206,9 +206,11 @@ LCD controller は window 内で GRAM address を自動 increment する。
   RAMWR 途中の CS deassert で GRAM address pointer が保持されるかは、
   ST7365P の実機確認が必要である。【推定】多くの ST77xx 系では保持されるが、保証はできない。
 
-計測は既に用意されている。
-`platform/display.c` の `s_perf_lcd_wait_us` と `display_get_perf()` の `wait_us` で、
-推定ではなく実測から入れる。
+既存の `s_perf_lcd_wait_us` / `s_perf_lcd_flush_us` は fallback packer だけを計測するため、
+通常の worker 動作では 0 であり、この候補の根拠には使えない。
+候補 2 に着手する場合は先に、worker が実行する `lcd_set_window()` 内の
+`lcd_wait_idle()` を driver 層で計測し、frame-end handoff で core0 へ渡す専用 counter を追加する。
+その実測から frame あたり 180 回の drain 費用を判定する。
 
 ### 候補 3: DMA 転送単位を 32 bit にする
 
@@ -368,4 +370,5 @@ stretch 実測は完了し、queue wait だけが窓単位化後の再計測待�
 - COLMOD 12 bit/pixel での panel 側の色展開が、現在の bit 複製展開と一致するか
 - RAMWR 途中の CS deassert で GRAM address pointer が保持されるか
 - `lcd_wait_idle()` 1 回あたりの実費用と、1 frame 180 回の合計
+  - 既存 `wait_us` では取れない。候補 2 着手時に worker/driver 側の専用 counter を追加する
 - `lcd_queue_wait_us` の実測値

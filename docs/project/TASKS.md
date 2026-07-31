@@ -143,12 +143,15 @@
     - reset、NES view の prepare、worker の stop/drain の 3 箇所で version 0 snapshot を強制する
     - `FRAME_END` は palette 規約の対象外とし、protocol fault を増やさない
     - `K6502_rw.h` を読む `K6502.cpp` と `InfoNES_pAPU.cpp` の両方で `display.h` を先に include する
+    - `display_perf_take_window()` をこの段階で導入する
+      - core1 handoff 値だけを queue lock 下で take-and-zero し、core0 専用 counter は lock なしで扱う
+      - `[PALETTE_SNAPSHOT]` と `[CORE1_BASE]` は同じ window を 1 回だけ取得して出力する
     - `NESCO_PALETTE_SNAPSHOT_LOG=ON` の protocol fault 0 を確認してから段階 2 へ進む
   - 段階 2 は normal 3 ROM で 3 窓ずつ A/B 比較する
     - 各 ROM の平均 `frame_us` 中央値を `3%` 以上短縮し、p95 中央値を `1%` 超悪化させず、
       protocol fault 0 なら採用する
     - 不合格なら結果を HISTORY へ記録して、段階 2 と段階 1 の commit を順に `git revert` する
-  - queue wait は段階 2 で `display_perf_take_window()` により 1 秒窓ごとの値へ直す
+  - queue wait は段階 1 で `display_perf_take_window()` により 1 秒窓ごとの値へ直す
     - depth 4 の基準はこの修正後に取り直し、段階 3 (depth 6) と比較する
   - 狙いは core0 の PPU background 描画を軽くすることで、
     LCD 帯域側と違い normal view の fps に直接効く
@@ -176,7 +179,8 @@
         depth 6 後も 1% 以上かつ p95 改善なら depth 8 を検討する
     - core1 が index から色への LUT を引く形になるため、
       LCD の COLMOD 12 bit/pixel 化が LUT 出力の差し替えだけで済むようになる
-  - 削減量の理論値は最大約 `1.9 ms/frame` だが、これは実効値の予測ではない
+  - 削減量の理論小計は約 `1.69 ms/frame` で、これに queue traffic 削減分が加わる
+    - queue traffic の cycle 換算は compiler / copy 展開依存のため、段階 2 で実測する
     - Cortex-M0+ では store 幅を狭めても cycle は減らないため、
       削減は幅ではなく `pal[]` load と `dst_opaque` store を消すことから出る
     - core0 から消えた palette lookup は core1 へ移るため、frame 全体では相殺され得る
@@ -191,4 +195,5 @@
         - この経路は `InfoNES_DrawLine()` の直後に同じ core0 で走るため、
           palette version の持ち回りは不要で現在の `PalTable` を使えばよい
       - `lcd_empty_polls` と窓単位の queue wait だけを記録し、line 単位の core1 時刻計測は追加しない
+      - `lcd_empty_polls` は各窓で十分大きいか / ほぼ 0 かだけを読み、窓間の増減では判定しない
     - 段階 3: queue wait が frame time の 1% 以上のときだけ depth 6 を別 commit で検討する

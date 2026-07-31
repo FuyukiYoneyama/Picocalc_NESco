@@ -185,7 +185,7 @@ palette index 0 の扱いも一致する。
 
 | 箇所 | 現在の意味 | index 化後に書く値 |
 |---|---|---:|
-| `InfoNES_DrawFrame()` の上下 4 line | `InfoNES_DrawLine()` を呼ばない black line | `0x20` |
+| `InfoNES_HSync()` の上下 4 line | `InfoNES_DrawLine()` を呼ばない black line | `0x20` |
 | `InfoNES_DrawLine()` の `!R1_SHOW_SCR` | screen off | `0x20` |
 | background 左端 8 px clip | clip black | `0x20` |
 | 上下 clip | clip black | `0x20` |
@@ -231,8 +231,8 @@ Cortex-M0+ では `LDRB` `LDRH` `STRB` `STRH` がいずれも 2 cycle である�
 |---|---|
 | tile 内側 loop | 32 tile x 232 line x 52 cycle = 約 0.39 M cycle = 1.54 ms |
 | `BackgroundOpaqueLine` の clear 廃止 | 約 0.04 M cycle = 0.15 ms |
-| queue line traffic の削減 | 最大 約 0.25 ms |
-| 合計 | **最大 約 1.9 ms / frame** |
+| queue line traffic の削減 | 444 byte / line。cycle は compiler / copy 展開依存のため独立には見積もらない |
+| 小計 | **約 1.69 ms / frame + queue traffic 削減分** |
 
 **この値は理論値であり、実効値の予測ではない。** 実効値は段階 2 で測定する。
 
@@ -430,6 +430,10 @@ pixels、`palette_valid`、`palette_version` を必ず明示代入してから `
 `palette_valid == 0` の `palette[32]` は読まない。これにより clean line に不要な
 352 byte memset を入れない。
 
+queue への構造体 copy は invalid item の `palette[32]` も運ぶが、これは保存先で読まれない
+payload である。GCC が `-Wmaybe-uninitialized` を出しても、全 item の memset を復活させない。
+必要なら「`palette_valid==1` のときだけ palette を copy する」push/pop へ局所化して解消する。
+
 現在の line traffic は pixel `memcpy` 512 byte と queue item copy 540 byte の計 1,052 byte、
 変更後は 256 byte と 352 byte の計 608 byte である。snapshot がある line だけはこれに
 palette copy 64 byte が加わる。
@@ -490,9 +494,18 @@ core1 は worker 内だけで `WORD core1_palette[64]`、`uint16_t core1_palette
 ```
 
 `forced` は version 0 の snapshot 数、`applied` と `protocol_faults` は core1 から
-frame-end ごとに handoff された値である。handoff は core1 が `FRAME_END` を処理した
-時だけ既存 queue lock 下で共有 accumulator へ加算し、core0 は同じ lock 下で swap-and-zero
-して読む。line ごとの lock や 64 bit の無保護な cross-core read は行わない。
+frame-end ごとに handoff された値である。段階 1 で `display_perf_snapshot()` を
+`display_perf_take_window()` へ置換し、これを snapshot log と通常の `[CORE1_BASE]` の
+唯一の受け渡し経路にする。別の palette 専用 handoff は作らない。
+
+core1 は `FRAME_END` 時だけ、`palette_applied`、`palette_protocol_faults`、`empty_polls` を
+既存 queue lock 下で共有 accumulator へ加算する。core0 の `display_perf_take_window()` は、
+**core1 から handoff されたこの 3 field だけ**を同じ queue lock 下で copy-and-zero する。
+core0 専用の `wait_us`、`flush_us`、`queue_wait_*`、frame pacing は lock を取らずに
+copy-and-zero する。line ごとの lock や 64 bit の無保護な cross-core read は行わない。
+
+`perf_log_if_due()` は window を 1 回だけ取得し、通常の `[CORE1_BASE]` と、
+`NESCO_PALETTE_SNAPSHOT_LOG` 時の `[PALETTE_SNAPSHOT]` が同じ window 値を出す。
 
 合格条件は、通常プレイ・reset・stretch 往復・menu へ戻って別 ROM を開始する一連の操作で
 `protocol_faults=0`、各遷移後に `forced>=1`、表示差分なしである。snapshot 数や version の
@@ -558,7 +571,7 @@ load の幅が狭くなること自体には価値がない。
 
 結果として案 B の削減は queue copy の半減、
 すなわち理論値で **約 0.25 ms / frame** にとどまる。
-案 A の最大約 1.9 ms に対して 1 桁小さい。
+案 A の tile/opaque 小計 約 1.69 ms に対して 1 桁小さい。
 
 したがって **案 A を採用し、snapshot の複雑さを引き受ける**。
 この比較は、snapshot 機構がなぜ払う価値のあるコストなのかの根拠でもある。
@@ -804,6 +817,8 @@ fps 比では削減された実時間が分からない。
 - sprite 合成を index 書き込みへ変更する
 - 画面 off / clip 時の 5 clear を byte 幅の **black reserved index `0x20`** へ変更する
 - `WorkLine` の型と `InfoNES_SetLineBuffer()` の契約を `BYTE*` へ変更する
+- `InfoNES_HSync()` の上下 4 line clear を `InfoNES_MemorySet(WorkLine, 0x20, NES_DISP_WIDTH)`
+  へ変え、直上の「`NES_DISP_WIDTH << 1 = 512`」という byte 数コメントを削除または 256 byte に更新する
 - **queue item を `BYTE pixels[256]` へ変更する。depth は 4 のまま据え置く**
 - core1 の packing に、ローカル palette による index から色への変換を追加する
 - **worker を使わない fallback packing も index 入力へ変更する** (後述)
@@ -816,8 +831,8 @@ queue item の byte 化を将来の queue depth 変更と分けるのは、
 段階 2 の測定に queue traffic 削減が含まれるかどうかを曖昧にしないためである。
 これにより段階 2 は「描画の削減 + queue traffic 削減」、
 段階 3 は「純粋に queue depth の効果」に分かれ、
-理論値 (tile 内側 1.54 ms + clear 0.15 ms + queue traffic 最大 0.25 ms = 約 1.9 ms) と
-段階 2 の実測を直接比較できる。
+理論小計 (tile 内側 1.54 ms + clear 0.15 ms = 約 1.69 ms) と、独立には cycle 化しない
+queue traffic 削減分を含む段階 2 の実測を比較できる。
 
 ### fallback 経路も index 化が必要である
 
@@ -863,19 +878,19 @@ core1 の index lookup 増分は、1 px あたり多めに 4 cycle と見積も�
 
 したがって line ごとの `time_us_64()` 計測や別 build は追加しない。worker が RUNNING 中に
 item を pop できなかった回数 `empty_polls` だけを core1 ローカルで数え、`FRAME_END` 時に
-queue lock 下で共有 accumulator へ handoff する。`display_perf_take_window()` は既存 LCD
-counter と同時にこの値と `palette_protocol_faults` を take-and-zero し、`[CORE1_BASE]` へ
-`lcd_empty_polls=E palette_protocol_faults=F` として出す。0 を要求せず、連続する計測窓で増加していれば worker が
-core0 を待てており、core1 過負荷の兆候ではないと判断する。
+queue lock 下で共有 accumulator へ handoff する。これは段階 1 の
+`display_perf_take_window()` が同じ lock 下で take-and-zero し、`[CORE1_BASE]` へ
+`lcd_empty_polls=E palette_protocol_faults=F` として出す。
 
-既存の core0 側 LCD 計測も同じ窓単位に直す。`display_perf_snapshot()` を
-`display_perf_take_window()` に置換し、引数と戻り値の並びは維持したまま、値を copy した後に
-`wait_us`、`flush_us`、`queue_wait_us`、`queue_wait_count`、frame pacing、`empty_polls`、
-`palette_protocol_faults` の
-全 accumulator を zero にする。`perf_log_if_due()` はこの API だけを呼ぶ。これにより
-`[CORE1_BASE]` の `lcd_queue_wait_us/count`、`lcd_empty_polls`、`palette_protocol_faults` は
-必ず直前の 1 秒窓の値となる。
-`display_perf_reset()` は ROM/reset 境界での初期化専用として残す。
+`core1_worker` は空 queue を引くと外側 loop を抜けて `sleep_us(50)` するため、
+`empty_polls` の絶対値は core1 の余裕量ではない。各 1 秒窓で十分大きい
+（idle 時は概ね 2 万回程度）なら worker が core0 を待てており、ほぼ 0 なら core1 側が
+継続して仕事を持つ状態として調査する。窓間の単純な増減は判定に使わない。
+
+`wait_us` と `flush_us` は fallback packer 専用の legacy counter で、worker 稼働中は 0 のまま
+である。`display_perf_take_window()` は窓の整合のためこれらも core0 lock なしで reset するが、
+worker の性能指標や LCD 帯域分析には使わない。`display_perf_reset()` は ROM/reset 境界での
+初期化専用として残す。
 
 #### 段階 2 の A/B 比較と打ち切り
 
@@ -963,6 +978,19 @@ queue depth を 8 にするのは、depth 6 でも queue wait の平均中央値
   queue depth を超える回数の palette 変更が起きる ROM があるか
 
 ## この文書の改訂
+
+### 第 5 版から第 6 版へ (`perf/bg-tile-share-log`)
+
+再レビューを反映した。
+
+- clear 表の関数名を `InfoNES_HSync()` へ訂正し、段階 2 で 256 byte clear とコメントを直すことを追加した
+- `display_perf_take_window()` を段階 1 で導入する唯一の handoff 経路にした。core1 由来の
+  `palette_applied` / `palette_protocol_faults` / `empty_polls` だけは queue lock 下で take-and-zero し、
+  core0 専用 counter は lock を取らない
+- `empty_polls` は 50 µs sleep 周期に左右されるため、窓間の増減でなく「十分大きい / ほぼ 0」で読む規約にした
+- invalid palette payload の構造体 copy で警告が出ても全 item memset を戻さないことを明記した
+- queue traffic の cycle 値を再導出できないため、理論値を tile/opaque の約 1.69 ms 小計と
+  traffic 削減分へ分けた
 
 ### 第 4 版から第 5 版へ (`perf/bg-tile-share-log`)
 
