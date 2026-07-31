@@ -10,6 +10,35 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.28 palette snapshot 段階1 合格 (2026-07-31)
+
+- 実装:
+  - palette RAM の dirty/version を core0 専用状態として管理し、変更後の最初の
+    LCD worker LINE item に `PalTable[32]` snapshot を同梱する protocol を追加した
+  - reset、NES view prepare、worker stop/drain 後の最初の line では version 0 snapshot を強制する
+  - core1 は LINE item だけを検査し、`FRAME_END` は palette protocol の対象外とした
+  - core1 由来の applied、protocol fault、empty poll は frame end で queue lock 下に handoff し、
+    `display_perf_take_window()` から同じ lock 下で take-and-zero する
+  - `NESCO_PALETTE_SNAPSHOT_LOG` と `[PALETTE_SNAPSHOT]` を追加し、version を `1.1.28` に更新した
+  - 実装 commit は `7ab3a19 Implement palette snapshot stage` である
+- build:
+  - 通常版、baseline 版、palette snapshot 計測版の ARM build に成功した
+  - 計測版 size は `text=283864 data=0 bss=99308`
+  - 計測版 UF2 SHA-256 は
+    `57c64169a82d98387ee3d61b1eb3eb39bf317c15c5e2346b3336a79d417a72a2`
+- 実機確認:
+  - log: `/home/fuyuki/pico_dvl/codex/log/pico20260731_203816.log`
+  - `LodeRunner.nes` の開始、reset、stretch 切替、normal 復帰、menu 経由の
+    `Project_DART_V1.0.nes` 開始を確認した
+  - 追加で Project DART の stretch / normal 往復も記録された
+  - `[PALETTE_SNAPSHOT]` は 202 窓あり、全窓で `protocol_faults=0` だった
+  - snapshot と applied の全窓合計はともに `1739`、`forced>=1` の窓は 7 個で、
+    上記の開始・reset・表示切替の各境界に存在した
+  - 実機プレイで気になる画面の乱れや不具合はなかった
+- 判定:
+  - 段階 1 の protocol fault、強制 snapshot、目視の合格条件をすべて満たした
+  - palette snapshot 段階 1 を採用し、段階 2 の index 描画実装へ進む
+
 ## 1.1.27 計測 build 段階0 (2026-07-31)
 
 - 実装:

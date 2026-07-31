@@ -786,10 +786,10 @@ fps 比では削減された実時間が分からない。
 
 ### 段階 1: palette snapshot 機構 (動作不変)
 
-実装状態 (2026-07-31): source 実装と通常版・計測版の ARM build は完了した。
-実機確認は未完了であり、下記の固定手順に合格するまで段階 2 へ進まない。
-実機投入用の計測 artifact は
-`build-palette-snapshot-arm/Picocalc_NESco.uf2` である。
+実装状態 (2026-07-31): **完了・実機合格**。
+`/home/fuyuki/pico_dvl/codex/log/pico20260731_203816.log` の 202 窓すべてで
+`protocol_faults=0`、snapshot/applied 合計 `1739/1739`、開始・reset・表示切替の
+各境界で forced snapshot を確認した。実機の表示回帰もなかったため段階 2 へ進む。
 
 - version は **`1.1.28`** に更新する
 - 前節「snapshot の実装契約（固定）」の API、状態、呼び出し箇所、handoff をそのまま実装する
