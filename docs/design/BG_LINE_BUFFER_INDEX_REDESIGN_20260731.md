@@ -1205,7 +1205,9 @@ queue depth を増やす前に sleep 幅または通知方式を独立に比較�
 同じ 100 us 量子化は新しい baseline の Xevious normal でも確認され、queue wait 比率中央値は
 8.9331%、1 wait は約 102.6 us だった。したがって normal でも上記の polling-first 規約を使う。
 段階 2 後は3 ROMすべてが平均・p95とも16,700 us以下になったため、normal向け段階 3 は実装しない。
-stretchの約27--30 ms/frameは別課題として残す。
+stretchの約27--30 ms/frameは別課題として残す。次工程は
+`docs/design/STRETCH_QUEUE_RETRY_OPTIMIZATION_PLAN_20260731.md`を正本とし、
+`1.1.30`計測baselineと`1.1.31`の10 us retry候補を同じ実機A/Bで判断する。
 
 ### 段階 4 以降 (任意、別課題)
 

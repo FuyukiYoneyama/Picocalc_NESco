@@ -275,7 +275,7 @@ stretch view は 224 x 1.25 = 280 line となり、320x280 になる。
 stretch view を 60fps に近づけられるのは COLMOD 12 bit のみで、
 縦 crop だけでは stretch は 137.6% にとどまり届かない。
 
-## 着手順の案
+## LCD帯域候補の順序
 
 | 順 | 候補 | 効果 | 主なリスク | 表示変化 |
 |---|---|---|---|---|
@@ -288,9 +288,15 @@ stretch view を 60fps に近づけられるのは COLMOD 12 bit のみで、
 1 と 2 を入れた場合、normal view は予算比 70% 前後、stretch view は 110% 前後になる。
 4 は表示内容が変わるため最後に置き、設定項目として実装する。
 
-ただし `1.1.29` の stretch 実測では、queue-full待ち1回が現行の
-`sleep_us(100)` とほぼ一致した。stretchの次の実験は上表のLCD形式変更より先に、
-polling幅短縮または通知方式を独立A/Bする。COLMODはその結果を見て判断する。
+ただし`1.1.29`のstretch実測では、queue-full retry 1回が現行の
+`sleep_us(100)`とほぼ一致した。上表はLCD帯域側へ着手した後の順序であり、実際の次工程は
+`docs/design/STRETCH_QUEUE_RETRY_OPTIMIZATION_PLAN_20260731.md`を正本とする。
+
+1. `1.1.30`でpacing sleepをbaseline logへ追加する
+2. `1.1.31`でframe hot pathのqueue retryだけを100 usから10 usへ変更してA/Bする
+3. 結果に応じてdepth、通知方式、COLMODのどれを計画するか決める
+
+計測baselineとcandidateを先に作り、実機確認はnormal/stretch、3 ROMを1回にまとめる。
 
 なお 1 を入れて予算比 70% まで下がれば、
 sysclk を 200 MHz へ落として規格超過を一段解消する選択肢が現実的になる。
@@ -375,7 +381,8 @@ normal/stretchの追加実プレイを含む窓を取得した。目視・プレ
 
 queue waitは十分大きいが、1 waitあたりが全ROMで約100 usであり、
 queue-full loopの`sleep_us(100)`量子化と一致する。queue depthを増やす前に、
-polling幅または通知方式の効果を独立して測る。
+10 us retry候補の効果を独立して測る。採否手順は
+`docs/design/STRETCH_QUEUE_RETRY_OPTIMIZATION_PLAN_20260731.md`を正本とする。
 
 ## 未確認事項
 

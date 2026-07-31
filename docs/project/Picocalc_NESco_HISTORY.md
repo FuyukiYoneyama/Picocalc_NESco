@@ -40,24 +40,26 @@
   - normal 3 ROMすべてが上限到達したためnormal向け段階3は実装しない
   - stretchのqueue waitは100 us polling改善を先に検討する別課題として残す
 - 合格後レビュー:
-  - 実測の削減量は理論小計 `1.69 ms/frame` を大きく上回った。
-    normal 固定 30 窓から `core0 実働 <= frame_us_avg - queue wait/frame` として下限を出すと次になる。
-    pacing sleep は現在ログに出していないため、いずれも下限であり実値はさらに大きい。
+  - LodeRunnerとProject_DARTの観測frame time短縮はそれぞれ`2.517 ms`、`3.592 ms`で、
+    理論小計`1.69 ms/frame`を上回った。Xeviousはpacing上限へ到達したためframe timeでは全効果を測れない
+  - normal固定30窓から`frame_us_avg - queue wait/frame`を計算すると次になる。
+    この値には未出力のpacing sleepとaudio waitなどが残るため、core0実働時間ではなく暫定参考値である。
 
-    | ROM | `1.1.28` core0 実働上限 | `1.1.29` core0 実働上限 | core0 削減 |
+    | ROM | `1.1.28` 暫定値 | `1.1.29` 暫定値 | pacing未控除の差 |
     |---|---:|---:|---:|
-    | LodeRunner | 19,114 us | 13,309 us | `>= 5,805 us` |
-    | Project_DART | 20,179 us | 13,988 us | `>= 6,190 us` |
-    | Xevious | 15,399 us | 10,908 us | `>= 4,491 us` |
+    | LodeRunner | 19,114 us | 13,309 us | 5,805 us |
+    | Project_DART | 20,179 us | 13,988 us | 6,190 us |
+    | Xevious | 15,399 us | 10,908 us | 4,491 us |
 
-  - `frame_us` の 3% 条件を落とした Xevious も、core0 実働では `4.49 ms/frame` 以上削れている。
-    条件 1 が測っていたのは実装の質ではなく pacer 上限までの残り距離だった
+  - `frame_us`の3%条件を落としたXeviousでも上表の暫定差は4.491 msあるが、
+    pacing sleep未控除なのでcore0削減量の確定値には使わない。
+    旧条件が実装の質ではなくpacer上限までの残り距離に制約されていたという結論は変わらない
   - 理論値との差は、`renderBgTileFull()` 内側だけを数えたモデルに、
     partial tile、sprite 合成の byte 化、queue traffic 半減、
     core0/core1 の SRAM 競合低下が含まれていなかったためと考えられる。個別の内訳は未計測
   - normal 3 ROM が pacing 上限へ張り付いたため、
     **normal view では `frame_us` による以降の改善も小さな劣化も検出できない**。
-    次の計測基準は `docs/project/TASKS.md` の frame pacing sleep 項目を正本とする
+    次の計測基準は`docs/design/STRETCH_QUEUE_RETRY_OPTIMIZATION_PLAN_20260731.md`を正本とする
 
 ## 1.1.28 段階2 A/B baseline (2026-07-31)
 

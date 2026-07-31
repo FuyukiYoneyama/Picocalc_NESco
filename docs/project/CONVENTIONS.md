@@ -134,14 +134,18 @@
     `p95_us` が `16,668` 付近なら上限到達とみなす。
 - 上限に達した ROM に「`frame_us` を N% 短縮」という条件を課さない。
   - どれだけ速くしても満たせないため、正しい実装を不採用にする。
-  - `1.1.29` では Xevious がこれに該当し、`frame_us` は `-1.85%` だったが
-    core0 実働は `4.49 ms/frame` 以上削れていた。
-- 上限到達 ROM では、`frame_pacing_sleep_us` の増加、または
-  `frame_us_avg - queue wait/frame - pacing sleep/frame` で求めた
-  core0 実働時間の減少で判定する。
+  - `1.1.29`ではXeviousがこれに該当し、`frame_us`は`-1.85%`に留まった。
+    pacing sleepを出していなかったため、同版のcore0実働改善量は確定できない
+- 上限到達 ROM では、`frame_pacing_sleep_us / frames` の増加を主判定にする。
+  - 現在の`frame_pacing_sleep_us`は`sleep_us()`へ渡した要求時間であり、実経過時間の計測値ではない
+  - `frame_us_avg - queue wait/frame - pacing sleep/frame`はaudio waitなどを含み得るため、
+    **非pacing・非LCD queue時間の診断用推定値**としてだけ扱う
+  - この推定値を純粋なcore0実働時間や、その改善量の確定値として記録しない
 - 無操作でタイトル画面を測る場合も、attract demo が始まると frame time が段状に動く。
-  - 固定窓数で切らず、連続窓が `±0.5%` 以内に収まる区間を採用区間とする。
-  - 採用区間の `max / min` が `1.5%` を超えたら、その ROM は取り直す。
+  - 各計画で最低連続窓数を先に固定し、その窓数を満たす最初の区間を機械的に選ぶ
+  - 区間内の`frame_us_avg`が区間中央値の`±0.5%`以内で、
+    `max(frame_us_avg) / min(frame_us_avg) <= 1.015`を採用条件とする
+  - 条件を満たす区間がなければ取り直し、後ろの都合のよいplateauを目視で選ばない
   - `1.1.28` の実測では LodeRunner が窓 29、Xevious が窓 43 付近で demo に入り、
     `4` 〜 `5%` の段差が出た。
 
