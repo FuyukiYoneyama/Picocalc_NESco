@@ -43,6 +43,38 @@
   - 未確認なのは PRG flash overlay の書き込み / 復元
 - `[pending]` Mapper87 / Choplifter 系の確認を、別の Mapper87 ROM 入手後に再開する
 
+## 計測基盤
+
+- `[next]` frame pacing sleep を `[CORE1_BASE]` へ出し、normal 上限到達後の計測基準を作る
+  - 背景:
+    - `1.1.29` で normal 3 ROM が 60 fps pacing 上限 (`frame_target_us = 16667`) へ到達した
+    - このため normal view では `frame_us` が pacer で決まり、
+      以降の core0 改善も小さな劣化も検出できない
+    - `display_perf_take_window()` は既に `frame_pacing_sleep_us` /
+      `frame_pacing_sleep_count` を返しているが、
+      `infones/InfoNES.cpp` の `perf_log_if_due()` が `(void)` で捨てている
+  - 作業:
+    - `[CORE1_BASE]` へ `frame_pacing_sleep_us` と `frame_pacing_sleep_count` を追加する
+    - 出力 field を増やすだけで、accumulator と窓の take-and-zero は変更しない
+    - 既存 field の並びは変えず末尾へ追加する
+    - version は `PATCH` を 1 つ上げる
+  - これで判定できること:
+    - core0 実働時間 = `frame_us_avg - queue wait/frame - pacing sleep/frame`
+    - 上限到達 ROM でも改善量と劣化量を数値で追える
+    - `1.1.29` で下限しか出せなかった core0 削減量を確定できる
+      (下限は `docs/project/Picocalc_NESco_HISTORY.md` の `1.1.29` 合格後レビューを正本とする)
+  - 実機検証は単独で依頼しない。次の高速化課題の A/B と同じ 1 回にまとめる
+- `[next]` 上限到達 ROM を含む場合の採用条件を、実装着手前に書き換える
+  - `1.1.29` の旧条件「各 ROM の `frame_us_avg` 中央値が `3%` 以上短い」は、
+    baseline が既に pacing 上限だった Xevious では原理的に満たせなかった
+  - 事後に明文化した「平均・p95 とも `16,700 us` 以下なら上限到達合格」は結論としては正しいが、
+    上限へぎりぎり届いた実装と余裕を持って届いた実装を区別できない
+  - 次の normal 側課題では、着手前に次の 2 段構えで書く
+    1. baseline が上限未到達の ROM: 従来どおり `frame_us_avg` 中央値の改善率で判定する
+    2. baseline が上限到達済みの ROM: `frame_us_avg` ではなく
+       `frame_pacing_sleep_us` の増加、または core0 実働時間の減少で判定する
+  - 判定 ROM が 1 本でも上限に達している場合は、着手前にどちらの条件を使うか明記する
+
 ## 保留中の改善候補
 
 - `[deferred]` audio ring size を `4096` から `2048` へ下げられるか再評価する

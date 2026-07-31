@@ -39,6 +39,25 @@
     平均・p95とも16,700 us以下を上限到達合格として明文化した
   - normal 3 ROMすべてが上限到達したためnormal向け段階3は実装しない
   - stretchのqueue waitは100 us polling改善を先に検討する別課題として残す
+- 合格後レビュー:
+  - 実測の削減量は理論小計 `1.69 ms/frame` を大きく上回った。
+    normal 固定 30 窓から `core0 実働 <= frame_us_avg - queue wait/frame` として下限を出すと次になる。
+    pacing sleep は現在ログに出していないため、いずれも下限であり実値はさらに大きい。
+
+    | ROM | `1.1.28` core0 実働上限 | `1.1.29` core0 実働上限 | core0 削減 |
+    |---|---:|---:|---:|
+    | LodeRunner | 19,114 us | 13,309 us | `>= 5,805 us` |
+    | Project_DART | 20,179 us | 13,988 us | `>= 6,190 us` |
+    | Xevious | 15,399 us | 10,908 us | `>= 4,491 us` |
+
+  - `frame_us` の 3% 条件を落とした Xevious も、core0 実働では `4.49 ms/frame` 以上削れている。
+    条件 1 が測っていたのは実装の質ではなく pacer 上限までの残り距離だった
+  - 理論値との差は、`renderBgTileFull()` 内側だけを数えたモデルに、
+    partial tile、sprite 合成の byte 化、queue traffic 半減、
+    core0/core1 の SRAM 競合低下が含まれていなかったためと考えられる。個別の内訳は未計測
+  - normal 3 ROM が pacing 上限へ張り付いたため、
+    **normal view では `frame_us` による以降の改善も小さな劣化も検出できない**。
+    次の計測基準は `docs/project/TASKS.md` の frame pacing sleep 項目を正本とする
 
 ## 1.1.28 段階2 A/B baseline (2026-07-31)
 
