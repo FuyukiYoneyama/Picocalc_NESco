@@ -245,25 +245,23 @@ type 4 + scanline 4 + viewport_x/y/w/h 16 + scale_mode 4 + pixels 512 = 540
 540 x 4 slot = 2,160 byte   (HISTORY の .bss 実測と一致)
 ```
 
-画素を byte 化すると 1 item は 284 byte になる。
+画素を byte 化すると画素部は 256 byte になる。
+snapshot 64 byte と `palette_version` / `palette_valid` の 4 byte を加えて、
+1 item は 352 byte になる。
 
 | 構成 | 計算 | 現在 2,160 byte との差 |
 |---|---|---|
-| depth 6 + palette ring 4 x 64 | 284 x 6 + 256 = 1,960 | **-200** |
-| depth 8 + palette ring 4 x 64 | 284 x 8 + 256 = 2,528 | **+368** |
-| depth 8 + snapshot を item 内に持つ | (284 + 64) x 8 = 2,784 | +624 |
+| depth 6 + snapshot を item 内に持つ | 352 x 6 = 2,112 | **-48** |
+| depth 8 + snapshot を item 内に持つ | 352 x 8 = 2,816 | **+656** |
+| (参考) depth 6 + 外部 ring 6 段 + core1 ローカル | 284 x 6 + 384 + 64 = 2,152 | -8 |
 
-採用する構成は **palette snapshot を queue item の外に出し、
-version 付きの独立 ring として持つ形**とする。理由は 3 つある。
+snapshot を item 内に持つ方式は、外部 ring 方式と RAM がほぼ同じである。
+depth 6 で比べて 40 byte の差しかない。
+**RAM 上の利点がないのに競合の危険を抱える理由がない**ため、item 内方式を採る。
 
-- snapshot 個数を queue depth から切り離せる。
-  palette 変更は frame あたり 0 回から数回なので、ring 4 本で足りる
-- depth を変えても snapshot の RAM が増えない
-- version 番号による受け渡しが自然になり、後述の初期化規則を書きやすい
-
-まず **depth 6 で始める**。この構成は現在より 200 byte 少なく、RAM 増がない。
+まず **depth 6 で始める**。この構成は現在より 48 byte 少なく、RAM 増がない。
 depth 8 へ上げるのは、計測 2 の `lcd_queue_wait_us` が
-frame 時間に対して無視できない場合に限る。そのとき `+368 byte` を許容する。
+frame 時間に対して無視できない場合に限る。そのとき `+656 byte` を許容する。
 
 `.bss` には余裕がある (`1.0.15` 時点で静的領域末尾から heap limit まで 122,328 byte)
 ため `+368 byte` 自体は問題にならないが、
@@ -302,17 +300,59 @@ status bar の色替えなど、frame 途中の palette 書き換えは珍しく
 palette snapshot は同じ理由で同じことを palette に対して行うだけであり、
 このコードベースで確立済みの手法である。
 
+### 外部 ring 方式は現在の pop 実装では安全でない
+
+初版では snapshot を queue item の外の version 付き ring に置く方式を採った。
+これは現在の worker 実装と組み合わせると競合する。
+
+`platform/display.c` の `display_lcd_worker_pop_item()`:
+
+```c
+display_lcd_worker_lock();
+if (s_lcd_worker_queue_count > 0) {
+    *item = s_lcd_worker_queue[s_lcd_worker_queue_head];
+    s_lcd_worker_queue_head = (s_lcd_worker_queue_head + 1u) % DISPLAY_LCD_WORKER_QUEUE_DEPTH;
+    s_lcd_worker_queue_count--;
+    popped = true;
+}
+display_lcd_worker_unlock();
+```
+
+item を core1 ローカルへ copy した直後に count を減らして unlock し、
+packing は lock の外で行う。したがって次が起こりうる。
+
+```text
+1. core1 が version V の item を pop する
+2. count が減り、core0 は新しい line を enqueue できるようになる
+3. core0 が最大 depth 本の line を積む
+4. その過程で version V+depth の snapshot が ring slot V を上書きする
+5. core1 は上書き後の ring を読んで version V の line を packing する
+```
+
+**pop 済みで packing 中の 1 item が、ring の生存数計算から抜けている。**
+ring 段数を queue depth と同数にしても防げない。
+
+### 採用する方式: snapshot を queue item 内に置く
+
+上記を踏まえ、snapshot は **queue item 内**に持つ。
+
+`pop_item()` は item 全体を lock 保持下で core1 ローカルへ copy するため、
+snapshot も一緒に copy される。**この方式は構造上安全であり、
+ring の寿命解析そのものが不要になる。** 危険を管理するのではなく消す。
+
+RAM も外部 ring と同等である (後述)。
+
 ### snapshot の受け渡し規則
 
-dirty flag だけでは足りない。次を規則として定める。
-
-1. **snapshot は version 付きの独立 ring に置く。** queue item は version 番号だけを持つ
-2. **`PalTable` 書き込みで dirty flag を立てる。** 書き込み箇所は
+1. **`PalTable` 書き込みで dirty flag を立てる。** 書き込み箇所は
    `infones/K6502_rw.h` の 2 か所だけである
-3. **dirty のとき、`PostDrawLine()` で ring の次の枠へ copy し、version を進める。**
-   copy を完了させてから queue item を publish する。
-   publish 後に copy すると core1 が中途の palette を読む
-4. **dirty でない scanline は、直近の version 番号をそのまま持つ**
+2. **dirty のときだけ、`PostDrawLine()` で queue item へ `PalTable` 64 byte を copy し、
+   item の `palette_valid` を立てて version を進める。**
+   copy を完了させてから `push_item()` する
+3. **dirty でない scanline は snapshot を持たず、version 番号だけを持つ。**
+   core0 側で毎 line 64 byte を copy すると frame あたり 15 KB になるため、これは避ける
+4. **core1 は直近に受け取った palette を core1 ローカルに保持する。**
+   item が snapshot を持つときだけ更新する
 5. **初回 snapshot を強制する。** 以下の時点で dirty flag を立て、
    最初の scanline が必ず snapshot を伴うようにする
    - reset 後
@@ -320,9 +360,10 @@ dirty flag だけでは足りない。次を規則として定める。
    - queue 再初期化 (`drain`) 後
    - 表示モード切替後
    - ROM menu からの復帰後
-6. **上記の時点で version をリセットする**
-7. **core1 は queue item の version で ring を引く。**
-   version が未初期化を指す場合は、その scanline を描画しない
+6. **上記の時点で version をリセットし、core1 ローカルの palette を無効化する**
+7. **core1 は version の連続性を検証する。**
+   ローカル palette が無効なまま snapshot なしの item を受けた場合は、
+   その scanline を描画しない
 
 規則 5 が最も重要である。これがないと、
 palette 書き込みが起きなかった起動直後の scanline で、
@@ -331,21 +372,18 @@ core1 が未初期化の、あるいは前の ROM の palette を使う。
 `PalTable` を 0 埋めするため、この穴は「黒画面」ではなく
 「前 ROM の色が残る」形で出る可能性がある。
 
-通常 frame で palette 書き換えは 0 回から数回程度なので、copy 費用は無視できる。
+### 外部 ring を採る場合の必須条件
 
-### ring 段数
+将来 RAM の都合で外部 ring へ移す場合は、次を満たさなければならない。
 
-palette 変更は稀だが、queue に滞留している scanline の数だけ
-異なる version が同時に生きうる。したがって ring 段数は queue depth 以上あれば安全である。
-depth 6 に対して ring 4 本で足りるかは、
-1 frame 内で 4 回を超える palette 変更が連続 scanline で起きないことに依存する。
+- **queue lock を保持したまま**、item 取得と同時に
+  ring slot から core1 専用バッファへ palette を copy し、そのあとで count を減らす
+- ring slot には snapshot 本体と**完全な version 番号**を持たせ、
+  `slot.version == item.palette_version` を検証する。
+  未初期化だけでなく上書き済み version も検出対象とする
+- version が一致する限り copy は省略してよい
 
-安全側に倒し、**ring 段数は queue depth と同数**とする。
-depth 6 なら 6 x 64 = 384 byte、depth 8 なら 512 byte である。
-上の RAM 表は ring 4 本で計算しているため、この分を足すと
-depth 6 で `284 x 6 + 384 = 2,088` (現在比 -72)、
-depth 8 で `284 x 8 + 512 = 2,784` (現在比 +624) になる。
-depth 6 が RAM 増なしである結論は変わらない。
+この条件を満たさない外部 ring 方式は採用しない。
 
 ### queue depth を増やすことの副作用
 
@@ -414,18 +452,19 @@ tile の書き込み先は水平 scroll 量だけずれるため 4 byte 境界�
 - 効果見積もりが background tile の占有率に依存しており、その値が `1.1.26` で不明である
 - 実装後に効果を測るための基準値が必要である
 
-### 必要な build は 2 つである
+### 計測は既存 build では取れない。計測用のコード変更が先に要る
 
-`[CORE1_SUMMARY]` の `cpu_us` `ppu_us` `apu_us` `other_us` という 4 分類では、
+`[FPS_SUMMARY]` の `cpu_us` `ppu_us` `apu_us` `other_us` という 4 分類では、
 PPU 処理のうち background tile が何割かは分からない。この 4 分類から推定してはならない。
 
-必要な値は既にカウンタとして存在する。`infones/InfoNES.cpp`:
+必要な値の一部はカウンタとして存在する。`infones/InfoNES.cpp`:
 
 ```c
-uint64_t g_perf_draw_us = 0;
-uint64_t g_perf_ppu_bg_us = 0;
-uint64_t g_perf_ppu_bg_tile_us = 0;
-uint64_t g_perf_ppu_sprite_us = 0;
+uint64_t g_perf_ppu_bg_us = 0;        /* line 1839 で加算 */
+uint64_t g_perf_ppu_bg_tile_us = 0;   /* line 1800 で加算 */
+uint64_t g_perf_ppu_sprite_us = 0;    /* line 2219 で加算 */
+uint64_t g_perf_frame_us_total = 0;   /* line 309 で加算 */
+uint64_t g_perf_frame_us_max = 0;     /* line 312 で更新 */
 ```
 
 `g_perf_ppu_bg_tile_us` は `bg_tile_start_us` (line 1724) から
@@ -434,32 +473,87 @@ uint64_t g_perf_ppu_sprite_us = 0;
 `1.1.5` / `1.1.6` で重すぎるとされた tile ごと計測とは別物である。
 tile ごと計測は `1.1.8` で既に除去されている。
 
-判断に使う値を次と定義する。
+しかし、現状のままでは計測できない。次の 3 つが足りない。
 
-```text
-background tile 占有率 = g_perf_ppu_bg_tile_us / g_perf_draw_us
+1. **`g_perf_draw_us` は宣言されているだけで、加算も参照もされていない。**
+   `infones/InfoNES.cpp:246` の定義以外に出現しない。
+   したがって `g_perf_ppu_bg_tile_us / g_perf_draw_us` は分母が常に 0 になる。
+   この式は使えない
+2. **出力処理が存在しない。**
+   `perf_log_if_due()` が出すのは `[FPS_SUMMARY]` と、
+   条件付きの `[SPR_ACTIVE]` だけである。
+   `g_perf_ppu_bg_tile_us` を出す行はない
+3. **中央値と 95 percentile を算出する材料がない。**
+   frame time について保持しているのは合計、最大、本数だけであり、
+   sample 列も histogram もない
+
+また出力の gate は 2 段になっている。
+
+```c
+constexpr bool kPerfLogToSerial =
+#if defined(NESCO_CORE1_BASELINE_LOG)
+    true;
+#else
+    false;
+#endif
+constexpr bool kDetailedPerfLogToSerial = false;
 ```
 
-これらは `kDetailedPerfLogToSerial` (`infones/InfoNES.cpp:217`、現在 `false`) で
-有効になる。有効時の `time_us_64()` は scanline あたり約 22 回、
-frame あたり約 5,280 回で、**約 0.4 ms から 0.5 ms / frame の計測負荷**が乗る。
+`perf_log_if_due()` は先頭で `if (!kPerfLogToSerial) return;` する。
+`kDetailedPerfLogToSerial` はカウンタの加算を有効にするだけで、出力は有効にしない。
+**計測 build では両方が必要である。**
 
-したがって、この build の fps を基準値に使ってはならない。**build を 2 つ用意する。**
+### 計測用 build に加える変更
+
+計測は専用の compile option で行う。
+`kDetailedPerfLogToSerial=true` は scanline あたり約 22 回の `time_us_64()` を有効にし、
+frame あたり約 0.4 ms から 0.5 ms の負荷が乗る。
+必要なのは background tile 区間だけなので、既存の 22 回すべてを有効にする必要はない。
+
+`NESCO_BG_TILE_SHARE_LOG` option を追加し、有効時に次を行う。
+
+- `NESCO_CORE1_BASELINE_LOG` を含意する (出力 gate のため)
+- `g_perf_ppu_bg_tile_us` の加算だけを有効にする (scanline あたり `time_us_64()` 2 回)
+- frame time の sample を保持する
+
+```c
+uint32_t g_perf_frame_us_samples[64];   /* 1 秒 = 最大約 60 frame */
+uint32_t g_perf_frame_us_sample_count;
+```
+
+- 計測窓の終了時に sort し、中央値と 95 percentile を出す
+- 次の 2 行を 1 秒ごとに出力する
+
+```text
+[BG_SHARE]    frames=N bg_tile_us=... bg_us=... sprite_us=...
+              bg_tile_us_per_frame=... bg_tile_pct_x100=...
+[FRAME_STATS] avg_us=... median_us=... p95_us=... max_us=...
+```
+
+**出力 frame が最大値を汚染しないようにする。**
+シリアル出力は数百 µs 単位で frame を伸ばすため、次のどちらかを行う。
+
+- 出力を行った直後の 1 frame を次の統計から除外する
+- 統計を RAM に貯め、計測終了時にまとめて出力する
+
+これを決めずに「最大値が悪化したら不採用」とすると、
+log 出力による単発の遅延で判定が変わる。
+
+### 必要な build は 2 つである
 
 | build | 設定 | 取る値 |
 |---|---|---|
-| build 1 | `kDetailedPerfLogToSerial=false`、`NESCO_CORE1_BASELINE_LOG=ON` | 計測 A、計測 1、計測 2 |
-| build 2 | `kDetailedPerfLogToSerial=true` | 計測 3 の **比率のみ** |
+| build 1 | `NESCO_CORE1_BASELINE_LOG=ON` のみ | 計測 A、計測 1、計測 2 |
+| build 2 | `NESCO_BG_TILE_SHARE_LOG=ON` | 計測 3 |
 
-build 2 からは比率だけを取り、fps と frame time は使わない。
 実機作業は 1 回の session で両方を流せる。
 
 ### 順序
 
 計測 3 を最初に置く。これが不発なら以降は不要になるためである。
 
-1. **計測 3: `1.1.26` の draw 内訳** (build 2)
-   - `g_perf_ppu_bg_tile_us / g_perf_draw_us` を 1 秒ごとに出力する
+1. **計測 3: `1.1.26` の background tile 実時間** (build 2)
+   - 主判定に使うのは **1 frame あたりの `bg_tile_us` 絶対値**である
    - 併せて `g_perf_ppu_bg_us` `g_perf_ppu_sprite_us` も出し、
      background 以外が支配的だった場合に次の対象を選べるようにする
    - 対象: `LodeRunner.nes` `Xevious.nes` `Project_DART_V1.0.nes`
@@ -473,6 +567,20 @@ build 2 からは比率だけを取り、fps と frame time は使わない。
    - queue depth 4 が core0 をどれだけ止めているかを知る
    - LCD 帯域分析の計測 2 と同一
    - 本案の queue depth 化の効果見積もりにも使う
+
+### 判定に比率ではなく絶対値を使う理由
+
+比率を使うと分母の選び方で結論が動く。
+
+`kDetailedPerfLogToSerial` を全面的に有効にした場合、
+計測負荷は draw 全体には乗るが `g_perf_ppu_bg_tile_us` の区間内には乗らない。
+したがって比率は分母だけが膨らみ、**background の占有率が実態より低く出る**。
+40% / 60% のような境界付近では判断が変わりうる。
+
+専用 option で `bg_tile` 区間だけを測り、
+1 frame あたりの絶対 µs で判定すれば、この偏りを受けない。
+
+比率は参考値として `g_perf_frame_us_total` を分母に併記するが、判定には使わない。
 
 ### 比較は fps ではなく frame time で行う
 
@@ -490,17 +598,33 @@ fps 比では削減された実時間が分からない。
 
 平均だけでは、引っかかりの改善または悪化が見えない。
 本案は core0 の平均負荷を下げる一方で snapshot copy という
-散発的な処理を増やすため、最大値と 95 percentile の確認が要る。
+散発的な処理を増やすため、95 percentile の確認が要る。
+
+**最大値は診断値として記録するだけで、単独の不採用理由にはしない。**
+最大値は UART log、SD access、入力処理、単発の割り込み、
+計測開始直後の状態にも強く影響される。
+
+- 主判定は平均と 95 percentile とする
+- 最大値は記録し、悪化が複数の計測窓で再現した場合にだけ不採用理由に加える
+- 各 ROM について同じ場面を複数の計測窓で取り、中央値どうしを比較する
 
 ### 判断基準
 
 計測 3 の結果で分岐する。
 
-| background tile の draw 占有率 | 判断 |
-|---|---|
-| 60% 以上 | 本案を実装する |
-| 40% 以上 60% 未満 | 実装するが、段階 2 の実測で打ち切り判断を行う |
-| 40% 未満 | 本案は見送る。draw の内訳で最大の項目を対象に検討し直す |
+理論値のうち tile 内側 loop の削減分は約 1.6 ms / frame である。
+これが `bg_tile_us` に対して占める比率が現実的な範囲に収まるかで判断する。
+
+| 1 frame あたりの `bg_tile_us` | 理論削減 1.6 ms の位置づけ | 判断 |
+|---|---|---|
+| 8 ms 以上 | 20% 以下。妥当な範囲 | 本案を実装する |
+| 4 ms 以上 8 ms 未満 | 20% から 40%。やや強気 | 実装するが、段階 2 の実測で打ち切り判断を行う |
+| 4 ms 未満 | 40% 超。理論モデルが成立していない | 本案は見送る |
+
+`bg_tile_us` が 4 ms 未満の場合、削減の見込みが小さいだけでなく、
+`renderBgTileFull()` の外 (fetch、loop 制御) が
+区間の大半を占めていることを意味する。その場合は
+`g_perf_ppu_bg_us` と `g_perf_ppu_sprite_us` を見て対象を選び直す。
 
 計測 B が大きい場合 (frame 時間に対して無視できない場合) は、
 本案とは独立に queue depth を増やす価値があるため、
@@ -514,15 +638,39 @@ fps 比では削減された実時間が分からない。
 各段階で `platform/version.h` の `PICOCALC_NESCO_VERSION` を更新する。
 実機未確認の段階を `main` へ push しない。
 
+### 段階 0: 計測用コードの追加 (計測フェーズの前提)
+
+- `NESCO_BG_TILE_SHARE_LOG` option を追加する
+- `g_perf_ppu_bg_tile_us` の加算と `[BG_SHARE]` 出力を追加する
+- frame time の sample 保持、中央値、95 percentile、`[FRAME_STATS]` 出力を追加する
+- 出力 frame が最大値を汚染しない措置を入れる
+- 未使用の `g_perf_draw_us` は、加算を入れるか削除するかを決める
+
+この段階は計測専用であり、通常 build の動作を変えない。
+
 ### 段階 1: palette snapshot 機構 (動作不変)
 
 - `infones/K6502_rw.h` の `PalTable` 書き込み 2 か所に dirty flag を追加する
-- queue item に `PalTable` snapshot 領域と有効フラグを追加する
-- `InfoNES_PostDrawLine()` で dirty のときだけ snapshot を copy し、flag を落とす
-- core1 側は snapshot を受け取るが、まだ使わない
+- `display_lcd_worker_item_t` に次を追加する
+  - `WORD palette[32]` (64 byte)
+  - `uint16_t palette_version`
+  - `uint8_t palette_valid`
+- `InfoNES_PostDrawLine()` で dirty のときだけ item へ `PalTable` を copy し、
+  `palette_valid` を立てて version を進める。copy は `push_item()` より前に完了させる
+- reset / ROM 切替 / drain / 表示モード切替 / ROM menu 復帰で
+  dirty flag を立て、version をリセットする
+- core1 は pop した item に snapshot があれば core1 ローカルへ取り込む。
+  この段階ではローカル palette を描画に使わない
 
 この段階では色は従来どおり core0 が焼くため、表示は変わらない。
-snapshot が意図した頻度でしか発生しないことを log で確認する。
+
+確認項目:
+
+- snapshot の発生頻度が想定 (frame あたり 0 回から数回) の範囲か
+- reset / ROM 切替の各契機で初回 snapshot が必ず発生しているか
+- version が飛んだり戻ったりしないか
+
+段階 1 だけで snapshot の寿命管理と並行動作を検証できる。
 
 ### 段階 2: index 描画への切り替え (効果測定ポイント)
 
@@ -531,8 +679,48 @@ snapshot が意図した頻度でしか発生しないことを log で確認す
   buffer 自身からの導出へ変更する
 - sprite 合成を index 書き込みへ変更する
 - 画面 off / clip 時の clear を byte 幅へ変更する
-- core1 の packing に `PalTable` snapshot による index から色への変換を追加する
 - `WorkLine` の型と `InfoNES_SetLineBuffer()` の契約を `BYTE*` へ変更する
+- **queue item を `BYTE pixels[256]` へ変更する。depth は 4 のまま据え置く**
+- core1 の packing に、ローカル palette による index から色への変換を追加する
+- **worker を使わない fallback packing も index 入力へ変更する** (後述)
+
+queue item の byte 化を段階 3 ではなく段階 2 に入れるのは、
+段階 2 の測定に queue copy 半減が含まれるかどうかを曖昧にしないためである。
+これにより段階 2 は「描画の削減 + queue copy 半減」、
+段階 3 は「純粋に queue depth の効果」に分かれ、
+理論値 (tile 内側 1.6 ms + clear 0.15 ms + queue copy 0.25 ms = 約 2.0 ms) と
+段階 2 の実測を直接比較できる。
+
+### fallback 経路も index 化が必要である
+
+`InfoNES_PostDrawLine()` には worker を使わない経路がある。
+
+```c
+void InfoNES_PostDrawLine(int scanline, bool frommenu) {
+    const WORD *src = s_line_buffer;
+    BYTE *strip = lcd_dma_acquire_buffer();
+
+    if (!frommenu && display_lcd_worker_submit_line(scanline, src)) {
+        return;
+    }
+    /* 以降は core0 が直接 pack する */
+```
+
+`display_lcd_worker_submit_line()` は worker が `RUNNING` でないとき、
+または表示 mode が NES view でないときに `false` を返すため、この経路は生きている。
+`frommenu` でも通る。
+
+現在の fallback packer (`display_pack_line_normal()` /
+`display_pack_line_stretch_320()`) は `const WORD *src` を前提にしている。
+index 化後はこの経路も index 入力へ変更しなければならない。
+
+**fallback では palette version を持ち回す必要はない。**
+`InfoNES_PostDrawLine()` は `InfoNES_DrawLine()` の直後に
+同じ core0 上で呼ばれ、その間に CPU emulation は進まない。
+したがって `PalTable` はその scanline を描画した時点のものであり、
+現在値をそのまま使えばよい。
+
+確認項目に「`frommenu` 経路が実際に NES index line を通るか」を含める。
 
 ここで計測 A と同条件・同 build 設定で frame time を取り、削減量を確認する。
 
@@ -575,15 +763,17 @@ core0 側の buffer 形式とは独立である。
 ただし段階 4 で COLMOD を 12 bit/pixel へ変更する場合は、
 読み戻し側の形式も合わせる必要がある。
 
-### 段階 3: queue item の byte 化と depth 化 (効果測定ポイント)
+### 段階 3: queue depth の変更 (効果測定ポイント)
 
-- queue item を `BYTE pixels[256]` へ変更する
 - `DISPLAY_LCD_WORKER_QUEUE_DEPTH` を 4 から **6** へ変更する
-  - この構成は現在より `.bss` が 72 byte 少ない
+  - この構成は現在より `.bss` が 48 byte 少ない
   - depth 8 へ上げるのは、計測 B の `lcd_queue_wait_us` が
-    frame 時間に対して無視できない場合に限る。そのとき `+624 byte` を許容する
-- palette ring 段数を queue depth と同数にする
+    frame 時間に対して無視できない場合に限る。そのとき `+656 byte` を許容する
 - `.bss` の増減を実測し、上記の計算と一致することを確認する
+
+段階 2 で queue item は既に byte 化されているため、
+この段階の変更は depth のみである。したがって測定結果は
+queue を深くしたことの効果だけを表す。
 
 ここで `lcd_queue_wait_us` を計測 B と同条件で取り直し、減少を確認する。
 併せて段階 2 で追加した core1 側の計測も取り、
@@ -613,7 +803,42 @@ queue を深くしたことで core1 が枯れていないことを確認する�
 
 ## この文書の改訂
 
-初版 (`554a630`) から次を修正した。外部レビューの指摘による。
+### 第 2 版 (`f02db9e`) から第 3 版へ
+
+外部レビュー第 2 回の指摘による。
+
+- **外部 palette ring 方式に競合があったため、snapshot を queue item 内へ戻した。**
+  `display_lcd_worker_pop_item()` は item を copy 後 count を減らして unlock し、
+  packing は lock の外で行う。pop 済みで packing 中の 1 item が
+  ring の生存数計算から抜けており、ring 段数を queue depth と同数にしても防げない。
+  item 内方式は pop が item 全体を lock 下で copy するため構造上安全で、
+  RAM も depth 6 で 40 byte しか違わない。
+  外部 ring を採る場合の必須条件も併記した
+- **`g_perf_draw_us` は宣言のみで加算も参照もされていないことが分かった。**
+  第 2 版で判定式に採用した `g_perf_ppu_bg_tile_us / g_perf_draw_us` は
+  分母が常に 0 になる。判定を 1 frame あたりの `bg_tile_us` 絶対値へ変更した。
+  これは比率の分母が計測負荷で膨らむ偏りも同時に回避する
+- **計測用のコード追加を段階 0 として明記した。**
+  出力 gate は `NESCO_CORE1_BASELINE_LOG` が必要で、
+  `kDetailedPerfLogToSerial` だけでは出力されない。
+  `g_perf_ppu_bg_tile_us` の出力処理は存在せず、
+  中央値と 95 percentile の材料 (sample 列) も存在しない。
+  専用 option `NESCO_BG_TILE_SHARE_LOG` を追加し、
+  出力 frame が最大値を汚染しない措置も入れる
+- **段階 1 の記述を、本文で決めた方式と一致させた**
+- **queue item の byte 化を段階 3 から段階 2 へ移した。**
+  段階 2 の測定に queue copy 半減が含まれるかを曖昧にしないため。
+  段階 3 は depth 変更のみになった
+- **fallback packing 経路の index 化を段階 2 に追加した。**
+  `InfoNES_PostDrawLine()` の worker 非使用経路は `const WORD *src` 前提である。
+  なお この経路は `InfoNES_DrawLine()` の直後に同じ core0 で走るため、
+  palette version を持ち回る必要はなく現在の `PalTable` を使えばよい
+- **最大値を単独の不採用理由から外した。** 主判定は平均と 95 percentile とし、
+  最大値は複数の計測窓で再現した場合にだけ理由に加える
+
+### 初版 (`554a630`) から第 2 版へ
+
+外部レビュー第 1 回の指摘による。
 
 - 計測 3 の方法を `[CORE1_SUMMARY]` の 4 分類から
   `g_perf_ppu_bg_tile_us / g_perf_draw_us` へ変更した。
