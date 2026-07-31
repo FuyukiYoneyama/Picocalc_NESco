@@ -3,7 +3,7 @@
 `Picocalc_NESco` は、PicoCalc 向けに調整している NES エミュレーター firmware です。
 現在の実装は `infones` ベースで、PicoCalc の LCD、I2C keyboard、PWM audio、SD / flash ROM 選択 menu に接続しています。
 
-現在の埋め込み version は `1.1.29` です。
+現在の埋め込み version は `1.2.0` です。
 このプロジェクトは PicoCalc 専用 firmware を対象にしています。
 PicoCalc 向け以外の build は未検証なので、現在は明示的に無効化しています。
 `infones` 側にある他環境向け build は、このプロジェクトの対象外です。
@@ -38,6 +38,9 @@ PicoCalc 向け以外の build は未検証なので、現在は明示的に無�
 - `Map6` `Map19` `Map185` `Map188` `Map235` は dynamic 化済みです。ただし対象 mapper ROM での実機確認は未完です
 - runtime log は default では banner 1 行目以外 disable です
 - sprite 描画は scanline ごとの active list を使い、描画対象外の OAM entry の固定走査を削減しています
+- game 描画ラインは palette index で保持し、LCD worker で RGB565 へ変換します。
+  RGB565 line を直接 queue していた `1.1.26` と比べて line traffic を約 `42%` 削減し、
+  実機計測では normal 表示の代表 3 ROM が約 `60fps` の pacing 上限へ到達しました
 - PicoCalc debug console の UART は `921600 bps` で初期化します
 
 ## すぐ使うには
@@ -102,6 +105,26 @@ make clean
 make -j4
 ```
 
+公開用の通常 build は計測 option をすべて明示的に無効にし、専用 directory に生成します。
+
+```bash
+cmake -S . -B build-release \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DPICO_SDK_PATH=/path/to/pico-sdk \
+      -DNESCO_RUNTIME_LOGS=OFF \
+      -DNESCO_INPUT_IO_LOGS=OFF \
+      -DNESCO_BOKOSUKA_STATE_LOGS=OFF \
+      -DNESCO_CORE1_BASELINE_LOG=OFF \
+      -DNESCO_BG_TILE_SHARE_LOG=OFF \
+      -DNESCO_PALETTE_SNAPSHOT_LOG=OFF \
+      -DNESCO_SPRITE_ACTIVE_LIST_METRICS=OFF \
+      -DNESCO_SPRITE_ACTIVE_LIST=ON
+cmake --build build-release --clean-first -j4
+```
+
+この通常 build は起動時の version / build ID banner 1 行だけを出し、
+`[CORE1_BASE]`、`[FRAME_STATS]`、`[BG_SHARE]`、`[PALETTE_SNAPSHOT]` は出力しません。
+
 計測用 build は通常 build と分けて生成します。baseline 版は `[CORE1_BASE]` と
 `[FRAME_STATS]` を出力し、BG share 版はそれに加えて `[BG_SHARE]` を出力します。
 
@@ -159,6 +182,8 @@ GitHub Actions では、push / pull request / manual run 時に clean configure 
 
 ## 既知の制約
 
+- Mapper7 / AxROM は nametable / background 崩れを確認しており、未解決です
+- Mapper9 / MMC2 は CHR / background 崩れを確認しており、未解決です
 - `Mapper30` の `*.m30` 保存 / 復元は実装済みですが、実ゲームでの書き込み / 復元確認は未完です
 - `Map6` `Map19` `Map185` `Map188` `Map235` は dynamic 化済みですが、対象 mapper ROM での実機確認は未完です
 - `core/` ディレクトリは repo に残っていますが、現在の active target source には入っていません
@@ -187,5 +212,7 @@ GitHub Actions では、push / pull request / manual run 時に clean configure 
 - 計画書索引: `docs/project/PLANS.md`
 - agent 向け入口: `AGENTS.md`
 - 履歴: `docs/project/Picocalc_NESco_HISTORY.md`
+- `1.2.0` release gate: `docs/release/RELEASE_GATE_1_2_0.md`
+- `1.2.0` release notes: `docs/release/RELEASE_NOTES_1_2_0.md`
 - `infones` 接続設計: `docs/design/INFONES_PLATFORM_CONNECTION_PLAN_20260419.md`
 - mapper 動的化設計: `docs/design/MAPPER_DYNAMIC_ALLOCATION_PLAN_20260419.md`

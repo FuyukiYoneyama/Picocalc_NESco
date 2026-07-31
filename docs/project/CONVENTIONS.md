@@ -72,13 +72,21 @@
   2. `git pull`
   3. `git switch -c <branch-name>`
 - 作業 branch 上で実装、build、必要な文書更新を行う。
-- 実機確認用 UF2 は試作品名にする。
-  - 例: `Picocalc_NESco-test.uf2`
-  - 実機確認前に release 名の UF2 として扱わない。
+- ローカルの実機確認用、release candidate、SD cardへ置くUF2のbasenameは常に
+  `Picocalc_NESco.uf2`とする。
+  - version、用途、実験名をUF2 filenameへ付けない。
+  - SD card上では同じ`Picocalc_NESco.uf2`を上書きし、複数名のUF2を増やさない。
+  - buildの区別はbuild directory、ELF bannerのversion / build ID、SHA-256で行う。
+- GitHub Releaseのasset管理はローカル／SD card管理と分ける。
+  - GitHub Releaseへ添付する公開assetは既存releaseと同じ
+    `Picocalc_NESco-<version>.uf2`形式にする。
+  - version付きassetはGitHub公開用にだけ作り、SD cardへ置く検証用fileとして使わない。
 - 現在進行中の実機確認用 UF2 は `build/` に置いてよい。
 - release 作業や特別な実機試験で使い終わった UF2 は、
   project root 直下へ散らばらせず `local_uf2_archive/` に集約する。
   - `local_uf2_archive/` は管理外の退避場所であり、公開 artifact ではない。
+  - 複数版を保存する場合はversionごとのsubdirectoryへ分け、basenameは
+    `Picocalc_NESco.uf2`のまま維持する。
 - 実機確認が必要な変更では、確認完了前に `main` へ merge / push しない。
 - 実機確認で問題があれば、同じ作業 branch 上で修正し、build と確認を繰り返す。
 - 実機確認と CI が通った後に、必要なら version、README、HISTORY、TASKS を最終更新する。

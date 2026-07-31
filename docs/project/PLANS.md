@@ -27,8 +27,14 @@
    - 電源 ON 時 1 回 init による音声 pop 抑制設計。
 10. `docs/design/GITHUB_ACTIONS_BUILD_CI_PLAN_20260426.md`
    - GitHub Actions による最小 build CI 導入設計。
-
 ## 完了済み計画 / 結果
+
+- `1.2.0` release
+  - gate: `docs/release/RELEASE_GATE_1_2_0.md`
+  - notes: `docs/release/RELEASE_NOTES_1_2_0.md`
+  - build check: `docs/release/RELEASE_BUILD_CHECK_1_2_0_RC.md`
+  - 計測logなしの通常buildを公開artifactとして承認し、GitHub Release assetだけ
+    `Picocalc_NESco-1.2.0.uf2`のversion付き名称にする
 
 - Stretch LCD worker queue depth optimization
   - 計画: `docs/design/STRETCH_QUEUE_DEPTH_OPTIMIZATION_PLAN_20260731.md`

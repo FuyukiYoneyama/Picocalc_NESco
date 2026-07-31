@@ -55,4 +55,5 @@
   - 224-line cropは表示内容が変わるため、必要なら設定項目として別計画にする
   - ST7365PのCOLMODはcontrol interfaceで16/18/24 bitだけを定義し、`0x63`の12 bitは未対応。
     実装候補へ戻さない
+  - 同一stretch stripの再送省略とframe境界のDMA重なりは未計測の別候補とし、`1.2.0`には含めない
   - LCD側の分析は`docs/design/LCD_BUS_BANDWIDTH_ANALYSIS_20260731.md`を正本とする

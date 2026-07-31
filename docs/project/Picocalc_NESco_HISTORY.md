@@ -10,6 +10,47 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## `1.2.0` release (2026-08-01)
+
+- release方針:
+  - GitHub最新release `1.1.26`以後に採用したBG palette index pipelineを、公開上の新しい節目として
+    `1.2.0`へまとめる
+  - `1.1.27`--`1.1.32`は計測、段階実装、不採用実験、診断に使用したため、診断version
+    `1.1.32`をそのまま公開番号にはしない
+  - normal表示の代表3 ROMが約60fpsのpacing上限へ到達したことを主なrelease価値とし、
+    stretchを60fps化したとは記載しない
+- 文書:
+  - `platform/version.h`とREADMEを`1.2.0`へ統一した
+  - `docs/release/RELEASE_NOTES_1_2_0.md`と`RELEASE_GATE_1_2_0.md`を追加した
+  - Mapper7 / Mapper9の既知不具合、不採用retry、未実装depth 8、stretchのLCD帯域制約を明記した
+- release candidate build:
+  - `CMAKE_BUILD_TYPE=Release`
+  - runtime / input / state / core1 baseline / BG share / palette snapshot / sprite metricsをすべてOFF
+  - 採用済み`NESCO_SPRITE_ACTIVE_LIST=ON`
+  - clean configure / `--clean-first` buildに成功した
+  - banner: `PicoCalc NESco Ver. 1.2.0 Build Aug  1 2026 08:33:30`
+  - size: `text=278844 data=0 bss=97548`
+  - ELF file size: `2,272,760 byte`
+  - UF2 file size: `553,472 byte`
+  - ELF SHA-256:
+    `41a5639a6b7b9fafe202f087bbc396c7c573090f1e0f729c7a4eaad71c3bdf6a`
+  - UF2 SHA-256:
+    `9413821218af6cadb65102f4dbeac6f06bc1d5dadab225b3fc0ca7786b40b582`
+  - 実機smoke用artifact: `build-release/Picocalc_NESco.uf2`
+- 静的確認:
+  - ELFに`[CORE1_BASE]`、`[FRAME_STATS]`、`[BG_SHARE]`、`[PALETTE_SNAPSHOT]`、
+    `[SPR_ACTIVE]`の文字列が存在しない
+  - tracked fileにROM / save / 圧縮ROM候補の混入なし
+  - README正式画像は既存4 entryだけで、候補画像の混入なし
+  - `git diff --check`合格
+- 状態:
+  - release candidate buildと文書準備は完了
+  - ユーザーが確認済みUF2をrelease artifactとして承認し、pushとGitHub Release作成を指示した
+  - ローカル／SD cardでは`Picocalc_NESco.uf2`を上書きし、GitHub Release assetだけ
+    `Picocalc_NESco-1.2.0.uf2`とする
+  - tagは`v1.2.0`、GitHub Release名は`Picocalc_NESco v1.2.0`とする
+  - 公開URLは`https://github.com/FuyukiYoneyama/Picocalc_NESco/releases/tag/v1.2.0`
+
 ## `1.1.32` stretch queue depth Phase 0診断 — depth 8不実施 (2026-08-01)
 
 - 実装:
