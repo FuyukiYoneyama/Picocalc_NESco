@@ -45,7 +45,7 @@
 
 ## 次に実装する高速化
 
-- `[next]` stretch LCD queue retryの100 us量子化をA/Bする
+- `[in-progress]` stretch LCD queue retryの100 us量子化をA/Bする
   - 詳細計画の正本は
     `docs/design/STRETCH_QUEUE_RETRY_OPTIMIZATION_PLAN_20260731.md` とする
   - Phase 0 (`1.1.30`): 既存の`frame_pacing_sleep_us/count`と、新設する
@@ -55,6 +55,11 @@
       - 削除する未使用pacing globalは現行ELFで既に除去されているため、`.bss`差はepisodeの`+4`だけ
   - Phase 1 (`1.1.31`): frame hot pathのqueue-full retry 2箇所だけを
     `sleep_us(100)`から`10 us`定数へ変更する
+  - 実装・buildは完了し、実機A/B待ち
+    - Phase 0 commit: `1f1c093`
+    - Phase 1 commit: `8ba265f`
+    - baseline: `build-stretch-retry-baseline/Picocalc_NESco.uf2`
+    - candidate: `build-stretch-retry-10us/Picocalc_NESco.uf2`
   - Phase 0単独の実機確認は行わず、2つのUF2を先に作ってnormal/stretch、3 ROMの
     A/Bと機能確認を1回へまとめる
     - 各ROM/modeを最低30窓取り、`max(frame_us_avg) / min(frame_us_avg) <= 1.015`を満たす

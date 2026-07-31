@@ -22,6 +22,32 @@
 2つのUF2を先に作り、normal/stretch、3 ROMのA/Bと機能確認を1回の実機作業へまとめる。
 queue depth、通知方式、COLMODはこのA/B結果が出るまで実装せず、versionも予約しない。
 
+## 実装状況（2026-07-31）
+
+Phase 0とPhase 1の実装・buildは完了し、実機A/B待ちである。
+
+- Phase 0 commit: `1f1c093` (`Add stretch queue retry baseline metrics`)
+- Phase 1 commit: `8ba265f` (`Shorten LCD queue retry interval`)
+- 両PhaseともARM EABI5の通常buildと計測buildが成功
+- 通常buildは両Phaseとも`text=278844 data=0 bss=97548`
+- 計測buildは両Phaseとも`text=283776 data=0 bss=97892`
+- queue item 352 byte、queue depth 4を維持
+
+| build | version / build ID | ELF SHA-256 | UF2 SHA-256 |
+|---|---|---|---|
+| Phase 0 normal検証 | `1.1.30` / `Jul 31 2026 22:56:03` | `403a8cb58eac8caa445c9dd83825a3bfb909c0dbec4348ed57b4b490e27c2b8b` | `9770de51e82e9acc07e02bd801ad36735def0b8b8dc85114316ff12096a29428` |
+| Phase 0計測baseline | `1.1.30` / `Jul 31 2026 22:56:39` | `21ec7aa8aebfbea2792237306bf1ac3fa3c611c6112c562a72eed9ad56abeae0` | `f4588e39fa0ceb403e1d55f7c3c94765b6ebc2b8322227d2c804959096c04046` |
+| Phase 1 normal検証 | `1.1.31` / `Jul 31 2026 22:58:36` | `f22b05d263638d487d7b88de429587d33c2f728d134d16b928e8e57e348e96f5` | `181968f5cecfe093815feb9636f560ba9ad31d7d8ae9c2d33fe866d63d701507` |
+| Phase 1計測candidate | `1.1.31` / `Jul 31 2026 22:59:16` | `d3781bbb8f36e6c30048daa5a5a6bd5f814f5e251cb69c50c95972737b4c274b` | `767a914c32add132edaa2a7c2b42fe9fa390a5a128eb0e4375fc5ec3b70ac2bc` |
+
+実機へ渡す計測artifactは次の2つである。
+
+- baseline: `build-stretch-retry-baseline/Picocalc_NESco.uf2`
+- candidate: `build-stretch-retry-10us/Picocalc_NESco.uf2`
+
+逆アセンブルでは、baselineのqueue hot path 2箇所が即値100、candidateの同じ2箇所だけが
+即値10になっている。drainは両方で100、core1の空queue待機は両方で50を維持している。
+
 ## 目的
 
 - stretchのframe timeがLCDバス下限より2.6--5.7 ms遅い原因に、
