@@ -169,16 +169,50 @@ palette index 0 の扱いも一致する。
 | queue への copy | 512 byte / scanline | 256 byte / scanline |
 | 非表示 line の clear | 512 byte | 256 byte |
 
-tile あたりのメモリ操作は概算で 28 回から 10 回になる。
+### 削減量は「幅を狭めること」からは出ない
 
-Cortex-M0+ の `LDR` / `STR` は 2 cycle である。
-32 tile x 240 line = 7,680 tile/frame として、
-メモリ操作だけで約 0.28 M cycle、250 MHz で **約 1.1 ms/frame** の削減になる。
-shift / mask 側の削減も同程度あるため、内側 loop はおおむね半減する見込みである。
+Cortex-M0+ では `LDRB` `LDRH` `STRB` `STRH` がいずれも 2 cycle である。
+したがって画素 store を halfword から byte へ狭めても、**store 自体の cycle は減らない**。
 
-frame 全体への効果は background tile が draw に占める割合に比例する。
-その割合が `1.1.26` で不明であるため、ここでは frame 全体の削減量を見積もらない。
-計測 D の結果を得てから見積もる。
+削減は幅ではなく、操作を消すことから出る。tile あたりで消えるのは次である。
+
+| 消える操作 | 回数 / tile | cycle |
+|---|---|---|
+| `pal[]` からの load | 8 | 16 |
+| `dst_opaque` への store | 8 | 16 |
+| opaque LUT からの load | 2 | 4 |
+| opaque の shift / mask | 8 組 | 約 16 |
+
+合計で約 52 cycle / tile である。
+
+### 理論値
+
+上記から、除去される命令とメモリ操作を cycle 換算すると次になる。
+
+| 項目 | 概算 |
+|---|---|
+| tile 内側 loop | 32 tile x 240 line x 52 cycle = 約 0.40 M cycle = 1.60 ms |
+| `BackgroundOpaqueLine` の clear 廃止 | 約 0.04 M cycle = 0.15 ms |
+| queue copy の半減 | 約 0.06 M cycle = 0.25 ms |
+| 合計 | **約 2.0 ms / frame** |
+
+**この値は理論値であり、実効値の予測ではない。** 実効値は段階 2 で測定する。
+
+理論値と実効値がずれる要因は次のとおりである。
+
+- `g_perf_ppu_bg_tile_us` が測る区間には、attribute / name table / CHR の fetch、
+  `g_bg_tile_pair_idx4` の load、pointer 更新、loop 制御が含まれる。
+  本案が削るのは `renderBgTileFull()` の中だけなので、
+  `bg_tile` 時間が同じ比率で減るわけではない
+- 型変更後の命令列は compiler 次第である
+- core0 と core1 の SRAM bank 競合は cycle 単純計算に乗らない
+- palette snapshot の判定と copy が新たに加わる
+- core0 から消えた palette lookup は core1 へ移るため、frame 全体では相殺され得る
+  (後述の core1 側計測が必要な理由)
+- frame time は background 以外の処理にも律速される
+
+frame 全体への効果は background tile が draw に占める割合にも比例するが、
+その割合は `1.1.26` で不明である。計測 3 の結果を得てから見積もる。
 
 ## 副次効果
 
@@ -194,14 +228,46 @@ LUT 出力を RGB565 にするか RGB444 にするかの違いだけになる。
 同分析で挙げた「stretch が core1 律速へ移る可能性」も、
 core0 から core1 へ渡るデータ量が半分になるぶん緩む。
 
-### queue depth を RAM 増なしで倍にできる
+### queue depth を増やせる (RAM 増なしとは限らない)
 
 queue item が `WORD pixels[256]` から `BYTE pixels[256]` になるため、
-同じ RAM で `DISPLAY_LCD_WORKER_QUEUE_DEPTH` を 4 から 8 へ増やせる。
-
+同じ RAM でより深い queue を取れる。
 これは core0 が `PostDrawLine()` で queue full を待つ時間を直接減らす。
 LCD 帯域分析で「normal view で期待できるのは二次効果のみ」と結論した、
 その二次効果を大きくする側の変更でもある。
+
+ただし palette snapshot を載せるため、**depth 8 は RAM 増なしでは成立しない**。
+
+`display_lcd_worker_item_t` の現在の実サイズは 540 byte である。
+
+```text
+type 4 + scanline 4 + viewport_x/y/w/h 16 + scale_mode 4 + pixels 512 = 540
+540 x 4 slot = 2,160 byte   (HISTORY の .bss 実測と一致)
+```
+
+画素を byte 化すると 1 item は 284 byte になる。
+
+| 構成 | 計算 | 現在 2,160 byte との差 |
+|---|---|---|
+| depth 6 + palette ring 4 x 64 | 284 x 6 + 256 = 1,960 | **-200** |
+| depth 8 + palette ring 4 x 64 | 284 x 8 + 256 = 2,528 | **+368** |
+| depth 8 + snapshot を item 内に持つ | (284 + 64) x 8 = 2,784 | +624 |
+
+採用する構成は **palette snapshot を queue item の外に出し、
+version 付きの独立 ring として持つ形**とする。理由は 3 つある。
+
+- snapshot 個数を queue depth から切り離せる。
+  palette 変更は frame あたり 0 回から数回なので、ring 4 本で足りる
+- depth を変えても snapshot の RAM が増えない
+- version 番号による受け渡しが自然になり、後述の初期化規則を書きやすい
+
+まず **depth 6 で始める**。この構成は現在より 200 byte 少なく、RAM 増がない。
+depth 8 へ上げるのは、計測 2 の `lcd_queue_wait_us` が
+frame 時間に対して無視できない場合に限る。そのとき `+368 byte` を許容する。
+
+`.bss` には余裕がある (`1.0.15` 時点で静的領域末尾から heap limit まで 122,328 byte)
+ため `+368 byte` 自体は問題にならないが、
+「RAM 増なし」と書くのは誤りなので、増分を明示して判断する。
 
 ### copy 自体を消せる可能性
 
@@ -223,15 +289,63 @@ status bar の色替えなど、frame 途中の palette 書き換えは珍しく
 
 対策は `PalTable` の snapshot である。
 
-- `PalTable` への書き込みは `infones/K6502_rw.h` の 2 か所だけなので、そこで dirty flag を立てる
-- dirty のときだけ、queue item へ `PalTable` 32 entry を copy する
-- core1 は queue item に snapshot があればそれを、なければ直近の snapshot を使う
+なお queue item は既に viewport と scale mode を per-line で snapshot している。
+
+```c
+/*
+ * Viewport and scale are snapshotted with each queued line.
+ * This prevents core1 from reading globals that may change when the user
+ * toggles stretch mode, opens the ROM menu, or starts screenshot capture.
+ */
+```
+
+palette snapshot は同じ理由で同じことを palette に対して行うだけであり、
+このコードベースで確立済みの手法である。
+
+### snapshot の受け渡し規則
+
+dirty flag だけでは足りない。次を規則として定める。
+
+1. **snapshot は version 付きの独立 ring に置く。** queue item は version 番号だけを持つ
+2. **`PalTable` 書き込みで dirty flag を立てる。** 書き込み箇所は
+   `infones/K6502_rw.h` の 2 か所だけである
+3. **dirty のとき、`PostDrawLine()` で ring の次の枠へ copy し、version を進める。**
+   copy を完了させてから queue item を publish する。
+   publish 後に copy すると core1 が中途の palette を読む
+4. **dirty でない scanline は、直近の version 番号をそのまま持つ**
+5. **初回 snapshot を強制する。** 以下の時点で dirty flag を立て、
+   最初の scanline が必ず snapshot を伴うようにする
+   - reset 後
+   - ROM 切り替え後
+   - queue 再初期化 (`drain`) 後
+   - 表示モード切替後
+   - ROM menu からの復帰後
+6. **上記の時点で version をリセットする**
+7. **core1 は queue item の version で ring を引く。**
+   version が未初期化を指す場合は、その scanline を描画しない
+
+規則 5 が最も重要である。これがないと、
+palette 書き込みが起きなかった起動直後の scanline で、
+core1 が未初期化の、あるいは前の ROM の palette を使う。
+`InfoNES()` の初期化は `InfoNES_MemorySet(PalTable, 0, sizeof PalTable)` で
+`PalTable` を 0 埋めするため、この穴は「黒画面」ではなく
+「前 ROM の色が残る」形で出る可能性がある。
 
 通常 frame で palette 書き換えは 0 回から数回程度なので、copy 費用は無視できる。
-必要な RAM は snapshot 1 個 64 byte x queue slot 数である。
 
-なお snapshot を `WORD` のまま持つ場合 64 byte、
-RGB444 化と同時に行う場合も 64 byte で変わらない。
+### ring 段数
+
+palette 変更は稀だが、queue に滞留している scanline の数だけ
+異なる version が同時に生きうる。したがって ring 段数は queue depth 以上あれば安全である。
+depth 6 に対して ring 4 本で足りるかは、
+1 frame 内で 4 回を超える palette 変更が連続 scanline で起きないことに依存する。
+
+安全側に倒し、**ring 段数は queue depth と同数**とする。
+depth 6 なら 6 x 64 = 384 byte、depth 8 なら 512 byte である。
+上の RAM 表は ring 4 本で計算しているため、この分を足すと
+depth 6 で `284 x 6 + 384 = 2,088` (現在比 -72)、
+depth 8 で `284 x 8 + 512 = 2,784` (現在比 +624) になる。
+depth 6 が RAM 増なしである結論は変わらない。
 
 ### queue depth を増やすことの副作用
 
@@ -240,6 +354,47 @@ queue が深くなると、core0 が core1 より先行できる scanline 数が
 
 mid-frame の mapper CHR 切り替えは scanline buffer の内容に影響しないため、
 snapshot の対象外である。
+
+## 代替案との比較
+
+scanline buffer へ何を入れるかには 2 案ある。
+
+- **案 A**: palette RAM index (0..31) を入れる。本文書の提案
+- **案 B**: その時点で palette から引いた NES master color (0..63) を入れる
+
+案 B は snapshot が不要になる。描画時点で色が確定するため、
+frame 途中の palette 変更が遡らない。core1 は固定 64 色の LUT を引くだけでよい。
+実装は明らかに単純で安全である。
+
+しかし案 B は、本案が狙っている削減のほとんどを取り逃す。
+
+| 削減対象 | 案 A | 案 B |
+|---|---|---|
+| `pal[]` からの load 8 / tile | 消える | **残る** (`LDRH` が `LDRB` になるだけ) |
+| `dst_opaque` への store 8 / tile | 消える | **残る** |
+| opaque LUT からの load 2 / tile | 消える | **残る** |
+| `BackgroundOpaqueLine` の clear | 消える | **残る** |
+| queue copy の半減 | あり | あり |
+
+案 B で `BackgroundOpaqueLine` を消せない理由は、
+opaque 判定が「tile pattern の 2 bit index が 0 でないこと」だからである。
+master color を書いてしまうと、
+backdrop として書かれた色と、たまたま同じ色の不透明画素とを区別できない。
+案 A は下位 2 bit がそのまま pattern index なので `(v & 3) != 0` で判定できる。
+
+Cortex-M0+ では `LDRB` と `LDRH` がどちらも 2 cycle なので、
+load の幅が狭くなること自体には価値がない。
+
+結果として案 B の削減は queue copy の半減、
+すなわち理論値で **約 0.25 ms / frame** にとどまる。
+案 A の約 2.0 ms に対して 1 桁小さい。
+
+したがって **案 A を採用し、snapshot の複雑さを引き受ける**。
+この比較は、snapshot 機構がなぜ払う価値のあるコストなのかの根拠でもある。
+
+段階 2 の打ち切り基準に触れた場合、案 B へ退避するのではなく、
+本案そのものを不採用として記録する。
+案 B 単独では改善幅が段階 3 の queue 化と重複しており、独立した価値が小さい。
 
 ## 発展案 (本案とは分けて扱う)
 
@@ -259,37 +414,87 @@ tile の書き込み先は水平 scroll 量だけずれるため 4 byte 境界�
 - 効果見積もりが background tile の占有率に依存しており、その値が `1.1.26` で不明である
 - 実装後に効果を測るための基準値が必要である
 
-LCD 帯域側の計測 (`docs/project/TASKS.md` の計測 1 / 計測 2) と同じ session で取る。
-build を分けると比較できなくなる。
+### 必要な build は 2 つである
+
+`[CORE1_SUMMARY]` の `cpu_us` `ppu_us` `apu_us` `other_us` という 4 分類では、
+PPU 処理のうち background tile が何割かは分からない。この 4 分類から推定してはならない。
+
+必要な値は既にカウンタとして存在する。`infones/InfoNES.cpp`:
+
+```c
+uint64_t g_perf_draw_us = 0;
+uint64_t g_perf_ppu_bg_us = 0;
+uint64_t g_perf_ppu_bg_tile_us = 0;
+uint64_t g_perf_ppu_sprite_us = 0;
+```
+
+`g_perf_ppu_bg_tile_us` は `bg_tile_start_us` (line 1724) から
+加算点 (line 1800) までで、**この区間に `time_us_64()` は 1 つも入っていない**。
+すなわち tile ごとではなく scanline ごとの計測であり、
+`1.1.5` / `1.1.6` で重すぎるとされた tile ごと計測とは別物である。
+tile ごと計測は `1.1.8` で既に除去されている。
+
+判断に使う値を次と定義する。
+
+```text
+background tile 占有率 = g_perf_ppu_bg_tile_us / g_perf_draw_us
+```
+
+これらは `kDetailedPerfLogToSerial` (`infones/InfoNES.cpp:217`、現在 `false`) で
+有効になる。有効時の `time_us_64()` は scanline あたり約 22 回、
+frame あたり約 5,280 回で、**約 0.4 ms から 0.5 ms / frame の計測負荷**が乗る。
+
+したがって、この build の fps を基準値に使ってはならない。**build を 2 つ用意する。**
+
+| build | 設定 | 取る値 |
+|---|---|---|
+| build 1 | `kDetailedPerfLogToSerial=false`、`NESCO_CORE1_BASELINE_LOG=ON` | 計測 A、計測 1、計測 2 |
+| build 2 | `kDetailedPerfLogToSerial=true` | 計測 3 の **比率のみ** |
+
+build 2 からは比率だけを取り、fps と frame time は使わない。
+実機作業は 1 回の session で両方を流せる。
 
 ### 順序
 
-計測 D を最初に置く。これが不発なら以降は不要になるためである。
+計測 3 を最初に置く。これが不発なら以降は不要になるためである。
 
-1. **計測 D: `1.1.26` の draw 内訳**
-   - 目的: background tile が draw 時間に占める割合を現在値で確定する
-   - 方法: `NESCO_CORE1_BASELINE_LOG=ON` の `[CORE1_SUMMARY]` で
-     `cpu_us` `ppu_us` `apu_us` `other_us` の比率を取る
-   - `1.1.5` 相当の tile ごと `time_us_64()` は計測負荷が高すぎるため使わない
-     (`1.1.8` でその理由により軽量版へ移行した経緯がある)
+1. **計測 3: `1.1.26` の draw 内訳** (build 2)
+   - `g_perf_ppu_bg_tile_us / g_perf_draw_us` を 1 秒ごとに出力する
+   - 併せて `g_perf_ppu_bg_us` `g_perf_ppu_sprite_us` も出し、
+     background 以外が支配的だった場合に次の対象を選べるようにする
    - 対象: `LodeRunner.nes` `Xevious.nes` `Project_DART_V1.0.nes`
 
-2. **計測 A: 基準 fps**
-   - 目的: 実装後の比較基準を作る
-   - 計測 D と同じ build、同じ session、同じ場面で取る
+2. **計測 A: 基準 frame time** (build 1)
+   - 実装後の比較基準を作る
    - normal 3 ROM に加えて `Xevious.nes` の stretch も取る
      (これは LCD 帯域分析の計測 1 を兼ねる)
 
-3. **計測 B: `lcd_queue_wait_us` / `lcd_queue_wait_count`**
-   - 目的: queue depth 4 が core0 をどれだけ止めているかを知る
+3. **計測 B: `lcd_queue_wait_us` / `lcd_queue_wait_count`** (build 1)
+   - queue depth 4 が core0 をどれだけ止めているかを知る
    - LCD 帯域分析の計測 2 と同一
-   - 本案の queue depth 8 化の効果見積もりにも使う
+   - 本案の queue depth 化の効果見積もりにも使う
 
-同一 build で 3 件とも取れるため、実機作業は 1 回で済む。
+### 比較は fps ではなく frame time で行う
+
+fps 比では削減された実時間が分からない。
+`47.99 fps` の 3% と `55.50 fps` の 3% では削減 µs が異なる。
+最適化の効果は 1 frame あたり何 µs 減ったかで判断する。
+
+計測 A では次を記録する。実装後も同じ項目で比較する。
+
+- `frame_us` 平均
+- `frame_us` 中央値
+- `frame_us` 95 percentile
+- `frame_us` 最大
+- `lcd_queue_wait_us` / `lcd_queue_wait_count`
+
+平均だけでは、引っかかりの改善または悪化が見えない。
+本案は core0 の平均負荷を下げる一方で snapshot copy という
+散発的な処理を増やすため、最大値と 95 percentile の確認が要る。
 
 ### 判断基準
 
-計測 D の結果で分岐する。
+計測 3 の結果で分岐する。
 
 | background tile の draw 占有率 | 判断 |
 |---|---|
@@ -329,10 +534,31 @@ snapshot が意図した頻度でしか発生しないことを log で確認す
 - core1 の packing に `PalTable` snapshot による index から色への変換を追加する
 - `WorkLine` の型と `InfoNES_SetLineBuffer()` の契約を `BYTE*` へ変更する
 
-ここで計測 A と同条件の fps を取り、削減量を確認する。
+ここで計測 A と同条件・同 build 設定で frame time を取り、削減量を確認する。
 
-打ち切り基準: 3 ROM すべてで fps 改善が 3% 未満なら、本案を不採用として記録し、
+**core1 側の負荷も同時に測る。** 本案は core0 の palette lookup を core1 へ移すため、
+core0 を軽くした代わりに core1 が次の律速になりうる。
+normal view は LCD 転送の余裕が小さく (`Xevious.nes` で 2.29 ms)、
+core0 の queue full 待ちだけでは
+**core1 が間に合わず queue が枯れる側の問題を検出できない**。
+
+段階 2 で追加する計測項目:
+
+- core1 の 1 line packing 時間 (平均)
+- core1 の 1 line packing 時間 (最大)
+- queue occupancy の最小値
+- core1 が LCD DMA 完了を待った時間
+
+250 MHz で 1 画素あたり load を 1 回増やす程度なので間に合う公算は高いが、
+机上で断定せず測る。
+
+打ち切り基準: 3 ROM すべてで `frame_us` 平均の改善が 3% 未満なら、
+本案を不採用として記録し、
 `docs/project/Picocalc_NESco_HISTORY.md` へ経緯を残して段階 1 ごと revert する。
+
+`frame_us` 95 percentile または最大が悪化した場合は、
+平均が改善していても採用しない。snapshot copy が原因なら
+ring 段数または copy 契機を見直す。
 
 確認項目:
 
@@ -349,13 +575,19 @@ core0 側の buffer 形式とは独立である。
 ただし段階 4 で COLMOD を 12 bit/pixel へ変更する場合は、
 読み戻し側の形式も合わせる必要がある。
 
-### 段階 3: queue item の byte 化と depth 8 化 (効果測定ポイント)
+### 段階 3: queue item の byte 化と depth 化 (効果測定ポイント)
 
 - queue item を `BYTE pixels[256]` へ変更する
-- `DISPLAY_LCD_WORKER_QUEUE_DEPTH` を 4 から 8 へ変更する
-- `.bss` の増減を確認する
+- `DISPLAY_LCD_WORKER_QUEUE_DEPTH` を 4 から **6** へ変更する
+  - この構成は現在より `.bss` が 72 byte 少ない
+  - depth 8 へ上げるのは、計測 B の `lcd_queue_wait_us` が
+    frame 時間に対して無視できない場合に限る。そのとき `+624 byte` を許容する
+- palette ring 段数を queue depth と同数にする
+- `.bss` の増減を実測し、上記の計算と一致することを確認する
 
 ここで `lcd_queue_wait_us` を計測 B と同条件で取り直し、減少を確認する。
+併せて段階 2 で追加した core1 側の計測も取り、
+queue を深くしたことで core1 が枯れていないことを確認する。
 
 ### 段階 4 以降 (任意、別課題)
 
@@ -369,6 +601,32 @@ core0 側の buffer 形式とは独立である。
 ## 未確認事項
 
 - `1.1.26` における background tile の draw 占有率
+- `g_perf_ppu_bg_tile_us` の区間のうち `renderBgTileFull()` が占める割合
+  (本案が削るのはこの内側だけなので、占有率がそのまま削減率にはならない)
 - 段階 2 の後、sprite 合成が core0 に残る形で問題がないか
   (index 化により sprite 合成も byte 操作になるため軽くなる見込みだが未計測)
+- core1 の 1 line packing 時間が、index から色への変換を足しても
+  strip DMA の時間内に収まるか
 - palette snapshot の発生頻度が実 ROM でどの程度か
+- 1 frame 内で連続する scanline に対して、
+  queue depth を超える回数の palette 変更が起きる ROM があるか
+
+## この文書の改訂
+
+初版 (`554a630`) から次を修正した。外部レビューの指摘による。
+
+- 計測 3 の方法を `[CORE1_SUMMARY]` の 4 分類から
+  `g_perf_ppu_bg_tile_us / g_perf_draw_us` へ変更した。
+  4 分類では background tile の割合は分からない。
+  併せて、計測負荷のため build を 2 つに分ける必要があることを明記した
+- 「RAM 増なしで depth 8」は誤りだったので訂正した。
+  snapshot 込みでは depth 6 が RAM 中立、depth 8 は増加になる
+- 約 1.1 ms / frame という削減量を理論値として位置づけ直し、
+  内訳と、実効値がずれる要因を明記した。
+  併せて Cortex-M0+ では store 幅を狭めても cycle が減らないことを反映し、
+  理論値を約 2.0 ms へ見直した
+- palette snapshot の受け渡し規則を追加した。
+  特に reset / ROM 切替時の初回 snapshot 強制が初版では抜けていた
+- 段階 2 に core1 側の計測を追加した
+- 比較の基準を fps 比から `frame_us` (平均、中央値、95 percentile、最大) へ変更した
+- 代替案 (NES master color 方式) との比較を追加した
