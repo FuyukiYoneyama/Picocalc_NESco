@@ -141,8 +141,8 @@
     - log: `/home/fuyuki/pico_dvl/codex/log/pico20260731_203816.log`
     - 202 窓すべてで protocol fault 0、snapshot/applied 合計一致、全遷移で forced snapshot、
       実機の表示回帰なしを確認した。詳細は HISTORY の `1.1.28 palette snapshot 段階1 合格` を参照する
-    - 次は段階 2 の index 描画 + queue item byte 化を独立 commit で実装する
-  - 段階 2 の実装前仕様確認 (2026-07-31): **完了**
+    - 段階 2 の実装・ARM build は完了し、次は実機 A/B を行う
+  - 段階 2 の状態 (2026-07-31): **実装・ARM build 完了、実機 A/B 待ち**
     - `WorkLine` / queue pixels を `BYTE[256]`、item を 352 byte、depth を 4 に固定した
     - background は palette base と 2 bit index、sprite は `0x10..0x1f`、clear は `0x20` を書く
     - `BackgroundOpaqueLine` と `g_bg_tile_pair_opaque4`、旧 RGB565 sprite 合成を同時に削除する
@@ -161,6 +161,12 @@
       - 3 ROM とも遷移窓を除く30窓が normal、入力0、fault 0、ログ対欠落なし
       - `frame_us_avg / p95_us` 中央値は LodeRunner `19114.0 / 26817.5`、
         Project_DART `20183.0 / 25584.0`、Xevious `16909.5 / 17346.0`
+    - `1.1.29` の通常版と計測版は clean ARM build 完了
+      - 通常版: `text=278820 data=0 bss=97544`、設計期待値と一致
+      - 計測版: `text=283616 data=0 bss=97888`
+      - 計測 artifact: `build-bg-index/Picocalc_NESco.uf2`
+      - 計測版 SHA-256: `2508444d39375e766f9d7410089f9efc4d9415074d0e674885764e7db5d5f6ad`
+      - queue `0x580`、line buffer `0x100`、core1 LUT `0x200`、black LUT read-only `0x200` を確認
   - 段階 1 の固定契約:
     - `display_lcd_worker_palette_mark_dirty()` と
       `display_lcd_worker_palette_force_snapshot()` を core0 API とする

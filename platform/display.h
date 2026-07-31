@@ -10,7 +10,7 @@
  * panel.
  *
  * InfoNES integration:
- *   - InfoNES_PreDrawLine() gives the PPU a 256-pixel RGB565 line buffer.
+ *   - InfoNES_PreDrawLine() gives the PPU a 256-pixel palette-index line buffer.
  *   - InfoNES_PostDrawLine() is called after the PPU has filled that line.
  *   - Lines are batched into 8-source-line strips before being sent to LCD.
  *   - In normal view, 8 NES lines become 8 LCD lines at 256 pixels wide.
