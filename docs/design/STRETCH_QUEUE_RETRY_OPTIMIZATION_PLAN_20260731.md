@@ -98,6 +98,18 @@ stretchは8 source lineごとに1 stripをflushするため、1 frameは`240 / 8
 `lcd_queue_wait_episodes`、retry/episode、`lcd_empty_polls`から、閉塞回数モデルとlock競合の
 どちらが外れたかを調べる。retry回数へ90 usを掛けて効果を見積もってはならない。
 
+実効retry量子を`q us`とすると、同じモデルでの回収量は次になる。
+
+```text
+回収量 ≒ 30 episodes/frame * (100 - q) / 2
+回収量 >= 500 us/frame となる条件: q <= 66.7 us
+```
+
+従って`10 us`要求の実効値がalarm登録などのoverheadで40--60 usになっても、
+600--900 us/frameの回収が見込め、実験は成立する。`lcd_queue_wait_us / lcd_queue_wait_count`
+へ30 usの上限を課すと、frame timeを500 us以上改善した候補を誤って不採用にし得る。
+この値は定数変更と実効量子を確認する診断値に留め、採否はframe timeと非退行条件で決める。
+
 ### frame pacing counter
 
 `display_perf_take_window()`は既に`frame_pacing_sleep_us`と
@@ -173,14 +185,22 @@ LINE itemと`FRAME_END` itemのqueue-full loopにある2個の`sleep_us(100)`だ
 別計画にする。
 
 使用中のpico-sdkでは`PICO_TIME_DEFAULT_ALARM_POOL_DISABLED=0`、
-`PICO_TIME_SLEEP_OVERHEAD_ADJUST_US=6`がdefaultである。`sleep_us(10)`はalarmで目標の6 us前まで
-待った後、最後の6 usを`busy_wait_until()`で待つ。関数・alarm設定の所要時間によっては
-10 usの大半がbusy waitになる。従って10 us候補は0 us pollingより上限があるものの、
-完全な低消費電力sleepではない。retry数とqueue lock取得試行は約10倍へ増え得る。
+`PICO_TIME_SLEEP_OVERHEAD_ADJUST_US=6`がdefaultである。実際の呼び出し経路は
+`sleep_us()`の`#if !PICO_TIME_DEFAULT_ALARM_POOL_DISABLED`側から`sleep_until()`へ進む。
+alarm pool無効時の`#else`側はこのprojectの経路ではない。
 
-実装時に、使用するSDKの`src/common/pico_time/time.c`と生成configで上記分岐を再確認する。
-実機では`lcd_queue_wait_us / lcd_queue_wait_count <= 30 us`、`lcd_empty_polls`、p95で、
-要求した10 usとlock競合の実影響を確認する。
+`sleep_until()`は目標時刻の6 us前を`t_before`とし、まだ未来なら`add_alarm_at()`でalarmを登録して
+WFE loopへ入り、最後に無条件で`busy_wait_until()`を呼ぶ。従って10 us要求では約4 us先のalarmを
+retryごとに登録し、最後の6 usは必ずbusy waitになる。関数・spin lock・alarm pool挿入・hardware
+timer設定のoverheadが要求時間と同程度になり、10 usの大半がbusy waitになる可能性がある。
+ただし末尾の`busy_wait_until()`はbaselineの100 us要求にも同じく存在するため、A/Bで新たに加わる
+処理ではない。10 us候補は0 us pollingより上限があるものの、完全な低消費電力sleepではなく、
+retry数とqueue lock取得試行は約10倍へ増え得る。
+
+実装時に、使用するSDKの`src/common/pico_time/time.c`にある`sleep_us()`と`sleep_until()`、
+および生成configで上記経路を再確認する。実機では
+`lcd_queue_wait_us / lcd_queue_wait_count`のbaselineからの短縮量、`lcd_empty_polls`、p95で、
+実効量子とlock競合の影響を診断する。実効量子へ30 usの採用上限は置かない。
 
 versionを`1.1.31`へ更新する。通常buildと`NESCO_CORE1_BASELINE_LOG=ON` buildを行い、
 計測artifactは`build-stretch-retry-10us/Picocalc_NESco.uf2`とする。
@@ -214,6 +234,9 @@ Phase 1ではdirectory名だけ`build-stretch-retry-10us`へ変えて同じoptio
 - queue item 352 byte、queue depth 4を維持する
 - episode counter 4 byteの追加により、通常buildの`.bss`期待値を`97544 -> 97548`とする。
   異なる場合はmap / `nm --size-sort`で差を説明してから実機へ進む
+- 削除対象の`g_perf_frame_pacing_sleep_us` / `g_perf_frame_pacing_sleep_count`は無名namespace内の
+  未使用globalで、現行ELFでは既に除去されている。削除しても`.bss`は減らず、上の差はepisode
+  counterの`+4 byte`だけである
 - Phase 0ではqueue retryが2箇所とも100 usのまま
 - Phase 1ではframe hot pathの2箇所だけが10 us定数を使い、drainの100 usは残る
 
@@ -231,8 +254,10 @@ candidate 1.1.31とも同じ順で行う。タイトル画面を使い、採用�
 5. その後、stretchで少なくとも30個の連続した対を取る
 6. selected windowは`input_events=0`、`palette_protocol_faults=0`、mode一致、対欠落なしとする
 
-最低30窓は既存logへ`max/min <= 1.015`を適用した結果から固定した。最初の安定10窓を
-含めるために必要だった総窓数は次のとおりで、12窓では3測定が必ず不足する。
+最低30窓は既存logへ`max/min <= 1.015`を適用した参考結果から安全側に固定した。
+normal行は連続測定から得た値だが、stretch行は既存の短いstretch episodeを連結して得た参考値であり、
+stretchを30窓連続で無操作測定する今回の条件はまだ実行されていない。既存logで最初の安定10窓を
+含めるために必要だった総窓数は次のとおりである。
 
 | 測定 | 安定10窓の開始 | 必要だった総窓数 |
 |---|---:|---:|
@@ -240,22 +265,35 @@ candidate 1.1.31とも同じ順で行う。タイトル画面を使い、採用�
 | Project_DART normal | w11 | 21 |
 | Xevious normal | w2 | 12 |
 | LodeRunner stretch | w2 | 12 |
-| Project_DART stretch | w16 | 26 |
+| Project_DART stretch | w16 | 25 |
 | Xevious stretch | w5 | 15 |
 
-切替後3窓を固定で捨てるのは、既存Xevious stretchで切替後3窓目に
-`frame_us_avg=21,947 us`の窓長不整合が観測されたためである。
+stretch行は連続30窓で再確認した値ではないため、必要窓数の保証には使わない。特に
+Project_DART stretchは参考値でも25窓を必要とし、30窓に対する余裕が5窓しかない。
+30窓に安定10窓がなければ異常と決めず、まず同じ測定を40窓まで延長または取り直す。
+
+切替後3窓の固定破棄はmode遷移処理を性能比較から遠ざけるための保守的な余白として残す。
+以前根拠にした`frame_us_avg=21,947 us`は安定したstretch窓ではなくmode遷移中の窓であり、
+「stretch切替後3窓目」という帰属は誤りだった。固定破棄だけに頼らず、窓長不整合を`frames`で除外する。
 
 attract demoの開始位置がROM・buildでずれるため、単純な「開始後N窓」や任意の3窓を使わない。
-各modeで、遷移窓を除いた候補から次を満たす**最初の10連続窓**を機械的に選ぶ。
+各modeの30窓について`frames`の中央値を`steady_frames`とする。次をすべて満たす窓だけを候補とし、
+不適格な窓は連続性を切る。その候補から条件を満たす**最初の10連続窓**を機械的に選ぶ。
 
+- `abs(frames - steady_frames) <= 1`
+- `input_events=0`
+- `palette_protocol_faults=0`
+- mode一致、`[CORE1_BASE]` / `[FRAME_STATS]`対の欠落なし
 - `max(frame_us_avg) / min(frame_us_avg) <= 1.015`
+
+`frames`はnormalで概ね61、stretchではROMにより概ね33--37になる。固定値を全ROMへ課さず、
+各測定の中央値から外れた窓を除くことで、modeに依存せず遷移時の短い／長い窓を検出する。
 
 中央値からの`±0.5%`条件は使わない。Project_DART normalは約20,044 usと20,185 usの
 2値振動を持ち、全体のmax/minは約1.007でも片方が中央値から0.5%を超えるためである。
 実ログではmax/minだけならDART normalは安定後に合格する。
 
-30窓の中に条件を満たす10連続窓がなければ、そのbuild・ROM・modeだけ取り直す。
+30窓の中に条件を満たす10連続窓がなければ、そのbuild・ROM・modeだけ40窓へ延長または取り直す。
 後ろの都合のよいplateauを目視で選ばない。比較値は選ばれた10窓の各fieldの中央値とする。
 
 計測A/B後、candidateだけで3 ROMを短時間プレイし、normal/stretch切替、入力、音、sprite、
@@ -292,19 +330,21 @@ normalの回帰判定:
 
 1. stretch 3 ROMのうち2 ROM以上で`frame_us_avg`中央値がbaselineより**500 us以上短い**
 2. stretchのどのROMも`frame_us_avg`中央値と`p95_us`中央値がbaselineより**1%超悪化しない**
-3. stretch candidateの`lcd_queue_wait_us / lcd_queue_wait_count`中央値がbaselineより明確に短く、
-   3 ROMとも**30 us以下**である
-4. normal 3 ROMの`frame_us_avg`中央値と`p95_us`中央値が`16,700 us`以下、
+3. normal 3 ROMの`frame_us_avg`中央値と`p95_us`中央値が`16,700 us`以下、
    `fps_x100`中央値が`6000`以上を維持する
-5. normalの`frame_pacing_sleep_us / frames`中央値が、どのROMもbaselineより
+4. normalの`frame_pacing_sleep_us / frames`中央値が、どのROMもbaselineより
    **200 us/frame超減らない**
-6. selected windowすべてで`palette_protocol_faults=0`
-7. normal/stretchの表示、入力、音、menu復帰に回帰がない
+5. selected windowすべてで`palette_protocol_faults=0`
+6. normal/stretchの表示、入力、音、menu復帰に回帰がない
 
 条件1は約1.35 msの期待回収量に対して、効果が人間側の実機作業コストに見合う最低線である。
-条件2と4が残り1 ROMとnormalの実質的な非退行条件になる。retry短縮ではnormalのqueue waitが
-pacing sleepへ移るため、条件5は通常自動的に通る補助的な整合確認であり、core0の小さな劣化を
+条件2と3が残り1 ROMとnormalの実質的な非退行条件になる。retry短縮ではnormalのqueue waitが
+pacing sleepへ移るため、条件4は通常自動的に通る補助的な整合確認であり、core0の小さな劣化を
 単独で検出する安全網とは扱わない。最大値は複数窓で再現した場合だけ原因調査へ加える。
+
+`lcd_queue_wait_us / lcd_queue_wait_count`は採用条件ではない。candidateでbaselineより明確に短いかを
+build健全性として確認し、実効量子が30 usを超えても、それだけでは不採用にしない。約67 usを超えた
+場合は500 us回収モデルとの不整合を調査するが、最終判断は条件1--6の実測結果で行う。
 
 不合格なら結果をHISTORYへ記録し、Phase 1 commitだけを`git revert`する。
 Phase 0の計測fieldとversion 1.1.30は残す。

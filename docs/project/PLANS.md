@@ -34,6 +34,7 @@
   - 計画: `docs/design/STRETCH_QUEUE_RETRY_OPTIMIZATION_PLAN_20260731.md`
   - `1.1.30`でpacing sleepとqueue閉塞episode数をbaseline logへ追加し、`1.1.31`で
     queue-full retryを100 usから10 usへ短縮して、normal/stretchの同一実機A/Bで採否を決める
+  - 実効retry量子は診断値とし、採否はstretchのframe改善とnormal/stretchの非退行で決める
   - queue depth、通知方式、COLMODはこの結果後の条件付き別課題とする
 
 ## 完了済み計画 / 結果

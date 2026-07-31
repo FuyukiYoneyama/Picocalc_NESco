@@ -52,16 +52,22 @@
     `lcd_queue_wait_episodes`を`[CORE1_BASE]`末尾へ出す計測baselineを作る
     - episodeは連続したqueue閉塞期間の開始だけを数え、retry回数と分離する
     - 4 byte counter追加後の通常build `.bss`期待値は`97548`
+      - 削除する未使用pacing globalは現行ELFで既に除去されているため、`.bss`差はepisodeの`+4`だけ
   - Phase 1 (`1.1.31`): frame hot pathのqueue-full retry 2箇所だけを
     `sleep_us(100)`から`10 us`定数へ変更する
   - Phase 0単独の実機確認は行わず、2つのUF2を先に作ってnormal/stretch、3 ROMの
     A/Bと機能確認を1回へまとめる
     - 各ROM/modeを最低30窓取り、`max(frame_us_avg) / min(frame_us_avg) <= 1.015`を満たす
       最初の10連続窓を比較する。中央値`±0.5%`条件は2値振動を排除するため使わない
+    - 各測定の`frames`中央値から`±1`を外れる遷移窓は除外し、Project_DART stretchなどで
+      安定10窓が得られなければ、異常と決めず40窓へ延長する
+    - stretch連続30窓は既存の短いepisodeを連結した解析とは異なる新しい測定条件である
   - stretchはframe timeとp95、normalはframe time・p95・fpsで非退行を判定し、
     pacing sleep/frameは余裕量の補助確認に使う
     - `frame_us - queue wait - pacing sleep`はaudio waitなどを含み得る診断用推定値であり、
       純粋なcore0実働時間の確定値とは扱わない
+    - `wait_us / wait_count`は実効retry量子の診断値であり、30 usを超えただけでは不採用にしない。
+      500 us回収モデルの境界は約67 usで、採否はframe timeと非退行条件で決める
   - queue depth、通知方式、COLMODはA/B結果が出るまで実装せず、versionも予約しない
 
 ## 保留中の改善候補

@@ -298,6 +298,8 @@ stretch view を 60fps に近づけられるのは COLMOD 12 bit のみで、
 
 計測baselineとcandidateを先に作り、実機確認はnormal/stretch、3 ROMを1回にまとめる。
 30 strip/frameと平均過剰sleep 50 usから、10 us化の期待回収量は約1.35 ms/frameである。
+実効retry量子が約67 usまで延びても500 us/frameの回収モデルは成立するため、
+`wait_us / wait_count`へ30 usの採用上限は置かず、実効量子の診断値として扱う。
 
 なお 1 を入れて予算比 70% まで下がれば、
 sysclk を 200 MHz へ落として規格超過を一段解消する選択肢が現実的になる。
