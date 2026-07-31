@@ -49,3 +49,9 @@
   - 現時点では RAM に余裕があるため、今すぐの課題ではない
 - `[deferred]` 音量調整は `docs/audio/AUDIO_OUTPUT_GAIN_REDESIGN_20260422.md` を正本として必要時に再開する
 - `[deferred]` 256 表示で平均 60fps を目指す追加高速化は、難度が高いため独立課題として扱う
+  - LCD バス帯域側の分析は `docs/design/LCD_BUS_BANDWIDTH_ANALYSIS_20260731.md` を正本とする
+  - 現状は normal 256x240 で 60fps 予算の 94.4%、stretch 320x300 で 147.5% を転送が占める
+  - 削減候補は効果順に COLMOD 12 bit/pixel、frame 単位 window、DMA 32 bit 化、縦 224 crop
+  - 着手する場合は COLMOD 12 bit/pixel から始める
+    - `NesPalette` が RGB444 のため、色情報を落とさずに転送量を 25% 減らせる
+    - panel 側の色展開が一致するかの実機確認が前提になる
