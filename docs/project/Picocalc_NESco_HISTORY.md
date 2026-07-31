@@ -52,7 +52,8 @@
   - retry量子化は主な損失原因ではなく、queue waitの大部分はLCD DMA完了を実際に待つ時間だった
   - Phase 1 commit `8ba265f`だけを次実装開始時にrevertする。Phase 0の計測commitは残す
   - `1.1.31`は不採用実験の識別versionとして再利用しない
-  - 次は`docs/design/STRETCH_QUEUE_DEPTH_OPTIMIZATION_PLAN_20260731.md`に従い、depth 4/8を独立A/Bする
+  - 次は`docs/design/STRETCH_QUEUE_DEPTH_OPTIMIZATION_PLAN_20260731.md`に従い、
+    depth 4でDMA waitを直接計測し、仮説を支持した場合だけdepth 8を独立A/Bする
 
 ## 1.1.29 BG palette index 段階2 合格 (2026-07-31)
 

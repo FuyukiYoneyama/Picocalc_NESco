@@ -1169,9 +1169,10 @@ stretchだけを別課題として次の順で切り分けた。
 3. 実機A/Bのstretch改善は`-12.5 / +59.5 / -41.0 us`で、500 us条件へ届かず不採用とした
 4. retry 1回は約10.1 usへ短縮してもqueue wait/frameが変わらなかったため、polling/通知系列を終了した
 
-次はqueue itemとstrip heightを変えず、queue depthだけを4から8へ増やす。通常buildの`.bss`は
-Phase 0 counter込みの`97548 -> 98956`、queue symbolは`0x580 -> 0xb00`を期待値とする。
-実装・build・実機採否の正本は
+次はdepth 4のままDMA waitとwindow設定時間を`1.1.32`で直接計測する。
+診断がstrip間bus idle仮説を支持した場合だけ、`1.1.33`でqueue depthを4から8へ増やす。
+その場合、通常buildの`.bss`は`97548 -> 98956`、同一計測付きbuildは`97948 -> 99356`、
+queue symbolは`0x580 -> 0xb00`を期待値とする。実装・build・実機採否の正本は
 `docs/design/STRETCH_QUEUE_DEPTH_OPTIMIZATION_PLAN_20260731.md`である。
 
 ### 段階 4 以降 (任意、別課題)

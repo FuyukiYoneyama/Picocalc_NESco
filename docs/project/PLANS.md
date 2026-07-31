@@ -33,8 +33,9 @@
 - Stretch LCD worker queue depth optimization
   - 計画: `docs/design/STRETCH_QUEUE_DEPTH_OPTIMIZATION_PLAN_20260731.md`
   - 不採用の`1.1.31` 10 us retryだけをrevertし、`1.1.30`の計測fieldを残す
-  - `1.1.32`でqueue depthだけを4から8へ変更し、8-line strip 1個分を先行保持できるかをA/Bする
-  - stretchのframe time/p95を主判定にし、normalのpacing上限、fault 0、機能確認を非退行条件にする
+  - 既存`1.1.30`性能logは再取得せず、`1.1.32` depth 4診断buildでDMA waitとwindow設定時間を測る
+  - 診断がbus idle仮説を支持した場合だけ、`1.1.33`でqueue depthを4から8へ変更する
+  - Phase 1へ進んだ場合も`1.1.32`診断logをbaselineとして流用し、人的な再測定を増やさない
 
 ## 完了済み計画 / 結果
 

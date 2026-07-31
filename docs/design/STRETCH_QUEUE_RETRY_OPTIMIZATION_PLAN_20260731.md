@@ -437,7 +437,7 @@ Phase 0の計測fieldとversion 1.1.30は残す。
   系列を打ち切る
 - ST7365P仕様では`COLMOD=0x63`は12 bit/pixelを意味せず未定義なので、COLMOD候補も破棄する
 - 次は`docs/design/STRETCH_QUEUE_DEPTH_OPTIMIZATION_PLAN_20260731.md`を正本として、
-  8-line stripを丸ごと先行保持できるdepth 8だけを独立A/Bする
+  depth 4のDMA waitを直接測る。strip間bus idle仮説が支持された場合だけdepth 8を独立A/Bする
 
 ## 実装前の固定事項
 

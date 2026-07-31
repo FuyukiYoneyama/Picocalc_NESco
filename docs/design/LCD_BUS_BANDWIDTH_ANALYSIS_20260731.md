@@ -280,12 +280,14 @@ stretch view は 224 x 1.25 = 280 line となり、320x280 になる。
 frame windowとDMA 32 bitは画素byte数を変えないので、15.73/24.58 msの純転送下限は動かない。
 cropは表示内容が変わるため、無条件最適化ではなく設定項目として扱う。
 
-実際の次工程はLCD driver変更ではなく、
+実際の次工程はLCD driver変更やdepth変更ではなく、
 `docs/design/STRETCH_QUEUE_DEPTH_OPTIMIZATION_PLAN_20260731.md`を正本とする。
 
 1. 不採用の`1.1.31` 10 us retryだけをrevertし、`1.1.30`計測fieldを残す
-2. `1.1.32`でqueue depthだけを4から8へ変更し、8-line strip 1個を先行保持できるかA/Bする
-3. depth 8が不採用、または採用後も余地がある場合にframe単位windowを独立計測する
+2. `1.1.32`ではdepth 4のまま、strip flushのDMA waitとwindow設定時間を計測する
+3. DMA waitがbus idle仮説を支持した場合だけ、`1.1.33`でdepth 8をA/Bする
+4. 同じPhase 0で測るwindow設定全体の削減上限が250 us/frame以上の場合だけ、
+   frame単位windowを後続の独立候補にする
 
 COLMOD `0x63`は未定義なので候補順へ戻さない。
 
@@ -342,7 +344,7 @@ retry 1回は約100.5 usから約10.1 usへ短縮したが、queue wait/frameと
 
 以下は実機確認が必要である。
 
-- queue depth 8がstrip間のLCD idle時間とstretch frame timeをどこまで減らすか
-- `lcd_wait_idle()` 1 回あたりの実費用と、1 frame 180 回の合計
-  - 既存`wait_us`では取れない。frame window着手時にworker/driver側の専用counterを追加する
+- depth 4でcore1がstrip flush時に前DMAを待つ実時間
+- `lcd_set_window()` 30回/frameの実費用
+  - `1.1.32`診断buildでcommand byte、5回/windowの`lcd_wait_idle()`、GPIO/関数費用をまとめて測る
 - frame単位windowの実機表示が仕様どおりframe境界で自己復旧するか

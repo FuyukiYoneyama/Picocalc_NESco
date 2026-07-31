@@ -45,31 +45,38 @@
 
 ## 次に実装する高速化
 
-- `[next]` stretch LCD worker queue depth 4/8をA/Bする
+- `[next]` stretch LCD bus idleを計測し、queue depth 8の実装可否をgateする
   - 詳細計画の正本は
     `docs/design/STRETCH_QUEUE_DEPTH_OPTIMIZATION_PLAN_20260731.md` とする
   - 前提として、不採用になった10 us retryのcommit `8ba265f`だけをrevertする
     - Phase 0 commit `1f1c093`のepisode/pacing計測fieldは残す
     - `1.1.31`は不採用実験のversionとして再利用しない
-  - candidate `1.1.32`では`DISPLAY_LCD_WORKER_QUEUE_DEPTH`だけを`4`から`8`へ変更する
-    - 8-line stripを、前stripのDMA中に丸ごと1個先行保持できる構成にする
-    - retryは100 us、strip heightは8、queue itemは352 byteのまま
-    - queue symbol期待値は`0x580 -> 0xb00`
-    - 通常build `.bss`期待値は`97548 -> 98956`
-  - baselineは既存`1.1.30`計測artifactを使い、candidateの通常/計測buildを作る
-  - 実機は3 ROM、normal/stretch各最低30窓、最初の適格10連続窓を比較する
+  - 既存`1.1.30`性能logは再取得しない
+    - revert直後の対象sourceが`1f1c093`と同一であることをgit diffで確認する
+    - build IDが日時を含むため、再build UF2の旧SHA-256一致は要求しない
+  - Phase 0 (`1.1.32`): depth 4のままstrip単位で次を計測する
+    - `lcd_dma_wait_us/count`: core1が前strip DMA完了を実際に待った時間
+    - `lcd_window_set_us/count`: command byteとdrainを含むwindow設定全体
+    - 計測build `.bss`期待値は`97948`、queue symbolは`0x580`
+    - 3 ROMのnormal/stretchを各最低30窓取り、既存baselineにない診断値を得る
+  - Phase 0で3 ROMともDMA waitが5 ms/frame以上ならdepth 8を実装しない
+  - Phase 1 (`1.1.33`、gate通過時のみ): depthだけを4から8へ変更する
+    - queue symbol期待値は`0xb00`
+    - 通常build `.bss=98956`、同一計測付きbuild `.bss=99356`
+    - Project_DARTのMapper30最大確保とscreenshot同時確保後も単純計算21,592 byte残る
+  - Phase 1へ進んだ場合、`1.1.32`診断logをdepth 4 baselineとして流用し、再取得しない
   - stretch 2/3 ROMで500 us以上改善し、全modeで非退行・fault 0・機能回帰なしなら採用する
-  - queue waitの減少だけでは採用せず、frame timeとp95を主判定にする
 
 ## 保留中の改善候補
 
 - `[deferred]` audio ring size を `4096` から `2048` へ下げられるか再評価する
   - 現時点では RAM に余裕があるため、今すぐの課題ではない
 - `[deferred]` 音量調整は `docs/audio/AUDIO_OUTPUT_GAIN_REDESIGN_20260422.md` を正本として必要時に再開する
-- `[deferred]` depth 8 A/B後のLCD側追加高速化を結果に応じて再計画する
+- `[deferred]` Phase 0 bus診断とdepth 8 A/B結果に応じてLCD側追加高速化を再計画する
   - frame単位window設定をdepthとは混ぜず、独立候補とする
     - ST7365P仕様は画素byte境界でCSXを解除したData Transfer Pauseからの継続を保証する
-    - 削減できるcommand byteは約40.8 us/frame相当なので、depth 8より後に置く
+    - command byte削減は約40.8 us/frame。Phase 0でdrainを含むwindow設定全体を測り、
+      削減上限が250 us/frame以上の場合だけ後続候補にする
   - DMA 32 bit化はLCDバス下限を変えずcore1/SRAM負荷だけを下げるため、実測根拠が出た場合だけ行う
   - 224-line cropは表示内容が変わるため、必要なら設定項目として別計画にする
   - ST7365PのCOLMODはcontrol interfaceで16/18/24 bitだけを定義し、`0x63`の12 bitは未対応。
