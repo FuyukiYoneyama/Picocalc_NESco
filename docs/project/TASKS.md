@@ -45,46 +45,33 @@
 
 ## 次に実装する高速化
 
-- `[in-progress]` stretch LCD queue retryの100 us量子化をA/Bする
+- `[next]` stretch LCD worker queue depth 4/8をA/Bする
   - 詳細計画の正本は
-    `docs/design/STRETCH_QUEUE_RETRY_OPTIMIZATION_PLAN_20260731.md` とする
-  - Phase 0 (`1.1.30`): 既存の`frame_pacing_sleep_us/count`と、新設する
-    `lcd_queue_wait_episodes`を`[CORE1_BASE]`末尾へ出す計測baselineを作る
-    - episodeは連続したqueue閉塞期間の開始だけを数え、retry回数と分離する
-    - 4 byte counter追加後の通常build `.bss`期待値は`97548`
-      - 削除する未使用pacing globalは現行ELFで既に除去されているため、`.bss`差はepisodeの`+4`だけ
-  - Phase 1 (`1.1.31`): frame hot pathのqueue-full retry 2箇所だけを
-    `sleep_us(100)`から`10 us`定数へ変更する
-  - 実装・buildは完了し、実機A/B待ち
-    - Phase 0 commit: `1f1c093`
-    - Phase 1 commit: `8ba265f`
-    - baseline: `build-stretch-retry-baseline/Picocalc_NESco.uf2`
-    - candidate: `build-stretch-retry-10us/Picocalc_NESco.uf2`
-  - Phase 0単独の実機確認は行わず、2つのUF2を先に作ってnormal/stretch、3 ROMの
-    A/Bと機能確認を1回へまとめる
-    - 各ROM/modeを最低30窓取り、`max(frame_us_avg) / min(frame_us_avg) <= 1.015`を満たす
-      最初の10連続窓を比較する。中央値`±0.5%`条件は2値振動を排除するため使わない
-    - `frames`はframe timeとほぼ従属する診断値に留め、窓選択には使わない。遷移窓は固定破棄、
-      `input_events=0`、mode一致、log対の整合で除外する
-    - Project_DART stretchなどで安定10窓が得られなければ、異常と決めず40窓へ延長する
-    - stretch連続30窓は既存の短いepisodeを連結した解析とは異なる新しい測定条件である
-  - stretchはframe timeとp95、normalはframe time・p95・fpsで非退行を判定し、
-    pacing sleep/frameは余裕量の補助確認に使う
-    - `frame_us - queue wait - pacing sleep`はaudio waitなどを含み得る診断用推定値であり、
-      純粋なcore0実働時間の確定値とは扱わない
-    - `wait_us / wait_count`は実効retry量子の診断値であり、30 usを超えただけでは不採用にしない。
-      500 us回収モデルの境界は約67 usで、採否はframe timeと非退行条件で決める
-  - queue depth、通知方式、COLMODはA/B結果が出るまで実装せず、versionも予約しない
+    `docs/design/STRETCH_QUEUE_DEPTH_OPTIMIZATION_PLAN_20260731.md` とする
+  - 前提として、不採用になった10 us retryのcommit `8ba265f`だけをrevertする
+    - Phase 0 commit `1f1c093`のepisode/pacing計測fieldは残す
+    - `1.1.31`は不採用実験のversionとして再利用しない
+  - candidate `1.1.32`では`DISPLAY_LCD_WORKER_QUEUE_DEPTH`だけを`4`から`8`へ変更する
+    - 8-line stripを、前stripのDMA中に丸ごと1個先行保持できる構成にする
+    - retryは100 us、strip heightは8、queue itemは352 byteのまま
+    - queue symbol期待値は`0x580 -> 0xb00`
+    - 通常build `.bss`期待値は`97548 -> 98956`
+  - baselineは既存`1.1.30`計測artifactを使い、candidateの通常/計測buildを作る
+  - 実機は3 ROM、normal/stretch各最低30窓、最初の適格10連続窓を比較する
+  - stretch 2/3 ROMで500 us以上改善し、全modeで非退行・fault 0・機能回帰なしなら採用する
+  - queue waitの減少だけでは採用せず、frame timeとp95を主判定にする
 
 ## 保留中の改善候補
 
 - `[deferred]` audio ring size を `4096` から `2048` へ下げられるか再評価する
   - 現時点では RAM に余裕があるため、今すぐの課題ではない
 - `[deferred]` 音量調整は `docs/audio/AUDIO_OUTPUT_GAIN_REDESIGN_20260422.md` を正本として必要時に再開する
-- `[deferred]` stretch retry A/B後の追加高速化を結果に応じて再計画する
-  - depth 6、通知方式、COLMOD 12 bit/pixelを同時実装しない
-  - retry 10 us採用後もLCDバス下限24.58 msとの差が1 ms超残り、queue waitも大きい場合だけ
-    depth 6を独立計画する
-  - retry短縮がframe timeへ効かない場合、通知方式はlock競合の根拠があるときだけ検討し、
-    それ以外はCOLMODを次の主候補にする
+- `[deferred]` depth 8 A/B後のLCD側追加高速化を結果に応じて再計画する
+  - frame単位window設定をdepthとは混ぜず、独立候補とする
+    - ST7365P仕様は画素byte境界でCSXを解除したData Transfer Pauseからの継続を保証する
+    - 削減できるcommand byteは約40.8 us/frame相当なので、depth 8より後に置く
+  - DMA 32 bit化はLCDバス下限を変えずcore1/SRAM負荷だけを下げるため、実測根拠が出た場合だけ行う
+  - 224-line cropは表示内容が変わるため、必要なら設定項目として別計画にする
+  - ST7365PのCOLMODはcontrol interfaceで16/18/24 bitだけを定義し、`0x63`の12 bitは未対応。
+    実装候補へ戻さない
   - LCD側の分析は`docs/design/LCD_BUS_BANDWIDTH_ANALYSIS_20260731.md`を正本とする

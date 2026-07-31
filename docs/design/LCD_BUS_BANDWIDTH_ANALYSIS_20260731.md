@@ -2,11 +2,11 @@
 
 作成日: 2026-07-31
 
-対象 branch: `docs/lcd-bus-bandwidth-analysis`
+対象 branch: `perf/bg-tile-share-log`
 
 初回分析対象 version: `1.1.26`
 
-実測更新 version: `1.1.29`
+実測更新 version: `1.1.31`
 
 ## 目的
 
@@ -55,7 +55,12 @@ bit rate は `62.5 Mbps`、1 byte あたり `128 ns` である。
 lcd_write_command1(0x3Au, 0x65u);
 ```
 
-`0x3A` は COLMOD で、`0x65` は MCU interface 16 bit/pixel、つまり RGB565 である。
+`0x3A`はCOLMODである。ST7365P SPEC V1.0 (2023/02) section 9.2.32では、
+control interfaceの`D2:D0`は`101=16 bit/pixel`、`110=18 bit/pixel`、
+`111=24 bit/pixel`だけを定義している。現在値`0x65`の`D2:D0=101`はRGB565である。
+
+参照した仕様書:
+`https://cn.display-lcd.com/data/upload/admin/202503/67e36677ac8c3.pdf`
 
 ### viewport
 
@@ -157,35 +162,21 @@ PIO を採用する妥当な理由として挙げられるのは、以下であ�
 帯域そのもの (62.5 Mbps) は規格超過側にあるため、これ以上上げる方向は取らない。
 削減対象は転送量とする。
 
-### 候補 1: COLMOD 12 bit/pixel
+### 破棄: COLMOD 12 bit/pixel
 
-現在 LCD へ送っている RGB565 は、情報量として 12 bit しか持っていない。
+旧版では`0x3A <- 0x63`をcontrol interfaceの12 bit/pixelと解釈していたが、
+これはST7365P仕様と一致しない。
 
-`platform/display.c` の `NesPalette[64]` は RGB444 encoding であり、
-`display_init()` はこれを nibble ごとに bit 複製して RGB565 へ展開している。
+- `0x63`の`D2:D0=011`は未定義であり、12 bit/pixelではない
+- control interfaceで定義されるのは16/18/24 bit/pixelだけである
+- section 10.5のData Transfer Modeにも12 bit転送はない
 
-```c
-int r5 = (i << 1) | (i >> 3);
-int g6 = (i << 2) | (i >> 2);
-int b5 = (i << 1) | (i >> 3);
-```
+NES paletteの元情報がRGB444相当であることは事実だが、それだけではpanelへの12 bit転送を
+可能にしない。`0x63`候補、2 px = 3 byte packer、RGB444 DMAは実装しない。
+旧版の25%削減、normal 11.80 ms、stretch 18.43 msという値は、対応していない転送形式を
+仮定した机上値なので採用判断から削除する。
 
-下位 bit はすべて bit 複製で生成した冗長分である。
-したがって COLMOD を `0x3A <- 0x63` (MCU interface 12 bit/pixel) に変更し、
-2 画素 3 byte で詰めれば、転送量が 25% 減り、送出する色情報は減らない。
-
-これは他の候補と違い、表示内容が変わらない削減である。
-
-必要な変更点:
-
-- `drivers/lcd_spi.c` の COLMOD parameter
-- `platform/display.c` の `display_pack_line_normal()` / `display_pack_line_stretch_320()`
-  を 2 px = 3 byte 詰めに変更する
-- `lcd_dma_write_bytes_async()` の `n_bytes > s_window_pixels * 2` 上限計算
-- ROM menu / help / screenshot viewer は任意の RGB565 を使うため、
-  mode 切替時に COLMOD を戻す
-
-### 候補 2: frame 単位の window 設定
+### 候補 1: frame 単位の window 設定
 
 `lcd_set_window()` は CASET / RASET / RAMWR の 3 command を発行する。
 `lcd_write_command()` と `lcd_write_data()` はそれぞれ `lcd_wait_idle()` を呼ぶため、
@@ -200,21 +191,27 @@ LCD controller は window 内で GRAM address を自動 increment する。
 したがって frame 先頭で 1 回だけ window を設定し、
 以降は DC = 1 のまま画素を流し込めば、29 回分の window 設定を削除できる。
 
+ST7365P仕様section 10.4 Data Transfer Pauseは、frame memory dataを1 byte完了した後に
+CSXを解除した場合、driverが待機し、次にCSXをactiveにしたとき中断位置から転送を継続すると
+明記している。現在のDMAはbyte単位で完了してからCSを解除するため、strip間でCSを
+deassertしてもGRAM pointerを保持できることは仕様上確認済みである。
+
 引き換えになる点:
 
-- 現在の strip 単位 window は自己再同期する。
-  frame 単位にすると、strip が 1 つ落ちた場合に以降の表示がずれる。
-- `lcd_dma_wait()` は strip 間で CS を deassert している。
-  RAMWR 途中の CS deassert で GRAM address pointer が保持されるかは、
-  ST7365P の実機確認が必要である。【推定】多くの ST77xx 系では保持されるが、保証はできない。
+- 現在のstrip単位windowは毎strip自己再同期する
+- frame単位では1 stripが欠けると同じframe内の後続位置がずれる
+- 毎frame先頭でCASET/RASET/RAMWRを再発行し、次frameでは必ず自己復旧させる必要がある
 
 既存の `s_perf_lcd_wait_us` / `s_perf_lcd_flush_us` は fallback packer だけを計測するため、
 通常の worker 動作では 0 であり、この候補の根拠には使えない。
-候補 2 に着手する場合は先に、worker が実行する `lcd_set_window()` 内の
+この候補に着手する場合は先に、workerが実行する`lcd_set_window()`内の
 `lcd_wait_idle()` を driver 層で計測し、frame-end handoff で core0 へ渡す専用 counter を追加する。
 その実測から frame あたり 180 回の drain 費用を判定する。
 
-### 候補 3: DMA 転送単位を 32 bit にする
+削減できるcommand byte自体は29 window分の`29 x 11 = 319 byte`、62.5 Mbpsで
+約40.8 us/frameに留まる。queue depth 8より期待効果が小さいため、次工程にはしない。
+
+### 候補 2: DMA 転送単位を 32 bit にする
 
 現在の DMA 設定:
 
@@ -235,7 +232,7 @@ autopull threshold を 32、DMA を `DMA_SIZE_32` にすれば 30,720 回に減�
 byte 順は MSB first なので、buffer 上は `(hi0 << 24) | (lo0 << 16) | (hi1 << 8) | lo1`
 の配置が必要になる。
 
-### 候補 4: 縦 224 line への crop
+### 候補 3: 縦 224 line への crop
 
 NES の実画面は上下 8 line が表示外扱いになることが多く、
 多くの emulator は 224 line 表示を default にしている。
@@ -248,7 +245,7 @@ NES の実画面は上下 8 line が表示外扱いになることが多く、
 
 stretch view は 224 x 1.25 = 280 line となり、320x280 になる。
 
-### 候補 5: vreg build option
+### 候補 4: vreg build option
 
 `vreg_set_voltage(VREG_VOLTAGE_1_15)` を `set_sys_clock_khz()` の前に置けば、
 250 MHz 動作の余裕は増える。
@@ -265,45 +262,32 @@ stretch view は 224 x 1.25 = 280 line となり、320x280 になる。
 |---|---|---|---|
 | normal 256x240 RGB565 (現状) | 122,880 | 15.73 ms | 94.4% |
 | normal 256x224 RGB565 | 114,688 | 14.68 ms | 88.1% |
-| normal 256x240 RGB444 | 92,160 | 11.80 ms | 70.8% |
-| normal 256x224 RGB444 | 86,016 | 11.01 ms | 66.1% |
 | stretch 320x300 RGB565 (現状) | 192,000 | 24.58 ms | 147.5% |
-| stretch 320x300 RGB444 | 144,000 | 18.43 ms | 110.6% |
-| stretch 320x280 RGB444 | 134,400 | 17.20 ms | 103.2% |
+| stretch 320x280 RGB565 | 179,200 | 22.94 ms | 137.6% |
 
-縦 crop 単独の削減は `1.05 ms`、COLMOD 12 bit 単独の削減は `3.93 ms` である。
-stretch view を 60fps に近づけられるのは COLMOD 12 bit のみで、
-縦 crop だけでは stretch は 137.6% にとどまり届かない。
+縦cropの削減はnormal 1.05 ms、stretch 1.64 msである。ただし表示内容が変わる。
+現行ST7365Pの対応形式と62.5 Mbpsを維持する限り、表示差なしで画素byte数を25%減らす案はない。
 
 ## LCD帯域候補の順序
 
 | 順 | 候補 | 効果 | 主なリスク | 表示変化 |
 |---|---|---|---|---|
-| 1 | COLMOD 12 bit/pixel | -3.93 ms | panel 側の展開結果の実機確認 | なし |
-| 2 | frame 単位 window | 未計測 | strip 落ちで表示ずれ | なし |
-| 3 | DMA 32 bit 化 | core1 負荷減 | byte 順 | なし |
-| 4 | 縦 224 crop | -1.05 ms | 低 | あり (設定項目化が必要) |
-| 5 | vreg build option | 安定性 | 消費電力と発熱 | なし |
+| 1 | frame単位window | command 40.8 us + drain費用 | 同一frame内のstrip落ちで表示ずれ | なし |
+| 2 | DMA 32 bit化 | core1/SRAM負荷減 | byte順、PIO/DMA同時変更 | なし |
+| 3 | 縦224 crop | normal -1.05 ms、stretch -1.64 ms | 表示範囲減少 | あり (設定項目化が必要) |
+| 4 | vreg build option | OC安定性 | 消費電力と発熱 | なし |
 
-1 と 2 を入れた場合、normal view は予算比 70% 前後、stretch view は 110% 前後になる。
-4 は表示内容が変わるため最後に置き、設定項目として実装する。
+frame windowとDMA 32 bitは画素byte数を変えないので、15.73/24.58 msの純転送下限は動かない。
+cropは表示内容が変わるため、無条件最適化ではなく設定項目として扱う。
 
-ただし`1.1.29`のstretch実測では、queue-full retry 1回が現行の
-`sleep_us(100)`とほぼ一致した。上表はLCD帯域側へ着手した後の順序であり、実際の次工程は
-`docs/design/STRETCH_QUEUE_RETRY_OPTIMIZATION_PLAN_20260731.md`を正本とする。
+実際の次工程はLCD driver変更ではなく、
+`docs/design/STRETCH_QUEUE_DEPTH_OPTIMIZATION_PLAN_20260731.md`を正本とする。
 
-1. `1.1.30`でpacing sleepとqueue閉塞episode数をbaseline logへ追加する
-2. `1.1.31`でframe hot pathのqueue retryだけを100 usから10 usへ変更してA/Bする
-3. 結果に応じてdepth、通知方式、COLMODのどれを計画するか決める
+1. 不採用の`1.1.31` 10 us retryだけをrevertし、`1.1.30`計測fieldを残す
+2. `1.1.32`でqueue depthだけを4から8へ変更し、8-line strip 1個を先行保持できるかA/Bする
+3. depth 8が不採用、または採用後も余地がある場合にframe単位windowを独立計測する
 
-計測baselineとcandidateを先に作り、実機確認はnormal/stretch、3 ROMを1回にまとめる。
-30 strip/frameと平均過剰sleep 50 usから、10 us化の期待回収量は約1.35 ms/frameである。
-実効retry量子が約67 usまで延びても500 us/frameの回収モデルは成立するため、
-`wait_us / wait_count`へ30 usの採用上限は置かず、実効量子の診断値として扱う。
-
-なお 1 を入れて予算比 70% まで下がれば、
-sysclk を 200 MHz へ落として規格超過を一段解消する選択肢が現実的になる。
-これは予算比 94.4% の現状では取れない手である。
+COLMOD `0x63`は未定義なので候補順へ戻さない。
 
 ## 現在の律速はどちらか
 
@@ -325,74 +309,40 @@ LCD バスではない。バス下限を下げても、上に乗っている 18�
 
 これは transfer が DMA と PIO で非同期に走っているためで、設計どおりの結果である。
 
-その後、BG palette index化を行った `1.1.29` ではnormal 3 ROMすべてが
+その後、BG palette index化を行った`1.1.29`ではnormal 3 ROMすべてが
 `frame_us_avg` / `p95_us` とも `16,700 us` 以下へ到達した。
-したがってnormal向けのpolling変更、queue depth変更、LCD帯域変更は行わない。
+従って次のdepth A/Bはstretch改善を主目的とし、normalは非退行確認だけを行う。
 
 ### 予測される効果
 
-- normal view: 平均 fps はほぼ変わらない
-  - 期待できるのは二次効果のみで、LCD worker queue depth が 4 scanline しかないため
-    (`platform/display.c` の `DISPLAY_LCD_WORKER_QUEUE_DEPTH`)、
-    core1 の strip DMA 待ちで queue が埋まると core0 が `PostDrawLine` で止まる
-  - core1 の非重複余裕は Xevious 換算で `2.29 ms` から `6.22 ms` に増えるため、
-    平均 fps ではなく最低 fps 側が改善する可能性がある
-  - ただし `Xevious.nes` の余裕は `2.29 ms` しかなく、重い場面では
-    現在も LCD バスに当たっている可能性が残る
-- stretch view: ここが本命である
-  - バス上限 `40.7 fps` は確実に効く位置にある
-  - `1.1.27` の Xevious stretch 実測は `36.7 fps` で、天井には貼り付いていない
-  - COLMOD 導入時の上限は `40.7 fps` から `54.3 fps` へ上がるが、現状は core0 最適化を優先する
-- 将来の core0 最適化に対する天井
-  - 現在の天井は `63.6 fps` で、`Xevious.nes` の `55.50 fps` との差は 8 fps しかない
-  - COLMOD 12 bit/pixel を入れると天井は `84.8 fps` になる
-
-### stretch で新たに律速になり得る箇所
-
-stretch の core1 は 1 frame で 300 line x 320 px を pack する
-(`platform/display.c` の `display_pack_line_stretch_320()`)。
-
-バスが `24.58 ms` から `18.43 ms` に縮むと、core1 はより短い時間で、
-かつ 1 byte あたりより複雑な詰め方をすることになる。
-RGB565 は 2 px = 4 byte で境界が揃うが、RGB444 は 2 px = 3 byte で揃わない。
-stretch が core1 律速へ移る可能性がある。
-
-緩和策は本文書の候補内にある。
-
-- 候補 3 (DMA 32 bit 化) を stretch では同時に入れる。
-  packer の store 数が 4 px あたり 8 回から 2 回に減り、12 bit 化の増分を相殺できる
-- palette LUT を RGB444 のまま出す。
-  BG line buffer index 化の後は `s_line_buffer` 自体は palette index のままにし、
-  core1 の palette LUT 出力だけを RGB565 から RGB444 へ差し替える。packer は shift だけで済み、
-  InfoNES hot path を触らない。
-  InfoNES 側が scanline buffer の値に対して monochrome bit や
-  color emphasis のような色演算をしていないことは確認済みである。
-  `R1_MONOCHROME` は定義だけで参照されず、scanline buffer へ色演算を加える経路はない
+- normalは60 fps pacing上限へ達しているため、平均fps改善は期待しない
+- stretchはRGB565バス上限40.7 fpsが物理天井であり、depth/window/DMA変更でもこの天井は上がらない
+- depth 8はstrip間の重なり損失、frame windowはcommand/drain、DMA 32 bitはcore1/SRAM負荷だけを削る
+- stretchを60 fpsへ到達させるには、表示範囲、画素形式、バス速度のいずれかを変える必要がある。
+  現panelでは12 bit形式がないため、表示差なし・現バス速度のまま60 fpsへ届く計画はない
 
 ## 実測状況
 
-`1.1.29` の実機log `/home/fuyuki/pico_dvl/codex/log/pico20260731_214523.log` で、
-normal/stretchの追加実プレイを含む窓を取得した。目視・プレイ上の問題はなく、
-全412窓でpalette protocol fault 0だった。stretch値は固定A/B区間ではなく、
-入力を含む追加プレイ区間の参考値である。現在タスクの正本は `docs/project/TASKS.md` とする。
+`1.1.30` / `1.1.31`の固定A/Bを次のlogで行った。
 
-| ROM | stretch窓数 | `frame_us_avg` 中央値 | queue wait比率中央値 | 1 waitあたり |
-|---|---:|---:|---:|---:|
-| LodeRunner | 46 | 29.02 ms | 37.89% | 100.45 us |
-| Project_DART | 37 | 30.23 ms | 34.28% | 100.72 us |
-| Xevious | 28 | 27.22 ms | 48.41% | 100.43 us |
+- `/home/fuyuki/pico_dvl/codex/log/pico20260731_230528.log`
+- `/home/fuyuki/pico_dvl/codex/log/pico20260731_231422.log`
 
-queue waitは十分大きいが、1 waitあたりが全ROMで約100 usであり、
-queue-full loopの`sleep_us(100)`量子化と一致する。queue depthを増やす前に、
-10 us retry候補の効果を独立して測る。採否手順は
-`docs/design/STRETCH_QUEUE_RETRY_OPTIMIZATION_PLAN_20260731.md`を正本とする。
+| ROM | baseline stretch | 10 us candidate | 差 |
+|---|---:|---:|---:|
+| LodeRunner | 28.816 ms | 28.804 ms | -0.013 ms |
+| Project_DART | 29.835 ms | 29.894 ms | +0.060 ms |
+| Xevious | 26.283 ms | 26.242 ms | -0.041 ms |
+
+retry 1回は約100.5 usから約10.1 usへ短縮したが、queue wait/frameとframe timeは
+ほぼ変わらなかった。従ってpolling量子化は主因ではなく、10 us候補は不採用とした。
+全log 606対でpalette protocol fault 0、実プレイでも問題はなかった。
 
 ## 未確認事項
 
 以下は実機確認が必要である。
 
-- COLMOD 12 bit/pixel での panel 側の色展開が、現在の bit 複製展開と一致するか
-- RAMWR 途中の CS deassert で GRAM address pointer が保持されるか
+- queue depth 8がstrip間のLCD idle時間とstretch frame timeをどこまで減らすか
 - `lcd_wait_idle()` 1 回あたりの実費用と、1 frame 180 回の合計
-  - 既存 `wait_us` では取れない。候補 2 着手時に worker/driver 側の専用 counter を追加する
-- stretchでpolling幅短縮または通知方式がframe time / p95 / queue waitへ与える効果
+  - 既存`wait_us`では取れない。frame window着手時にworker/driver側の専用counterを追加する
+- frame単位windowの実機表示が仕様どおりframe境界で自己復旧するか

@@ -281,17 +281,14 @@ frame 全体への効果は background tile が draw に占める割合にも比
 
 ## 副次効果
 
-### LCD の COLMOD 12 bit/pixel が安く入る
+### LCD画素形式はRGB565のまま維持する
 
-`docs/design/LCD_BUS_BANDWIDTH_ANALYSIS_20260731.md` の候補 1 は、
-core1 の packer を 2 px = 3 byte 詰めへ書き換える必要があった。
+旧版ではpalette index化によりCOLMOD 12 bit/pixelを安く導入できるとしていたが、
+ST7365P仕様でcontrol interfaceに定義されるのは16/18/24 bit/pixelだけである。
+`0x63`の下位3 bit `011`は未定義で、12 bit/pixelではない。
 
-本案を入れると core1 は元から index から色への LUT を引くため、
-LUT 出力を RGB565 にするか RGB444 にするかの違いだけになる。
-`InfoNES_Palette444ToRgb565()` が変換の単一箇所であることも確認済みである。
-
-同分析で挙げた「stretch が core1 律速へ移る可能性」も、
-core0 から core1 へ渡るデータ量が半分になるぶん緩む。
+従ってpalette index化の副次効果はcore0/core1間trafficとRAMの削減に限定し、
+RGB444 DMAや2 px = 3 byte packerは実装候補にしない。core1 LUT出力とLCDはRGB565を維持する。
 
 ### queue depth を増やせる (RAM 増なしとは限らない)
 
@@ -327,14 +324,10 @@ queue 4 slot と 64 entry core1 LUT の合計は `608 x 4 + 128 = 2,560 byte` �
 外部 ring 方式でも item 側に version/valid が必要なため、depth 6 の RAM は item 内方式と同じである。
 **RAM 上の利点がないのに競合の危険を抱える理由がない**ため、item 内方式を採る。
 
-depth 6 は条件付きの将来段階とする。queue 関連だけなら `1.1.27` 比 +464 byte だが、段階 2 で
-`s_line_buffer` が -256 byte、`BackgroundOpaqueLine` が -256 byte、
-`g_bg_tile_pair_opaque4` が -256 byte になるため、列挙した主要 static 領域の小計は
-`1.1.27` 比 -304 byte、段階 1 比 -704 byte である。depth 4 基準で窓単位の queue wait を取り直し、
-frame time に対して無視できないと確認できた場合だけ depth 6 を実装する。
-depth 8 を検討するのは、depth 6 後も前述の窓ごとの queue wait 比率中央値が 1 ROM でも 1% 以上で、
-depth 6 の `p95_us` 中央値が depth 4 より改善する場合だけである。そのとき queue 関連
-`+1,168 byte` を許容する。
+この段階の初期案ではdepth 6を先に試す条件を置いていた。その後、実機で10 us retryを独立A/Bし、
+polling量子がframe timeの主因ではないことを確認した。後続計画では8-line stripとqueue単位を
+一致させる理由から、depth 6を挟まずdepth 8を試す。現在の正本は
+`docs/design/STRETCH_QUEUE_DEPTH_OPTIMIZATION_PLAN_20260731.md`である。
 
 `.bss` には余裕がある (`1.0.15` 時点で静的領域末尾から heap limit まで 122,328 byte)
 ため depth 8 の queue 関連 `+1,168 byte`（段階 2 の 3 配列削減込みでは `1.1.27` 比 `+400 byte`、
@@ -1164,54 +1157,26 @@ screenshot は影響を受けない。
 `platform/screenshot.c` は scanline buffer ではなく
 `lcd_readback_rect_rgb565()` で LCD panel から読み戻しているため、
 core0 側の buffer 形式とは独立である。
-ただし段階 4 で COLMOD を 12 bit/pixel へ変更する場合は、
-読み戻し側の形式も合わせる必要がある。
+LCDはRGB565のまま維持するため、COLMOD切替に伴う読み戻し形式変更は行わない。
 
-### 段階 3: queue full wait の追加最適化（polling/depth、条件付き、未計画）
+### 段階 3: stretch queue追加最適化（後続計画へ分離）
 
-この段階の trigger と採否は **normal 3 ROM のみ**で決め、stretch の値を混ぜない。
-段階 2 の A/B で得た各 30 窓について、窓ごとに
-`lcd_queue_wait_us / (frames * frame_us_avg)` を計算し、ROM ごとの中央値を depth 4 基準とする。
-ただし `frame_us_avg` と `p95_us` の両中央値が16,700 us以下なら、queue wait は60 fps pacing中の
-待ちでありnormalの高速化余地を示さないため、polling/depth段階を実装しない。
-3 ROM すべてが 1% 未満なら、この段階は実装せず version も予約しない。いずれかが 1% 以上なら、
-queue-full loop の polling 粒度を先に調べる。`lcd_queue_wait_us / lcd_queue_wait_count` が
-約 100 us なら `sleep_us(100)` の量子化が支配しているため、depth 6 を自動的には実装せず、
-polling 幅の比較を先に独立計画する。それでも queue wait が 1% 以上なら、depth 6 を
-別 commit・次の patch version で試す。
+段階2後はnormal 3 ROMが平均・p95とも16,700 us以下になったため、normal向け段階3は実装しない。
+stretchだけを別課題として次の順で切り分けた。
 
-- `DISPLAY_LCD_WORKER_QUEUE_DEPTH` を 4 から **6** へ変更する
-  （段階 2 完了時から `.bss +704 byte`、期待値 `97544 -> 98248`。
-  列挙した主要 static 領域の小計は `1.1.27` 比 -304 byte、段階 1 比 -704 byte）
-- `.bss` の増減と p95 を depth 4 と同条件で比較する
+1. `1.1.30`でqueue閉塞episodeとpacing計測を追加した
+2. `1.1.31`でretryを100 usから10 usへ短縮した
+3. 実機A/Bのstretch改善は`-12.5 / +59.5 / -41.0 us`で、500 us条件へ届かず不採用とした
+4. retry 1回は約10.1 usへ短縮してもqueue wait/frameが変わらなかったため、polling/通知系列を終了した
 
-段階 2 で queue item は既に byte 化されているため、
-この段階の変更は depth のみである。したがって測定結果は
-queue を深くしたことの効果だけを表す。
-
-段階 1 で導入済みの `display_perf_take_window()` により `lcd_queue_wait_us/count` を 1 秒窓ごとに
-take-and-zero し、上記 30 窓をそのまま depth 4 基準にする。
-その後 depth 6 を同じ手順で比較する。既存ログの累積値はこの判断に使わない。
-queue depth を 8 にするのは、depth 6 でも窓ごとの queue wait 比率中央値が 1 ROM でも 1% 以上で、
-かつ depth 6 の `p95_us` 中央値が depth 4 より改善する場合だけとする。
-併せて `lcd_empty_polls` を記録し、queue を深くしたことで worker の挙動が変わっていないことを確認する。
-
-stretch は別課題である。段階 1 log `pico20260731_203816.log` の LodeRunner stretch は、
-遷移直後の 1 窓を除く 35 窓の集計で queue wait が frame time の約 **22.1%**、
-`lcd_queue_wait_us / lcd_queue_wait_count` が約 **101.2 us** だった。これは Xevious ではない。
-100 us sleep を使う queue-full loop の量子化とほぼ一致するため、stretch を最適化するときは
-queue depth を増やす前に sleep 幅または通知方式を独立に比較する。queue wait から
-「4.5 ms の overlap を必ず回収できる」とは断定せず、現時点では改善候補として記録する。
-同じ 100 us 量子化は新しい baseline の Xevious normal でも確認され、queue wait 比率中央値は
-8.9331%、1 wait は約 102.6 us だった。したがって normal でも上記の polling-first 規約を使う。
-段階 2 後は3 ROMすべてが平均・p95とも16,700 us以下になったため、normal向け段階 3 は実装しない。
-stretchの約27--30 ms/frameは別課題として残す。次工程は
-`docs/design/STRETCH_QUEUE_RETRY_OPTIMIZATION_PLAN_20260731.md`を正本とし、
-`1.1.30`計測baselineと`1.1.31`の10 us retry候補を同じ実機A/Bで判断する。
+次はqueue itemとstrip heightを変えず、queue depthだけを4から8へ増やす。通常buildの`.bss`は
+Phase 0 counter込みの`97548 -> 98956`、queue symbolは`0x580 -> 0xb00`を期待値とする。
+実装・build・実機採否の正本は
+`docs/design/STRETCH_QUEUE_DEPTH_OPTIMIZATION_PLAN_20260731.md`である。
 
 ### 段階 4 以降 (任意、別課題)
 
-- LCD COLMOD 12 bit/pixel 化
+- LCD frame単位window設定
   (`docs/design/LCD_BUS_BANDWIDTH_ANALYSIS_20260731.md` の候補 1)
 - `InfoNES_SetLineBuffer()` へ queue slot を直接渡して copy を廃止する
 - 4 px 1 word store 化

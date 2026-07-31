@@ -14,17 +14,21 @@
 
 ## 結論
 
-次の実装は2 commitに分ける。
+この実験は完了し、`1.1.31`の10 us候補は**不採用**と判定した。
+
+実装は2 commitに分けて行った。
 
 1. `1.1.30`: frame pacing counterとqueue閉塞episode数を`[CORE1_BASE]`へ出す計測baseline
 2. `1.1.31`: LCD worker queue-full時のretry sleepを`100 us`から`10 us`へ短縮する候補
 
-2つのUF2を先に作り、normal/stretch、3 ROMのA/Bと機能確認を1回の実機作業へまとめる。
-queue depth、通知方式、COLMODはこのA/B結果が出るまで実装せず、versionも予約しない。
+2つのUF2を先に作り、normal/stretch、3 ROMのA/Bと機能確認を1回の実機作業へまとめた。
+retry 1回は約100.5 usから約10.1 usへ短縮したが、stretchのframe timeは3 ROMとも
+500 us以上改善しなかった。Phase 0の計測fieldは残し、Phase 1 commit `8ba265f`だけを
+次実装の開始時にrevertする。
 
 ## 実装状況（2026-07-31）
 
-Phase 0とPhase 1の実装・buildは完了し、実機A/B待ちである。
+Phase 0とPhase 1の実装・build、実機A/B、採否判定まで完了した。
 
 - Phase 0 commit: `1f1c093` (`Add stretch queue retry baseline metrics`)
 - Phase 1 commit: `8ba265f` (`Shorten LCD queue retry interval`)
@@ -47,6 +51,52 @@ Phase 0とPhase 1の実装・buildは完了し、実機A/B待ちである。
 
 逆アセンブルでは、baselineのqueue hot path 2箇所が即値100、candidateの同じ2箇所だけが
 即値10になっている。drainは両方で100、core1の空queue待機は両方で50を維持している。
+
+## 実機A/B結果（2026-07-31）
+
+使用log:
+
+- baseline `1.1.30`: `/home/fuyuki/pico_dvl/codex/log/pico20260731_230528.log`
+- candidate `1.1.31`: `/home/fuyuki/pico_dvl/codex/log/pico20260731_231422.log`
+
+計画どおり、各ROM/modeで適格な最初の10連続窓を機械選択できた。baseline 323対、
+candidate 283対、合計606対の全logで`palette_protocol_faults=0`だった。
+candidateの実プレイでも表示、入力、音、normal/stretch切替、menu復帰に問題は見られなかった。
+
+### stretch主判定
+
+| ROM | baseline avg | candidate avg | 差 | baseline p95 | candidate p95 | p95差 |
+|---|---:|---:|---:|---:|---:|---:|
+| LodeRunner | 28,816.0 us | 28,803.5 us | -12.5 us (-0.04%) | 30,309.5 us | 30,231.0 us | -0.26% |
+| Project_DART | 29,834.5 us | 29,894.0 us | +59.5 us (+0.20%) | 31,151.0 us | 31,056.0 us | -0.30% |
+| Xevious | 26,282.5 us | 26,241.5 us | -41.0 us (-0.16%) | 27,532.0 us | 27,447.5 us | -0.31% |
+
+3 ROMとも採用条件の`-500 us`へ届かず、条件1を満たしたROMは0本だった。
+p95悪化や機能回帰はないが、速度効果が実機作業と実装維持に見合わないため不採用とする。
+
+### normal非退行
+
+| ROM | baseline avg | candidate avg | baseline p95 | candidate p95 | pacing余裕差 |
+|---|---:|---:|---:|---:|---:|
+| LodeRunner | 16,581.0 us | 16,582.0 us | 16,668 us | 16,668 us | +59.7 us/frame |
+| Project_DART | 16,575.5 us | 16,576.0 us | 16,668 us | 16,668 us | +65.7 us/frame |
+| Xevious | 16,581.0 us | 16,581.5 us | 16,668 us | 16,668 us | +60.3 us/frame |
+
+全ROMが`fps_x100`約6035、平均・p95とも16,700 us以下を維持した。normalの回帰はない。
+
+### 機構上の結論
+
+- `lcd_queue_wait_us / lcd_queue_wait_count`は約100.43--100.57 usから
+  約10.09--10.11 usへ短縮し、source変更は実機で効いている
+- retry/frameはLodeRunner約111から1112、Project_DART約110から1088、
+  Xevious約145から1444へ約10倍になった
+- それでもqueue wait/frameはLodeRunner約11.14から11.22 ms、Project_DART約11.02から
+  11.00 ms、Xevious約14.59から14.56 msで、実質的に変わらなかった
+- episode/frameも約29--31のままで、1 stripごとに閉塞する構造は変わらなかった
+
+従って事前モデルの「各episodeの最後に平均50 us余分にsleepする」という仮定は、
+frame timeを説明する主因ではなかった。queue waitの大部分はcore1がLCD DMA完了を待っている
+実時間であり、polling量子だけを短くしても転送とproducer/consumerの重なりは改善しない。
 
 ## 目的
 
@@ -381,19 +431,13 @@ Phase 0の計測fieldとversion 1.1.30は残す。
 
 ## A/B後の分岐
 
-### 10 usが採用された場合
+実測結果は「10 usでframe timeが改善しない場合」に確定した。
 
-- stretchのframe timeが24.58 msのバス下限から1 ms以内なら、polling/depthの追加変更を止める
-- 1 ms超の差と大きいqueue waitが残る場合だけ、depth 6の独立計画を作る
-- depthを試す場合も、depth 4/6だけを変え、今回の10 usを共通baselineにする
-
-### 10 usでframe timeが改善しない場合
-
-- `lcd_queue_wait_us / lcd_queue_wait_count`だけ短く、`lcd_empty_polls`低下やp95悪化がある場合は、
-  lock再試行の競合が疑われるため通知方式を別計画として検討できる
-- retry時間もframe timeも変わらない場合はpolling系列を打ち切り、depthを自動的には実装しない
-- stretchを40.7 fpsのRGB565バス上限より先へ進めるにはCOLMOD 12 bit/pixelが必須なので、
-  次の主候補をLCD帯域計画のCOLMODへ移す
+- retry時間だけが短くなり、frame timeとqueue waitは変わらなかったため、polling幅と通知方式の
+  系列を打ち切る
+- ST7365P仕様では`COLMOD=0x63`は12 bit/pixelを意味せず未定義なので、COLMOD候補も破棄する
+- 次は`docs/design/STRETCH_QUEUE_DEPTH_OPTIMIZATION_PLAN_20260731.md`を正本として、
+  8-line stripを丸ごと先行保持できるdepth 8だけを独立A/Bする
 
 ## 実装前の固定事項
 

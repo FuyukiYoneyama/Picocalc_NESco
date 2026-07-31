@@ -30,14 +30,21 @@
 
 ## 現在必要な計画
 
-- Stretch LCD queue retry optimization
-  - 計画: `docs/design/STRETCH_QUEUE_RETRY_OPTIMIZATION_PLAN_20260731.md`
-  - `1.1.30`でpacing sleepとqueue閉塞episode数をbaseline logへ追加し、`1.1.31`で
-    queue-full retryを100 usから10 usへ短縮して、normal/stretchの同一実機A/Bで採否を決める
-  - 実効retry量子は診断値とし、採否はstretchのframe改善とnormal/stretchの非退行で決める
-  - queue depth、通知方式、COLMODはこの結果後の条件付き別課題とする
+- Stretch LCD worker queue depth optimization
+  - 計画: `docs/design/STRETCH_QUEUE_DEPTH_OPTIMIZATION_PLAN_20260731.md`
+  - 不採用の`1.1.31` 10 us retryだけをrevertし、`1.1.30`の計測fieldを残す
+  - `1.1.32`でqueue depthだけを4から8へ変更し、8-line strip 1個分を先行保持できるかをA/Bする
+  - stretchのframe time/p95を主判定にし、normalのpacing上限、fault 0、機能確認を非退行条件にする
 
 ## 完了済み計画 / 結果
+
+- Stretch LCD queue retry optimization
+  - 計画: `docs/design/STRETCH_QUEUE_RETRY_OPTIMIZATION_PLAN_20260731.md`
+  - 結果: `docs/project/Picocalc_NESco_HISTORY.md`
+  - `1.1.30` baselineと`1.1.31` 10 us候補を3 ROMのnormal/stretchでA/Bした
+  - retry 1回は約100.5 usから約10.1 usへ短縮したが、stretch改善は
+    `-12.5 / +59.5 / -41.0 us`で、500 us採用条件へ届かなかった
+  - polling量子の短縮は不採用。Phase 0計測fieldは残し、Phase 1だけを次実装開始時にrevertする
 
 - Compile-time logging cleanup / source comment cleanup
   - 結果: `docs/project/Picocalc_NESco_HISTORY.md`

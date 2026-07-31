@@ -10,6 +10,50 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## `1.1.30` / `1.1.31` stretch queue retry実験は不採用 (2026-07-31)
+
+- 実装:
+  - `1.1.30`で`lcd_queue_wait_episodes`とframe pacing fieldを`[CORE1_BASE]`へ追加した
+  - Phase 0 commitは`1f1c093 Add stretch queue retry baseline metrics`
+  - `1.1.31`でframe hot pathのqueue-full retry 2箇所だけを100 usから10 usへ変更した
+  - Phase 1 commitは`8ba265f Shorten LCD queue retry interval`
+- build:
+  - 通常buildは両Phaseとも`text=278844 data=0 bss=97548`
+  - 計測buildは両Phaseとも`text=283776 data=0 bss=97892`
+  - baseline計測UF2 SHA-256:
+    `f4588e39fa0ceb403e1d55f7c3c94765b6ebc2b8322227d2c804959096c04046`
+  - candidate計測UF2 SHA-256:
+    `767a914c32add132edaa2a7c2b42fe9fa390a5a128eb0e4375fc5ec3b70ac2bc`
+- 実機A/B:
+  - baseline log: `/home/fuyuki/pico_dvl/codex/log/pico20260731_230528.log`
+  - candidate log: `/home/fuyuki/pico_dvl/codex/log/pico20260731_231422.log`
+  - 各ROM/modeで最初の適格な10連続窓を選び、6測定すべてで比較区間を取得できた
+  - 全log 606対で`palette_protocol_faults=0`
+  - candidateの実プレイでも表示、入力、音、normal/stretch切替、menu復帰に問題は見られなかった
+- stretch結果:
+
+  | ROM | `frame_us_avg` baseline | candidate | 差 | `p95_us`差 |
+  |---|---:|---:|---:|---:|
+  | LodeRunner | 28,816.0 us | 28,803.5 us | -12.5 us (-0.04%) | -0.26% |
+  | Project_DART | 29,834.5 us | 29,894.0 us | +59.5 us (+0.20%) | -0.30% |
+  | Xevious | 26,282.5 us | 26,241.5 us | -41.0 us (-0.16%) | -0.31% |
+
+- normal結果:
+  - 3 ROMとも`frame_us_avg`は16,576--16,582 us、`p95_us=16,668 us`、
+    `fps_x100`約6035を維持した
+  - normalの速度・機能回帰はない
+- 機構確認:
+  - retry 1回は約100.5 usから約10.1 usへ短縮し、retry/frameは約10倍になった
+  - queue wait/frameはLodeRunner約11.14→11.22 ms、Project_DART約11.02→11.00 ms、
+    Xevious約14.59→14.56 msで、ほぼ変わらなかった
+  - queue閉塞は約29--31 episode/frameのままで、1 stripごとの閉塞構造も変わらなかった
+- 判定:
+  - 3 ROM中0本しか`500 us/frame`改善条件を満たさなかったため、10 us候補は不採用
+  - retry量子化は主な損失原因ではなく、queue waitの大部分はLCD DMA完了を実際に待つ時間だった
+  - Phase 1 commit `8ba265f`だけを次実装開始時にrevertする。Phase 0の計測commitは残す
+  - `1.1.31`は不採用実験の識別versionとして再利用しない
+  - 次は`docs/design/STRETCH_QUEUE_DEPTH_OPTIMIZATION_PLAN_20260731.md`に従い、depth 4/8を独立A/Bする
+
 ## 1.1.29 BG palette index 段階2 合格 (2026-07-31)
 
 - 実装:
@@ -59,7 +103,8 @@
     core0/core1 の SRAM 競合低下が含まれていなかったためと考えられる。個別の内訳は未計測
   - normal 3 ROM が pacing 上限へ張り付いたため、
     **normal view では `frame_us` による以降の改善も小さな劣化も検出できない**。
-    次の計測基準は`docs/design/STRETCH_QUEUE_RETRY_OPTIMIZATION_PLAN_20260731.md`を正本とする
+    当時の次計測基準は`docs/design/STRETCH_QUEUE_RETRY_OPTIMIZATION_PLAN_20260731.md`を正本とした。
+    このretry実験の完了結果は本文書冒頭に記録済みである
 
 ## 1.1.28 段階2 A/B baseline (2026-07-31)
 
@@ -144,7 +189,8 @@
     palette index 化を段階 1、段階 2 の順に実装する
   - 段階 2 では、3 ROM すべてで平均 `frame_us` の改善が `3%` 未満なら不採用とする
   - `Xevious.nes` stretch は約 `36.7 fps` (`27.3 ms/frame`) であり、
-    LCD バス上限 `40.7 fps` には貼り付いていない。COLMOD 12 bit/pixel は BG 実装の後に判断する
+    LCD バス上限 `40.7 fps` には貼り付いていない。当時はCOLMOD 12 bit/pixelを後続候補としたが、
+    後日のST7365P仕様確認で`0x63`は未定義と判明したため候補から破棄した
   - `lcd_queue_wait_us` / `lcd_queue_wait_count` は 1 秒窓ごとに reset されず累積して見える。
     queue depth の判断に使う前に計測を修正し、baseline build だけを再計測する
 - 状態:
