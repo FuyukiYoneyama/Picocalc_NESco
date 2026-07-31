@@ -292,11 +292,12 @@ stretch view を 60fps に近づけられるのは COLMOD 12 bit のみで、
 `sleep_us(100)`とほぼ一致した。上表はLCD帯域側へ着手した後の順序であり、実際の次工程は
 `docs/design/STRETCH_QUEUE_RETRY_OPTIMIZATION_PLAN_20260731.md`を正本とする。
 
-1. `1.1.30`でpacing sleepをbaseline logへ追加する
+1. `1.1.30`でpacing sleepとqueue閉塞episode数をbaseline logへ追加する
 2. `1.1.31`でframe hot pathのqueue retryだけを100 usから10 usへ変更してA/Bする
 3. 結果に応じてdepth、通知方式、COLMODのどれを計画するか決める
 
 計測baselineとcandidateを先に作り、実機確認はnormal/stretch、3 ROMを1回にまとめる。
+30 strip/frameと平均過剰sleep 50 usから、10 us化の期待回収量は約1.35 ms/frameである。
 
 なお 1 を入れて予算比 70% まで下がれば、
 sysclk を 200 MHz へ落として規格超過を一段解消する選択肢が現実的になる。

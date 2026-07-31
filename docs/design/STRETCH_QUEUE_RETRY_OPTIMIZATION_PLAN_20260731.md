@@ -16,7 +16,7 @@
 
 次の実装は2 commitに分ける。
 
-1. `1.1.30`: 既存のframe pacing counterを`[CORE1_BASE]`へ出す計測baseline
+1. `1.1.30`: frame pacing counterとqueue閉塞episode数を`[CORE1_BASE]`へ出す計測baseline
 2. `1.1.31`: LCD worker queue-full時のretry sleepを`100 us`から`10 us`へ短縮する候補
 
 2つのUF2を先に作り、normal/stretch、3 ROMのA/Bと機能確認を1回の実機作業へまとめる。
@@ -58,8 +58,45 @@ Project_DART 5.65 ms、Xevious 2.64 msであり、retry短縮で回収できる�
 「失敗したpush試行数」である。`lcd_queue_wait_us / lcd_queue_wait_count`はretry 1回の
 平均時間としてだけ読む。
 
+retry幅を変えても意味が変わらない比較値を得るため、Phase 0で
+`lcd_queue_wait_episodes`を追加する。LINE / `FRAME_END`それぞれのloopで
+`queue_waited`がfalseからtrueになるときだけ1増やし、1回の連続した閉塞期間を1 episodeと数える。
+これにより次を区別できる。
+
+- `lcd_queue_wait_count / frames`: push失敗試行数。10 us化では増えるのが正常
+- `lcd_queue_wait_episodes / frames`: 閉塞期間数。retry幅を変えても意味が同じ
+- `lcd_queue_wait_count / lcd_queue_wait_episodes`: 1閉塞あたりのretry数
+- `lcd_queue_wait_us / lcd_queue_wait_episodes`: 1閉塞あたりの実待ち時間
+
 `display_lcd_worker_stop_and_drain()`にも`sleep_us(100)`があるが、これはmode/menu遷移時の
 drain待ちでありframe hot pathではない。今回変更しない。
+
+### 効果の予測
+
+1回の閉塞期間では、最後以外のretryはqueueがまだfullなので必要な待ちである。
+queueに空きができた後も寝ている過剰分は最後のretry 1回にだけ生じ、解除時刻がsleep内で
+一様なら平均過剰sleepはretry幅の半分になる。
+
+stretchは8 source lineごとに1 stripをflushするため、1 frameは`240 / 8 = 30 strip`である。
+`1.1.29`の参考区間では次のretry数だった。
+
+| ROM | retry/frame | 30 stripで割ったretry/strip |
+|---|---:|---:|
+| LodeRunner | 109.4 | 3.6 |
+| Project_DART | 103.8 | 3.5 |
+| Xevious | 131.1 | 4.4 |
+
+閉塞が概ねstripごとに1回というモデルと整合する。従って机上期待値は次になる。
+
+```text
+100 us retryの平均過剰sleep = 30 episodes/frame * 50 us  = 1,500 us/frame
+ 10 us retryの平均過剰sleep = 30 episodes/frame *  5 us  =   150 us/frame
+期待回収量                                         = 1,350 us/frame
+```
+
+採用閾値500 usは期待値の約37%である。実測が約1.35 msから大きく外れた場合は、
+`lcd_queue_wait_episodes`、retry/episode、`lcd_empty_polls`から、閉塞回数モデルとlock競合の
+どちらが外れたかを調べる。retry回数へ90 usを掛けて効果を見積もってはならない。
 
 ### frame pacing counter
 
@@ -78,21 +115,27 @@ estimated_nonwait_us_per_frame =
     - frame_pacing_sleep_us / frames
 ```
 
-normalの主判定には式の差より、直接観測できる`frame_pacing_sleep_us / frames`の増減を優先する。
+normalのpacing余裕を記録するときは式の差より、直接観測できる
+`frame_pacing_sleep_us / frames`の増減を優先する。ただしretry短縮ではこの値が増えるのが自然なので、
+Phase 1のnormal非退行主判定は`frame_us_avg`、p95、fpsとし、pacing sleepは補助確認にする。
 
 ## Phase 0: pacing計測baseline (`1.1.30`)
 
 ### source変更
 
-`infones/InfoNES.cpp`の`[CORE1_BASE]`末尾へ次の2 fieldを追加する。
+`[CORE1_BASE]`末尾へ次の3 fieldを追加する。
 
 ```text
-frame_pacing_sleep_us=N frame_pacing_sleep_count=N
+lcd_queue_wait_episodes=N frame_pacing_sleep_us=N frame_pacing_sleep_count=N
 ```
 
 - 既存fieldの名前と順序は変えない
 - `view_mode`の後ろへ追加する
-- `display_perf_take_window()`、accumulator、lock、take-and-zeroは変更しない
+- `platform/display.c`へcore0専用の`uint32_t s_perf_lcd_queue_wait_episodes`を追加する
+- LINE / `FRAME_END`の両loopで、最初に`queue_waited=true`へ変える箇所だけepisodeを1増やす
+- `display_perf_window_t`へ`lcd_queue_wait_episodes`を追加し、`display_perf_reset()`と
+  `display_perf_take_window()`で他のcore0 counterと同じくlockなしでtake-and-zeroする
+- core1 handoff、queue lock、既存counterの意味は変更しない
 - hot pathへtimer callを追加しない
 - `g_perf_frame_pacing_sleep_us` / `g_perf_frame_pacing_sleep_count`の未使用globalは、
   log出力に使わず削除する。正本は`display_perf_window_t`の値だけとする
@@ -129,6 +172,16 @@ LINE itemと`FRAME_END` itemのqueue-full loopにある2個の`sleep_us(100)`だ
 通知方式は同期設計と遷移時のwake条件が増えるため、10 us候補の結果が必要性を示した場合だけ
 別計画にする。
 
+使用中のpico-sdkでは`PICO_TIME_DEFAULT_ALARM_POOL_DISABLED=0`、
+`PICO_TIME_SLEEP_OVERHEAD_ADJUST_US=6`がdefaultである。`sleep_us(10)`はalarmで目標の6 us前まで
+待った後、最後の6 usを`busy_wait_until()`で待つ。関数・alarm設定の所要時間によっては
+10 usの大半がbusy waitになる。従って10 us候補は0 us pollingより上限があるものの、
+完全な低消費電力sleepではない。retry数とqueue lock取得試行は約10倍へ増え得る。
+
+実装時に、使用するSDKの`src/common/pico_time/time.c`と生成configで上記分岐を再確認する。
+実機では`lcd_queue_wait_us / lcd_queue_wait_count <= 30 us`、`lcd_empty_polls`、p95で、
+要求した10 usとlock競合の実影響を確認する。
+
 versionを`1.1.31`へ更新する。通常buildと`NESCO_CORE1_BASELINE_LOG=ON` buildを行い、
 計測artifactは`build-stretch-retry-10us/Picocalc_NESco.uf2`とする。
 
@@ -158,7 +211,8 @@ Phase 1ではdirectory名だけ`build-stretch-retry-10us`へ変えて同じoptio
 - ELF / UF2内のversionとbuild ID
 - ARM EABI5、size、SHA-256
 - `git diff --check`
-- queue item 352 byte、queue depth 4、通常buildの`.bss=97544`を維持する。
+- queue item 352 byte、queue depth 4を維持する
+- episode counter 4 byteの追加により、通常buildの`.bss`期待値を`97544 -> 97548`とする。
   異なる場合はmap / `nm --size-sort`で差を説明してから実機へ進む
 - Phase 0ではqueue retryが2箇所とも100 usのまま
 - Phase 1ではframe hot pathの2箇所だけが10 us定数を使い、drainの100 usは残る
@@ -171,20 +225,38 @@ candidate 1.1.31とも同じ順で行う。タイトル画面を使い、採用�
 各build・各ROMで次を行う。
 
 1. ROMを開始し、最初の`[CORE1_BASE]` / `[FRAME_STATS]`対を遷移窓として捨てる
-2. normalで少なくとも12個の連続した対を取る
+2. normalで少なくとも30個の連続した対を取る
 3. stretchへ1回切り替える
-4. 切替入力を含む窓と、その次の最初の全stretch窓を捨てる
-5. stretchで少なくとも12個の連続した対を取る
+4. 切替入力を含む窓を1窓目として、切替後の連続3窓を捨てる
+5. その後、stretchで少なくとも30個の連続した対を取る
 6. selected windowは`input_events=0`、`palette_protocol_faults=0`、mode一致、対欠落なしとする
+
+最低30窓は既存logへ`max/min <= 1.015`を適用した結果から固定した。最初の安定10窓を
+含めるために必要だった総窓数は次のとおりで、12窓では3測定が必ず不足する。
+
+| 測定 | 安定10窓の開始 | 必要だった総窓数 |
+|---|---:|---:|
+| LodeRunner normal | w2 | 12 |
+| Project_DART normal | w11 | 21 |
+| Xevious normal | w2 | 12 |
+| LodeRunner stretch | w2 | 12 |
+| Project_DART stretch | w16 | 26 |
+| Xevious stretch | w5 | 15 |
+
+切替後3窓を固定で捨てるのは、既存Xevious stretchで切替後3窓目に
+`frame_us_avg=21,947 us`の窓長不整合が観測されたためである。
 
 attract demoの開始位置がROM・buildでずれるため、単純な「開始後N窓」や任意の3窓を使わない。
 各modeで、遷移窓を除いた候補から次を満たす**最初の10連続窓**を機械的に選ぶ。
 
-- 10個の`frame_us_avg`がその10個の中央値に対して各`±0.5%`以内
 - `max(frame_us_avg) / min(frame_us_avg) <= 1.015`
 
-条件を満たす10連続窓がなければ、そのbuild・ROM・modeだけ取り直す。後ろの都合のよいplateauを
-目視で選ばない。比較値は10窓の各fieldの中央値とする。
+中央値からの`±0.5%`条件は使わない。Project_DART normalは約20,044 usと20,185 usの
+2値振動を持ち、全体のmax/minは約1.007でも片方が中央値から0.5%を超えるためである。
+実ログではmax/minだけならDART normalは安定後に合格する。
+
+30窓の中に条件を満たす10連続窓がなければ、そのbuild・ROM・modeだけ取り直す。
+後ろの都合のよいplateauを目視で選ばない。比較値は選ばれた10窓の各fieldの中央値とする。
 
 計測A/B後、candidateだけで3 ROMを短時間プレイし、normal/stretch切替、入力、音、sprite、
 画面左端、menu復帰を確認する。この機能確認区間は性能比較へ混ぜない。
@@ -199,7 +271,10 @@ stretchの主判定:
 診断値:
 
 - `lcd_queue_wait_us / frames`中央値
+- `lcd_queue_wait_episodes / frames`中央値
 - `lcd_queue_wait_count / frames`中央値
+- `lcd_queue_wait_count / lcd_queue_wait_episodes`中央値
+- `lcd_queue_wait_us / lcd_queue_wait_episodes`中央値
 - `lcd_queue_wait_us / lcd_queue_wait_count`中央値
 - `lcd_empty_polls`中央値
 
@@ -217,16 +292,19 @@ normalの回帰判定:
 
 1. stretch 3 ROMのうち2 ROM以上で`frame_us_avg`中央値がbaselineより**500 us以上短い**
 2. stretchのどのROMも`frame_us_avg`中央値と`p95_us`中央値がbaselineより**1%超悪化しない**
-3. candidateの`lcd_queue_wait_us / lcd_queue_wait_count`中央値がbaselineより明確に短く、
+3. stretch candidateの`lcd_queue_wait_us / lcd_queue_wait_count`中央値がbaselineより明確に短く、
    3 ROMとも**30 us以下**である
-4. normal 3 ROMの`p95_us`中央値が`16,700 us`以下を維持する
+4. normal 3 ROMの`frame_us_avg`中央値と`p95_us`中央値が`16,700 us`以下、
+   `fps_x100`中央値が`6000`以上を維持する
 5. normalの`frame_pacing_sleep_us / frames`中央値が、どのROMもbaselineより
    **200 us/frame超減らない**
 6. selected windowすべてで`palette_protocol_faults=0`
 7. normal/stretchの表示、入力、音、menu復帰に回帰がない
 
-条件1は効果が人間側の実機作業コストに見合う最低線、条件2と5は残り1 ROMとnormalの
-非退行条件である。最大値は複数窓で再現した場合だけ原因調査へ加える。
+条件1は約1.35 msの期待回収量に対して、効果が人間側の実機作業コストに見合う最低線である。
+条件2と4が残り1 ROMとnormalの実質的な非退行条件になる。retry短縮ではnormalのqueue waitが
+pacing sleepへ移るため、条件5は通常自動的に通る補助的な整合確認であり、core0の小さな劣化を
+単独で検出する安全網とは扱わない。最大値は複数窓で再現した場合だけ原因調査へ加える。
 
 不合格なら結果をHISTORYへ記録し、Phase 1 commitだけを`git revert`する。
 Phase 0の計測fieldとversion 1.1.30は残す。

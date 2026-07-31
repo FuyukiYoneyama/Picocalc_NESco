@@ -48,13 +48,18 @@
 - `[next]` stretch LCD queue retryの100 us量子化をA/Bする
   - 詳細計画の正本は
     `docs/design/STRETCH_QUEUE_RETRY_OPTIMIZATION_PLAN_20260731.md` とする
-  - Phase 0 (`1.1.30`): 既存の`frame_pacing_sleep_us/count`を
-    `[CORE1_BASE]`末尾へ出す計測baselineを作る
+  - Phase 0 (`1.1.30`): 既存の`frame_pacing_sleep_us/count`と、新設する
+    `lcd_queue_wait_episodes`を`[CORE1_BASE]`末尾へ出す計測baselineを作る
+    - episodeは連続したqueue閉塞期間の開始だけを数え、retry回数と分離する
+    - 4 byte counter追加後の通常build `.bss`期待値は`97548`
   - Phase 1 (`1.1.31`): frame hot pathのqueue-full retry 2箇所だけを
     `sleep_us(100)`から`10 us`定数へ変更する
   - Phase 0単独の実機確認は行わず、2つのUF2を先に作ってnormal/stretch、3 ROMの
     A/Bと機能確認を1回へまとめる
-  - stretchはframe timeとp95、normalはp95とpacing sleep/frameで判定する
+    - 各ROM/modeを最低30窓取り、`max(frame_us_avg) / min(frame_us_avg) <= 1.015`を満たす
+      最初の10連続窓を比較する。中央値`±0.5%`条件は2値振動を排除するため使わない
+  - stretchはframe timeとp95、normalはframe time・p95・fpsで非退行を判定し、
+    pacing sleep/frameは余裕量の補助確認に使う
     - `frame_us - queue wait - pacing sleep`はaudio waitなどを含み得る診断用推定値であり、
       純粋なcore0実働時間の確定値とは扱わない
   - queue depth、通知方式、COLMODはA/B結果が出るまで実装せず、versionも予約しない
