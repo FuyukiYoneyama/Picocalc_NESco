@@ -55,3 +55,27 @@
   - 着手する場合は COLMOD 12 bit/pixel から始める
     - `NesPalette` が RGB444 のため、色情報を落とさずに転送量を 25% 減らせる
     - panel 側の色展開が一致するかの実機確認が前提になる
+- `[pending]` LCD 帯域削減に着手する前に、事前計測を 2 件取る
+  - 目的:
+    - 実装後に効果を測れる基準値を先に作る
+    - `1.1.26` の実測 fps は 3 ROM とも normal のバス下限 `15.73 ms` を上回っており、
+      normal が core0 律速か LCD バス律速かを実装前に確定させる
+  - 計測 1: `1.1.26` の stretch 実測 fps
+    - 対象は `Xevious.nes` stretch
+    - 最後の stretch 実測は `1.0.15` の `36.34 fps` で、`1.1.26` の値が存在しない
+    - stretch のバス上限は `40.7 fps` なので、天井に貼り付いているかどうかで
+      COLMOD 12 bit/pixel の効果見積もりが変わる
+  - 計測 2: `lcd_queue_wait_us` / `lcd_queue_wait_count`
+    - `NESCO_CORE1_BASELINE_LOG=ON` の `[CORE1_BASE]` から取得する
+    - 計測機構は `1.1.1` で追加済みだが、実測値が履歴に残っていない
+    - LCD worker queue depth は 4 scanline のため、core1 の strip DMA 待ちが
+      core0 の `PostDrawLine` を止めている量がここに出る
+    - normal 側で期待できる二次効果の大きさがこれで決まる
+  - 参照値 (`1.1.26` / `20260719_174109.log`):
+    - `Xevious.nes` `55.50 fps` (`18.02 ms`)、バス下限との差 `+2.29 ms`
+    - `LodeRunner.nes` `47.99 fps` (`20.84 ms`)、バス下限との差 `+5.11 ms`
+    - `Project_DART_V1.0.nes` `45.68 fps` (`21.89 ms`)、バス下限との差 `+6.16 ms`
+  - 判断基準:
+    - stretch が `40.7 fps` 付近なら COLMOD 12 bit/pixel を実装する
+    - stretch が `35 fps` 前後で `lcd_queue_wait_us` も小さいなら、
+      両表示とも core0 律速なので LCD 帯域側は着手しない

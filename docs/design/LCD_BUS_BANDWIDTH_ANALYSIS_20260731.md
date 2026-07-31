@@ -288,6 +288,78 @@ stretch view を 60fps に近づけられるのは COLMOD 12 bit のみで、
 sysclk を 200 MHz へ落として規格超過を一段解消する選択肢が現実的になる。
 これは予算比 94.4% の現状では取れない手である。
 
+## 現在の律速はどちらか
+
+上記の削減は、LCD バスが律速である場合にしか fps に現れない。
+`1.1.26` の実機 A/B (`/home/fuyuki/pico_dvl/codex/log/20260719_174109.log`) では次の値である。
+
+| ROM | 実測 fps | frame time | normal バス下限 15.73 ms との差 |
+|---|---|---|---|
+| `Xevious.nes` | 55.50 | 18.02 ms | +2.29 ms |
+| `LodeRunner.nes` | 47.99 | 20.84 ms | +5.11 ms |
+| `Project_DART_V1.0.nes` | 45.68 | 21.89 ms | +6.16 ms |
+
+3 ROM とも frame time がバス下限を上回っている。
+したがって normal view の平均 fps を決めているのは core0 の emulation であり、
+LCD バスではない。バス下限を下げても、上に乗っている 18〜22 ms は動かない。
+
+`0.1.74` 期のログでも `lcd_wait_us=29253.61` / `frames=52.95` すなわち
+1 frame あたり `552 µs` であり、core0 が LCD を待つ時間は frame の 3% 程度である。
+
+これは transfer が DMA と PIO で非同期に走っているためで、設計どおりの結果である。
+
+### 予測される効果
+
+- normal view: 平均 fps はほぼ変わらない
+  - 期待できるのは二次効果のみで、LCD worker queue depth が 4 scanline しかないため
+    (`platform/display.c` の `DISPLAY_LCD_WORKER_QUEUE_DEPTH`)、
+    core1 の strip DMA 待ちで queue が埋まると core0 が `PostDrawLine` で止まる
+  - core1 の非重複余裕は Xevious 換算で `2.29 ms` から `6.22 ms` に増えるため、
+    平均 fps ではなく最低 fps 側が改善する可能性がある
+  - ただし `Xevious.nes` の余裕は `2.29 ms` しかなく、重い場面では
+    現在も LCD バスに当たっている可能性が残る
+- stretch view: ここが本命である
+  - バス上限 `40.7 fps` は確実に効く位置にある
+  - `1.1.26` の stretch 実測が存在しないため、天井に貼り付いているかは未確認
+  - 貼り付いている場合、上限は `40.7 fps` から `54.3 fps` へ上がる
+- 将来の core0 最適化に対する天井
+  - 現在の天井は `63.6 fps` で、`Xevious.nes` の `55.50 fps` との差は 8 fps しかない
+  - COLMOD 12 bit/pixel を入れると天井は `84.8 fps` になる
+
+### stretch で新たに律速になり得る箇所
+
+stretch の core1 は 1 frame で 300 line x 320 px を pack する
+(`platform/display.c` の `display_pack_line_stretch_320()`)。
+
+バスが `24.58 ms` から `18.43 ms` に縮むと、core1 はより短い時間で、
+かつ 1 byte あたりより複雑な詰め方をすることになる。
+RGB565 は 2 px = 4 byte で境界が揃うが、RGB444 は 2 px = 3 byte で揃わない。
+stretch が core1 律速へ移る可能性がある。
+
+緩和策は本文書の候補内にある。
+
+- 候補 3 (DMA 32 bit 化) を stretch では同時に入れる。
+  packer の store 数が 4 px あたり 8 回から 2 回に減り、12 bit 化の増分を相殺できる
+- palette LUT を RGB444 のまま出す。
+  `display_init()` は現在 RGB444 nibble を bit 複製して RGB565 へ展開しているが、
+  展開せず 12 bit のまま `s_line_buffer` に置けば packer は shift だけで済む。
+  LUT テーブルの差し替えで済み、hot path を触らない。
+  ただし InfoNES 側が `s_line_buffer` の値に対して monochrome bit や
+  color emphasis のような色演算をしていないことが前提になる
+
+## 実装前に取る計測
+
+上の予測には未確認が 2 つ残っており、これを潰さないと実装の効果を判定できない。
+着手前に以下を取る。詳細は `docs/project/TASKS.md` の該当項目を正本とする。
+
+1. `1.1.26` の stretch 実測 fps (`Xevious.nes` stretch)
+   - `40.7 fps` 付近なら stretch はバス律速で、COLMOD 12 bit/pixel の効果が確定する
+   - `35 fps` 前後なら core0 律速で、効果は薄い
+2. `lcd_queue_wait_us` / `lcd_queue_wait_count`
+   - `NESCO_CORE1_BASELINE_LOG=ON` の `[CORE1_BASE]` から取得する
+   - 計測機構は `1.1.1` で追加済みだが実測値が履歴に残っていない
+   - normal 側の二次効果の大きさがこれで決まる
+
 ## 未確認事項
 
 以下は実機確認が必要である。
@@ -295,3 +367,6 @@ sysclk を 200 MHz へ落として規格超過を一段解消する選択肢が�
 - COLMOD 12 bit/pixel での panel 側の色展開が、現在の bit 複製展開と一致するか
 - RAMWR 途中の CS deassert で GRAM address pointer が保持されるか
 - `lcd_wait_idle()` 1 回あたりの実費用と、1 frame 180 回の合計
+- `1.1.26` の stretch 実測 fps
+- `lcd_queue_wait_us` の実測値
+- InfoNES 側が `s_line_buffer` の値に色演算をしていないか
