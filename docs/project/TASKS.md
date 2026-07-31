@@ -59,8 +59,9 @@
     A/Bと機能確認を1回へまとめる
     - 各ROM/modeを最低30窓取り、`max(frame_us_avg) / min(frame_us_avg) <= 1.015`を満たす
       最初の10連続窓を比較する。中央値`±0.5%`条件は2値振動を排除するため使わない
-    - 各測定の`frames`中央値から`±1`を外れる遷移窓は除外し、Project_DART stretchなどで
-      安定10窓が得られなければ、異常と決めず40窓へ延長する
+    - `frames`はframe timeとほぼ従属する診断値に留め、窓選択には使わない。遷移窓は固定破棄、
+      `input_events=0`、mode一致、log対の整合で除外する
+    - Project_DART stretchなどで安定10窓が得られなければ、異常と決めず40窓へ延長する
     - stretch連続30窓は既存の短いepisodeを連結した解析とは異なる新しい測定条件である
   - stretchはframe timeとp95、normalはframe time・p95・fpsで非退行を判定し、
     pacing sleep/frameは余裕量の補助確認に使う

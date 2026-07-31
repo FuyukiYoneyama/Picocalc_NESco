@@ -261,12 +261,12 @@ stretchを30窓連続で無操作測定する今回の条件はまだ実行さ�
 
 | 測定 | 安定10窓の開始 | 必要だった総窓数 |
 |---|---:|---:|
-| LodeRunner normal | w2 | 12 |
-| Project_DART normal | w11 | 21 |
-| Xevious normal | w2 | 12 |
-| LodeRunner stretch | w2 | 12 |
+| LodeRunner normal | w2 | 11 |
+| Project_DART normal | w11 | 20 |
+| Xevious normal | w2 | 11 |
+| LodeRunner stretch | w2 | 11 |
 | Project_DART stretch | w16 | 25 |
-| Xevious stretch | w5 | 15 |
+| Xevious stretch | w5 | 14 |
 
 stretch行は連続30窓で再確認した値ではないため、必要窓数の保証には使わない。特に
 Project_DART stretchは参考値でも25窓を必要とし、30窓に対する余裕が5窓しかない。
@@ -274,20 +274,23 @@ Project_DART stretchは参考値でも25窓を必要とし、30窓に対する�
 
 切替後3窓の固定破棄はmode遷移処理を性能比較から遠ざけるための保守的な余白として残す。
 以前根拠にした`frame_us_avg=21,947 us`は安定したstretch窓ではなくmode遷移中の窓であり、
-「stretch切替後3窓目」という帰属は誤りだった。固定破棄だけに頼らず、窓長不整合を`frames`で除外する。
+「stretch切替後3窓目」という帰属は誤りだった。既存logで確認したmode遷移窓は
+`input_events != 0`であり、selected windowの既存条件で除外される。
 
 attract demoの開始位置がROM・buildでずれるため、単純な「開始後N窓」や任意の3窓を使わない。
-各modeの30窓について`frames`の中央値を`steady_frames`とする。次をすべて満たす窓だけを候補とし、
-不適格な窓は連続性を切る。その候補から条件を満たす**最初の10連続窓**を機械的に選ぶ。
+次をすべて満たす窓だけを候補とし、不適格な窓は連続性を切る。その候補から条件を満たす
+**最初の10連続窓**を機械的に選ぶ。
 
-- `abs(frames - steady_frames) <= 1`
 - `input_events=0`
 - `palette_protocol_faults=0`
 - mode一致、`[CORE1_BASE]` / `[FRAME_STATS]`対の欠落なし
 - `max(frame_us_avg) / min(frame_us_avg) <= 1.015`
 
-`frames`はnormalで概ね61、stretchではROMにより概ね33--37になる。固定値を全ROMへ課さず、
-各測定の中央値から外れた窓を除くことで、modeに依存せず遷移時の短い／長い窓を検出する。
+`frames`の中央値や分布は診断値として記録するが、selected windowの適格条件には使わない。
+窓の実時間がほぼ一定なら`frames`は`frame_us_avg`とほぼ同じ情報であり、30窓全体の中央値から
+狭く切ると、安定域とattract demo域をまたいだXevious normalのような二峰分布で両方を誤って
+排除し得るためである。実際、`1.1.28` Xevious normalでは最初の12窓の`frames=61`安定域が、
+30窓全体の中央値59.5に対する`±1`条件ではすべて除外される。
 
 中央値からの`±0.5%`条件は使わない。Project_DART normalは約20,044 usと20,185 usの
 2値振動を持ち、全体のmax/minは約1.007でも片方が中央値から0.5%を超えるためである。
@@ -315,6 +318,7 @@ stretchの主判定:
 - `lcd_queue_wait_us / lcd_queue_wait_episodes`中央値
 - `lcd_queue_wait_us / lcd_queue_wait_count`中央値
 - `lcd_empty_polls`中央値
+- `frames`中央値と分布（診断値のみ。窓選択には使わない）
 
 normalの回帰判定:
 
