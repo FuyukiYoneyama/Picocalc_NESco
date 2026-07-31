@@ -93,8 +93,8 @@
       - `bg_tile_us` が 8 ms 以上なら実装する
       - 4 ms 以上 8 ms 未満なら実装するが、段階 2 の実測で打ち切り判断を行う
       - 4 ms 未満なら見送り、`bg_us` / `sprite_us` を見て対象を選び直す
-    - 実測値: 3 ROM で概ね `6.6`〜`6.9 ms/frame`。実装するが、段階 2 で
-      3 ROM すべての平均 `frame_us` 改善が `3%` 未満なら不採用とする
+    - 実測値: 3 ROM で概ね `6.6`〜`6.9 ms/frame`。実装するが、段階 2 は
+      平均 `frame_us`、p95、protocol fault の固定条件で採否を決める
   - 計測 1: stretch 実測 fps — **完了**
     - 対象は `Xevious.nes` stretch
     - 最後の stretch 実測は `1.0.15` の `36.34 fps` で、`1.1.26` の値が存在しない
@@ -132,9 +132,22 @@
     - stretch が `35 fps` 前後で `lcd_queue_wait_us` も小さいなら、
       両表示とも core0 律速なので LCD 帯域側は着手しない
     - core0 側の判断基準は上記の計測 3 に記載する
-- `[pending]` BG line buffer を palette index の byte 化する案を検討する
+- `[in_progress]` BG line buffer を palette index の byte 化する
   - 正本は `docs/design/BG_LINE_BUFFER_INDEX_REDESIGN_20260731.md`
-  - 着手条件は上記の事前計測、特に計測 3 の結果である
+  - 段階 0 は完了済み。段階 1 を `1.1.28`、段階 2 を `1.1.29`、
+    段階 3 を `1.1.30` として、各段階を個別 commit・実機確認する
+  - 段階 1 の固定契約:
+    - `display_lcd_worker_palette_mark_dirty()` と
+      `display_lcd_worker_palette_force_snapshot()` を core0 API とする
+    - snapshot は queue item 内に持ち、core1 のローカル状態へ core0 から直接書かない
+    - reset、NES view の prepare、worker の stop/drain の 3 箇所で version 0 snapshot を強制する
+    - `NESCO_PALETTE_SNAPSHOT_LOG=ON` の protocol fault 0 を確認してから段階 2 へ進む
+  - 段階 2 は normal 3 ROM で 3 窓ずつ A/B 比較する
+    - 各 ROM の平均 `frame_us` 中央値を `3%` 以上短縮し、p95 中央値を `1%` 超悪化させず、
+      protocol fault 0 なら採用する
+    - 不合格なら結果を HISTORY へ記録して、段階 2 と段階 1 の commit を順に `git revert` する
+  - queue wait は段階 2 で `display_perf_take_window()` により 1 秒窓ごとの値へ直す
+    - depth 4 の基準はこの修正後に取り直し、段階 3 (depth 6) と比較する
   - 狙いは core0 の PPU background 描画を軽くすることで、
     LCD 帯域側と違い normal view の fps に直接効く
   - scanline buffer を RGB565 の色から palette RAM index の byte へ変え、
@@ -155,7 +168,7 @@
     - queue item が小さくなるため queue depth を増やせる
       - snapshot 込みでは depth 6 が RAM 中立 (`-48 byte`)、
         depth 8 は `+656 byte` である。「RAM 増なしで depth 8」は成立しない
-      - まず depth 6 で始め、計測 2 の結果次第で depth 8 を検討する
+      - まず depth 6 で始め、修正後の窓単位 queue wait の結果次第で depth 8 を検討する
     - core1 が index から色への LUT を引く形になるため、
       LCD の COLMOD 12 bit/pixel 化が LUT 出力の差し替えだけで済むようになる
   - 削減量の理論値は約 `2.0 ms/frame` だが、これは実効値の予測ではない
