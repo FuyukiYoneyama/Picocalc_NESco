@@ -10,6 +10,26 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.28 段階2 A/B baseline (2026-07-31)
+
+- 計測版:
+  - `build-bg-index-baseline/Picocalc_NESco.uf2`
+  - ARM EABI5、`text=283552 data=0 bss=99296`
+  - SHA-256: `48e9642a946dcf7ddcbd8c921413693c8478d3a8cba0581165c06777f7cd79cf`
+- 実機 log: `/home/fuyuki/pico_dvl/codex/log/pico20260731_212613.log`
+- 固定区間:
+  - 各 ROM の `ROM_START` 後の最初の 1 窓を除き、続く30窓を使用した
+  - LodeRunner、Project_DART、Xevious の全区間が normal、入力0、palette protocol fault 0、
+    `[CORE1_BASE]` / `[FRAME_STATS]` の対欠落なしだった
+- 比較基準:
+  - LodeRunner: `frame_us_avg=19114.0`、`p95_us=26817.5`
+  - Project_DART: `frame_us_avg=20183.0`、`p95_us=25584.0`
+  - Xevious: `frame_us_avg=16909.5`、`p95_us=17346.0`
+- queue 観測:
+  - queue wait 比率中央値は LodeRunner `0.0000%`、Project_DART `0.0211%`、Xevious `8.9331%`
+  - Xevious の 1 wait は約 `102.6 us` で `sleep_us(100)` の量子化と一致するため、
+    将来の queue 段階では depth より先に polling 幅を比較する
+
 ## 1.1.28 palette snapshot 段階1 合格 (2026-07-31)
 
 - 実装:

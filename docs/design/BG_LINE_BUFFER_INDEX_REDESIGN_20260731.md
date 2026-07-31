@@ -1104,13 +1104,22 @@ cmake --build "$NESCO_BUILD_DIR" --clean-first -j4
 4. ROM ごとに、30 窓の `[CORE1_BASE] frame_us_avg` の中央値と
    `[FRAME_STATS] p95_us` の中央値を比較値にする
 
+段階 1 baseline は `pico20260731_212613.log` で取得済みである。3 ROM とも最初の 1 窓を除く
+30 対が normal、`input_events=0`、`palette_protocol_faults=0`、ログ欠落なしだった。
+
+| ROM | `frame_us_avg` 中央値 | 段階 2 合格上限 (-3%) | `p95_us` 中央値 | 段階 2 許容上限 (+1%) | queue wait 比率中央値 | `lcd_empty_polls` 中央値 |
+|---|---:|---:|---:|---:|---:|---:|
+| LodeRunner | 19,114.0 | 18,540.58 | 26,817.5 | 27,085.67 | 0.0000% | 23,320.5 |
+| Project_DART | 20,183.0 | 19,577.51 | 25,584.0 | 25,839.84 | 0.0211% | 23,214.0 |
+| Xevious | 16,909.5 | 16,402.22 | 17,346.0 | 17,519.46 | 8.9331% | 13,153.5 |
+
 窓や plateau を目視で選ばない。attract demo の場面によって LodeRunner の frame time が
 約 7% 移動し、3 窓では採用閾値 3% より位相差が大きいためである。既存 `1.1.27` / `1.1.28`
 ログには 30 窓中の操作入力が多数あり、この新規約の baseline には流用しない。
 次をすべて満たせば採用する。
 
-Xevious normal の baseline は 18.02 ms/frame で、LCD バス下限 15.73 ms までの余地は
-2.29 ms しかない。core0 の削減が LCD 下限へ近づくほど frame time 改善は頭打ちになるため、
+新しい無操作 Xevious normal baseline は 16.91 ms/frame で、LCD バス下限 15.73 ms までの余地は
+約 1.18 ms しかない。core0 の削減が LCD 下限へ近づくほど frame time 改善は頭打ちになるため、
 Xevious の結果はこの上限を踏まえて読む。ただし 3% 条件はこの余地より十分小さく、
 本案の採否基準は変えない。
 
@@ -1144,13 +1153,16 @@ core0 側の buffer 形式とは独立である。
 ただし段階 4 で COLMOD を 12 bit/pixel へ変更する場合は、
 読み戻し側の形式も合わせる必要がある。
 
-### 段階 3: queue depth の変更（条件付き、未計画）
+### 段階 3: queue full wait の追加最適化（polling/depth、条件付き、未計画）
 
 この段階の trigger と採否は **normal 3 ROM のみ**で決め、stretch の値を混ぜない。
 段階 2 の A/B で得た各 30 窓について、窓ごとに
 `lcd_queue_wait_us / (frames * frame_us_avg)` を計算し、ROM ごとの中央値を depth 4 基準とする。
 3 ROM すべてが 1% 未満なら、この段階は実装せず version も予約しない。いずれかが 1% 以上なら、
-そこで初めて depth 6 を別 commit・次の patch version で試す。
+queue-full loop の polling 粒度を先に調べる。`lcd_queue_wait_us / lcd_queue_wait_count` が
+約 100 us なら `sleep_us(100)` の量子化が支配しているため、depth 6 を自動的には実装せず、
+polling 幅の比較を先に独立計画する。それでも queue wait が 1% 以上なら、depth 6 を
+別 commit・次の patch version で試す。
 
 - `DISPLAY_LCD_WORKER_QUEUE_DEPTH` を 4 から **6** へ変更する
   （段階 2 完了時から `.bss +704 byte`、期待値 `97544 -> 98248`。
@@ -1174,6 +1186,8 @@ stretch は別課題である。段階 1 log `pico20260731_203816.log` の LodeR
 100 us sleep を使う queue-full loop の量子化とほぼ一致するため、stretch を最適化するときは
 queue depth を増やす前に sleep 幅または通知方式を独立に比較する。queue wait から
 「4.5 ms の overlap を必ず回収できる」とは断定せず、現時点では改善候補として記録する。
+同じ 100 us 量子化は新しい baseline の Xevious normal でも確認され、queue wait 比率中央値は
+8.9331%、1 wait は約 102.6 us だった。したがって normal でも上記の polling-first 規約を使う。
 
 ### 段階 4 以降 (任意、別課題)
 
@@ -1197,6 +1211,12 @@ queue depth を増やす前に sleep 幅または通知方式を独立に比較�
   queue depth を超える回数の palette 変更が起きる ROM があるか
 
 ## この文書の改訂
+
+### 第 8 版から第 9 版へ (`perf/bg-tile-share-log`)
+
+- 無操作30窓の `1.1.28` baseline log を合格確認し、ROM別の中央値と段階 2 合格上限を固定した
+- Xevious normal でも queue wait 比率 8.9331%、1 wait 約 102.6 us を確認したため、
+  段階 3 は depth 変更より先に polling 粒度を比較する規約へ変更した
 
 ### 第 7 版から第 8 版へ (`perf/bg-tile-share-log`)
 

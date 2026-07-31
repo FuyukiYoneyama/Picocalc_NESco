@@ -156,6 +156,11 @@
       - artifact: `build-bg-index-baseline/Picocalc_NESco.uf2`
       - ARM EABI5、`text=283552 data=0 bss=99296`
       - SHA-256: `48e9642a946dcf7ddcbd8c921413693c8478d3a8cba0581165c06777f7cd79cf`
+    - `1.1.28` baseline 実機計測も完了
+      - log: `/home/fuyuki/pico_dvl/codex/log/pico20260731_212613.log`
+      - 3 ROM とも遷移窓を除く30窓が normal、入力0、fault 0、ログ対欠落なし
+      - `frame_us_avg / p95_us` 中央値は LodeRunner `19114.0 / 26817.5`、
+        Project_DART `20183.0 / 25584.0`、Xevious `16909.5 / 17346.0`
   - 段階 1 の固定契約:
     - `display_lcd_worker_palette_mark_dirty()` と
       `display_lcd_worker_palette_force_snapshot()` を core0 API とする
@@ -204,8 +209,8 @@
         `g_bg_tile_pair_opaque4` も削除するため、列挙した主要 static 領域の小計は
         `1.1.27` 比で depth 6 が `-304 byte`、depth 8 が `+400 byte` となる
       - normal 3 ROM の 30 窓で、窓ごとの queue wait 比率の中央値が 1 ROM でも 1% 以上なら
-        depth 6 を検討し、
-        depth 6 後も 1% 以上かつ p95 改善なら depth 8 を検討する
+        まず 100 us polling 量子化を確認し、polling 幅の比較後も残る場合だけ depth 6 を検討する
+      - depth 6 後も 1% 以上かつ p95 改善なら depth 8 を検討する
       - stretch は段階 3 の trigger に混ぜない。段階 1 の LodeRunner stretch は
         遷移窓を除く 35 窓で queue wait 約 22.1%、1 wait 約 101.2 us だったため、
         別課題で queue depth より先に 100 us polling 幅または通知方式を比較する
