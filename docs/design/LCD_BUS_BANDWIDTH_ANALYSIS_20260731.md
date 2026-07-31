@@ -285,7 +285,8 @@ cropは表示内容が変わるため、無条件最適化ではなく設定項�
 
 1. 不採用の`1.1.31` 10 us retryだけをrevertし、`1.1.30`計測fieldを残す
 2. `1.1.32`ではdepth 4のまま、strip flushのDMA waitとwindow設定時間を計測する
-3. DMA waitがbus idle仮説を支持した場合だけ、`1.1.33`でdepth 8をA/Bする
+3. stretchの`frame_us_avg - 24,576 - window_set_us_per_frame`をdepth回収量の上限とし、
+   500 us以上のROMが2本以上あり、DMA waitも仮説と矛盾しない場合だけ`1.1.33`でdepth 8をA/Bする
 4. 同じPhase 0で測るwindow設定全体の削減上限が250 us/frame以上の場合だけ、
    frame単位windowを後続の独立候補にする
 

@@ -59,6 +59,9 @@
     - `lcd_window_set_us/count`: command byteとdrainを含むwindow設定全体
     - 計測build `.bss`期待値は`97948`、queue symbolは`0x580`
     - 3 ROMのnormal/stretchを各最低30窓取り、既存baselineにない診断値を得る
+    - stretchでは`frame_us_avg - 24576 - window_set_us_per_frame`をdepthによる
+      回収可能量の上限として算出する。これは期待改善量や保証値ではない
+  - 回収上限が500 us以上のROMが2本未満なら、採用条件を構造上満たせないためdepth 8を実装しない
   - Phase 0で3 ROMともDMA waitが5 ms/frame以上ならdepth 8を実装しない
   - Phase 1 (`1.1.33`、gate通過時のみ): depthだけを4から8へ変更する
     - queue symbol期待値は`0xb00`

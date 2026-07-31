@@ -209,23 +209,54 @@ dma_wait_count_per_frame  = lcd_dma_wait_count / frames
 window_set_us_per_frame   = lcd_window_set_us / frames
 window_set_count_per_frame= lcd_window_set_count / frames
 removable_window_us       = window_set_us_per_frame * 29 / 30
+stretch_nonpixel_us       = frame_us_avg - 24,576
+depth_recovery_upper_us   = max(0, stretch_nonpixel_us - window_set_us_per_frame)
 ```
 
 `dma_wait_count_per_frame`と`window_set_count_per_frame`は約30を期待する。
 
+`24,576 us`はstretch 1 frameのpixel DMA時間`192,000 byte x 128 ns`である。
+定常状態ではbounded queueによりcore0のframe生成率とLCDの消費率が長期平均で一致するため、
+`stretch_nonpixel_us`はpixel送出以外に使われたframe時間の近似値になる。
+
+ただしこれは厳密なbus idleだけではない。window command byte、`lcd_wait_idle()`、GPIO、DMA開始処理、
+packer、frame境界、core0/core1の到着ずれを含む。従って`depth_recovery_upper_us`はdepth 8の
+**回収可能量の上限**であり、期待改善量や保証値ではない。depth 8が回収できるのは、この上限のうち
+queue先行保持不足に由来する部分だけである。
+
+既存`1.1.30`の参考値では、stretchのnonpixel時間は次になる。Phase 0では`1.1.32`の同一selected窓で
+`window_set_us_per_frame`を差し引き、ROMごとの上限を確定する。
+
+| ROM | `frame_us_avg` | `stretch_nonpixel_us` | 1 stripあたり |
+|---|---:|---:|---:|
+| LodeRunner | 28,816.0 us | 4,240 us | 141 us |
+| Project_DART | 29,834.5 us | 5,258.5 us | 175 us |
+| Xevious | 26,282.5 us | 1,706.5 us | 57 us |
+
+計測整合性は次で確認する。
+
+- `window_set_us_per_frame`が`stretch_nonpixel_us`を測定誤差以上に超えたら、計測位置または
+  frame/LCD throughput対応の仮定が崩れているためPhase 1へ進まない
+- window command列はnormal/stretchで同じ11 byte x 30回なので、`window_set_us_per_frame`は
+  両modeで概ね同じ値を期待する。10%超の差が継続する場合は原因を調べる
+- `lcd_empty_polls * 50 us / frames`はqueue枯渇sleepの参考値として上限と桁を比較するが、
+  一致条件にはしない。空queue sleepはpixel DMA実行中にも起こり得るためである
+
 ### depth 8実装gate
 
+- `depth_recovery_upper_us >= 500 us`のROMが2本未満なら、Phase 1の採用条件を構造上満たせないため
+  depth 8を実装しない
 - stretch 3 ROMすべてで`dma_wait_us_per_frame >= 5,000 us`なら、core1は各frameで長時間、
   次stripを準備済みのまま前DMAを待っている。depth 8仮説を不支持としてPhase 1を実装しない
-- stretch 3 ROMのうち2 ROM以上で`dma_wait_us_per_frame <= 1,000 us`なら、前DMA完了後に
-  core1が到着する時間が支配的である。depth 8仮説を支持しPhase 1へ進む
-- 1,000--5,000 usの中間またはROM間で分かれる場合、counterだけでは500 us効果を確定できない。
-  この場合は**定量予測なしの探索的A/B**であることを明記してPhase 1へ進む
+- stretch 3 ROMのうち2 ROM以上で`dma_wait_us_per_frame <= 1,000 us`かつ上限500 us以上なら、
+  前DMA完了後のcore1到着遅れを減らす余地があるためPhase 1へ進む
+- 1,000--5,000 usの中間またはROM間で分かれても、上限500 us以上が2本あればPhase 1へ進む。
+  この場合はROMごとの`depth_recovery_upper_us`を上限予測として先に記録し、回収率未知のA/Bとする
 - `1.1.32`のframe time/p95が既存`1.1.30`より1%超悪化した場合、timer計測負荷を調査し、
   診断buildをそのままA/B baselineに使わない
 
 5,000/1,000 usはframe改善の予測値ではなく、明確なバス待ちとほぼ無待ちを分離する診断境界である。
-Phase 0からdepth 8の改善量を直接算出できるとは扱わない。
+Phase 0から算出する`depth_recovery_upper_us`も上限であり、depth 8の改善量そのものとは扱わない。
 
 ### frame window候補のgate
 
@@ -310,4 +341,4 @@ queue waitやDMA waitの減少だけでは採用しない。frame timeとp95を�
 - ST7365Pが対応しない`COLMOD=0x63`を候補へ戻さない
 
 ST7365P仕様書は
-`https://cn.display-lcd.com/data/upload/admin/202503/67e36677ac8c3c.pdf`を参照する。
+`https://cn.display-lcd.com/data/upload/admin/202503/67e36677ac8c3.pdf`を参照する。

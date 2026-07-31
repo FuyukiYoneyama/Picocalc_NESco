@@ -34,7 +34,8 @@
   - 計画: `docs/design/STRETCH_QUEUE_DEPTH_OPTIMIZATION_PLAN_20260731.md`
   - 不採用の`1.1.31` 10 us retryだけをrevertし、`1.1.30`の計測fieldを残す
   - 既存`1.1.30`性能logは再取得せず、`1.1.32` depth 4診断buildでDMA waitとwindow設定時間を測る
-  - 診断がbus idle仮説を支持した場合だけ、`1.1.33`でqueue depthを4から8へ変更する
+  - stretch非pixel時間からwindow設定時間を引いた値をdepth回収量の上限として算出し、
+    500 us以上のROMが2本以上ある場合だけ`1.1.33`でqueue depthを4から8へ変更する
   - Phase 1へ進んだ場合も`1.1.32`診断logをbaselineとして流用し、人的な再測定を増やさない
 
 ## 完了済み計画 / 結果
