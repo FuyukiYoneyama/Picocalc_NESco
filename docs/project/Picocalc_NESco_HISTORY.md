@@ -38,6 +38,14 @@
 - 判定:
   - 段階 1 の protocol fault、強制 snapshot、目視の合格条件をすべて満たした
   - palette snapshot 段階 1 を採用し、段階 2 の index 描画実装へ進む
+- 合格後レビュー:
+  - LodeRunner の同じ plateau を `1.1.27` と比較した差は `-0.09%`、`-0.03%`、`0.00%` で、
+    snapshot 判定と 64 byte copy の費用は frame time の測定限界以下だった
+  - `display_perf_reset()` に呼び出し元がなく、ROM/reset を含む窓だけ display counter と
+    InfoNES の `frames` がずれることを確認した。palette protocol の合格判定には影響しないが、
+    段階 2 で Init/Reset 境界から reset し、A/B では遷移直後の 1 窓を捨てる
+  - LodeRunner stretch は遷移直後の 1 窓を除く 35 窓で queue wait が frame time の約 22.1%、
+    1 wait 約 101.2 us だった。Xevious の値ではなく、normal の queue depth 判定とは分離する
 
 ## 1.1.27 計測 build 段階0 (2026-07-31)
 

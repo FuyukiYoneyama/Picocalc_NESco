@@ -61,9 +61,10 @@
   - BG line buffer index 化は実装へ進める
     - 3 ROM の `bg_tile_us_per_frame` は概ね `6.6`〜`6.9 ms`
     - 判断基準の `4 ms 以上 8 ms 未満` に該当するため、段階 2 の実測で打ち切り判断を行う
-  - LCD queue wait の raw counter は 1 秒窓ごとに reset されず累積して見える
-    - queue depth を判断する前に計測を修正し、baseline build だけを再計測する
-    - BG line buffer 実装の着手条件ではない
+  - LCD queue wait は段階 1 の `display_perf_take_window()` で 1 秒窓値へ修正済み
+    - ROM/reset 境界だけ display counter が残るため、段階 2 で Init/Reset から
+      `display_perf_reset()` を呼び、比較では遷移直後の 1 窓を捨てる
+    - queue depth の判断は normal 3 ROM の連続 30 窓で行う
   - 目的:
     - 実装後に効果を測れる基準値を先に作る
     - `1.1.26` の実測 fps は 3 ROM とも normal のバス下限 `15.73 ms` を上回っており、
@@ -145,10 +146,16 @@
     - `WorkLine` / queue pixels を `BYTE[256]`、item を 352 byte、depth を 4 に固定した
     - background は palette base と 2 bit index、sprite は `0x10..0x1f`、clear は `0x20` を書く
     - `BackgroundOpaqueLine` と `g_bg_tile_pair_opaque4`、旧 RGB565 sprite 合成を同時に削除する
-    - worker / fallback は同じ 64 entry LUT 構築 helper と normal/stretch packer を使う
+    - worker / fallback は同じ 256 entry LUT 構築 helper と normal/stretch packer を使う
+      - `0x21..0xff` は black とし、producer の取りこぼしでも LUT 外を読まない
+    - 通常 build の `.bss` 期待値は `97544`、queue item は 352 byte のままとする
     - protocol fault は pixel を index 0 clear せず、zero palette で元 line を pack する
-    - 実装順は InfoNES 型・renderer変更、display型・共通packer変更、fault/fallback接続、
-      version 1.1.29、通常版と `build-bg-index` の clean ARM build、実機A/Bとする
+    - 実装順は `1.1.28` baseline build/保存、InfoNES 型・renderer変更、display型・共通packer変更、
+      fault/fallback/reset接続、version 1.1.29、通常版と `build-bg-index` の clean ARM build、実機A/Bとする
+    - `1.1.28` baseline 計測版 build は完了
+      - artifact: `build-bg-index-baseline/Picocalc_NESco.uf2`
+      - ARM EABI5、`text=283552 data=0 bss=99296`
+      - SHA-256: `48e9642a946dcf7ddcbd8c921413693c8478d3a8cba0581165c06777f7cd79cf`
   - 段階 1 の固定契約:
     - `display_lcd_worker_palette_mark_dirty()` と
       `display_lcd_worker_palette_force_snapshot()` を core0 API とする
@@ -160,11 +167,18 @@
       - core1 handoff 値だけを queue lock 下で take-and-zero し、core0 専用 counter は lock なしで扱う
       - `[PALETTE_SNAPSHOT]` と `[CORE1_BASE]` は同じ window を 1 回だけ取得して出力する
     - `NESCO_PALETTE_SNAPSHOT_LOG=ON` の protocol fault 0 を確認してから段階 2 へ進む
-  - 段階 2 は normal 3 ROM で 3 窓ずつ A/B 比較する
-    - 各 ROM の平均 `frame_us` 中央値を `3%` 以上短縮し、p95 中央値を `1%` 超悪化させず、
-      protocol fault 0 なら採用する
+  - 段階 2 は normal 3 ROM で、ROM 開始直後の 1 窓を捨てた後の連続 30 窓を A/B 比較する
+    - 比較対象は新規に取る段階 1 `1.1.28` baseline と段階 2 `1.1.29`。既存ログは入力を含むため流用しない
+    - 計測中は操作せず全窓 `input_events=0` とし、input event / reset / mode 変更 / UART 欠落が
+      あればその ROM を最初から取り直す
+    - 各 ROM の 30 窓の `frame_us_avg` 中央値を `3%` 以上短縮し、`p95_us` 中央値を `1%` 超悪化させず、
+      全 90 窓で `palette_protocol_faults=0` なら採用する
+    - attract demo の位相で約 7% 動くため、3 窓比較や目視で選んだ plateau は使わない
     - 不合格なら結果を HISTORY へ記録して、段階 2 と段階 1 の commit を順に `git revert` する
   - queue wait は段階 1 で `display_perf_take_window()` により 1 秒窓ごとの値へ直す
+    - 段階 2 で `display_perf_reset()` を `InfoNES_Init()` / `InfoNES_Reset()` からだけ呼ぶ。
+      毎秒呼ぶ `perf_reset()` 内には入れない
+    - reset 直後は core1 local の最大 1 frame 未満が持ち越され得るため、上記の最初の 1 窓を捨てる
     - depth 4 の基準はこの修正後に取り直し、段階 3 (depth 6) と比較する
   - 狙いは core0 の PPU background 描画を軽くすることで、
     LCD 帯域側と違い normal view の fps に直接効く
@@ -185,12 +199,16 @@
       - これがないと起動直後の scanline で前 ROM の palette を使う
   - 副次効果:
     - queue item が小さくなるため queue depth を増やせる
-      - 64 entry core1 LUT 込みでは depth 6 の queue 関連は `+80 byte`、
-        depth 8 は `+784 byte` である。段階 2 の buffer/opaque 配列削減を含めた全体では
+      - 256 entry core1 LUT 込みでは depth 6 の queue 関連は `+464 byte`、
+        depth 8 は `+1,168 byte` である。段階 2 の buffer/opaque 配列削減を含めた全体では
         `g_bg_tile_pair_opaque4` も削除するため、列挙した主要 static 領域の小計は
-        `1.1.27` 比で depth 6 が `-688 byte`、depth 8 が `+16 byte` となる
-      - 修正後の窓単位 queue wait が frame time の 1% 以上なら depth 6 を検討し、
+        `1.1.27` 比で depth 6 が `-304 byte`、depth 8 が `+400 byte` となる
+      - normal 3 ROM の 30 窓で、窓ごとの queue wait 比率の中央値が 1 ROM でも 1% 以上なら
+        depth 6 を検討し、
         depth 6 後も 1% 以上かつ p95 改善なら depth 8 を検討する
+      - stretch は段階 3 の trigger に混ぜない。段階 1 の LodeRunner stretch は
+        遷移窓を除く 35 窓で queue wait 約 22.1%、1 wait 約 101.2 us だったため、
+        別課題で queue depth より先に 100 us polling 幅または通知方式を比較する
     - core1 が index から色への LUT を引く形になるため、
       LCD の COLMOD 12 bit/pixel 化が LUT 出力の差し替えだけで済むようになる
   - 削減量の理論小計は約 `1.69 ms/frame` で、これに queue traffic 削減分が加わる

@@ -2,6 +2,8 @@
 build/
 build-baseline/
 build-bg-share/
+build-bg-index/
+build-bg-index-baseline/
 build-palette-snapshot/
 build-palette-snapshot-arm/
 *.elf

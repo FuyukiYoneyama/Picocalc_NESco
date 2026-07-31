@@ -8,6 +8,8 @@
 
 実装起点 version: 段階 1 合格済みの `1.1.28`
 
+段階 2 A/B baseline: 同一条件で新規計測する `1.1.28`
+
 関連文書: `docs/design/LCD_BUS_BANDWIDTH_ANALYSIS_20260731.md`
 
 ## 目的
@@ -34,10 +36,10 @@ fps を上げるには core0 側を削るしかない。
 | Xevious / stretch | 6.633 ms |
 
 いずれも実装判定の 4--8 ms 帯に入ったため、本案を実装する。段階 2 の採否は、
-後述の固定した A/B 比較基準で決める。`lcd_queue_wait_*` は現在のログでは
+後述の固定した A/B 比較基準で決める。段階 0 時点の `lcd_queue_wait_*` は
 計測窓ごとにリセットされない累積値だったため、queue depth の判断には使わない。
-段階 1 で `display_perf_take_window()` による窓単位値へ修正済みであり、段階 2 採用後、
-段階 3 の直前に depth 4 の基準値を取り直す。
+段階 1 で `display_perf_take_window()` による窓単位値へ修正済みであり、段階 2 の
+無操作 30 窓を depth 4 の基準にも使う。
 
 ## 根拠と、根拠の限界
 
@@ -171,17 +173,19 @@ scanline producer が書いてよい値は `0x00..0x1f` と black 予約値 `0x2
 - screen off / clip / 非描画 line: `0x20`
 
 `WorkLine[256]` は `InfoNES_PostDrawLine()` までに必ず全画素をこの範囲で初期化する。
-core1 hot path はこの producer 契約を前提に 64 entry LUT を直接引き、画素ごとの範囲 branch は
-追加しない。`0x21..0x3f` は LUT 上 black のまま予約し、producer は生成しない。
+core1 hot path は 256 entry LUT を `src[x]` で直接引き、画素ごとの mask / 範囲 branch は
+追加しない。producer 契約から外れた byte が混入しても LUT 外を読まないよう、
+`0x21..0xff` はすべて black とする。producer がこの範囲を生成してよいという意味ではない。
 
 ### core1 側の変換
 
-core1 は 64 entry のローカル LUT を使う。`0x00..0x1f` は snapshot からコピーした
-`PalTable`、`0x20..0x3f` は RGB565 black (`0x0000`) に固定する。snapshot に載せるのは
-従来どおり前半 32 entry (64 byte) だけである。
+core1 は 256 entry のローカル LUT を使う。`0x00..0x1f` は snapshot からコピーした
+`PalTable`、`0x20..0xff` は RGB565 black (`0x0000`) に固定する。snapshot に載せるのは
+従来どおり前半 32 entry (64 byte) だけである。LUT を 64 entry に縮めず、producer の
+取りこぼしが RP2040 上で隣接 `.bss` の色化けとして現れる余地を構造的に除く。
 
-worker を使わない fallback では現在の `PalTable[32]` から一時 64 entry LUT を作り、
-後半 32 entry を `0x0000` にして worker と同じ packer を呼ぶ。palette version は持ち回らない。
+worker を使わない fallback では現在の `PalTable[32]` から stack 上に一時 256 entry LUT を作り、
+後半 224 entry を `0x0000` にして worker と同じ packer を呼ぶ。palette version は持ち回らない。
 
 ## 出力が変わらないことの根拠
 
@@ -307,40 +311,42 @@ type 4 + scanline 4 + viewport_x/y/w/h 16 + scale_mode 4 + pixels 512 = 540
 ```
 
 段階 1 (`1.1.28`) では snapshot field を追加したため、現在の item は 608 byte、
-queue 4 slot と core1 LUT の合計は `608 x 4 + 128 = 2,560 byte` である。
+queue 4 slot と 64 entry core1 LUT の合計は `608 x 4 + 128 = 2,560 byte` である。
 
 段階 2 で画素を byte 化すると画素部は 256 byteになり、item は 352 byteになる。
-depth 4 の queue と既存 core1 LUT の合計は `352 x 4 + 128 = 1,536 byte` で、
-段階 1 から `-1,024 byte` となる。
+同時に LUT を安全な 256 entry へ拡張する。depth 4 の queue と core1 LUT の合計は
+`352 x 4 + 512 = 1,920 byte` で、段階 1 から `-640 byte` となる。
 
 | 構成 | 計算 | `1.1.27` queue 2,160 byte との差 | 段階 1 の 2,560 byte との差 |
 |---|---|---|---|
-| depth 4 + item 内 snapshot + 64 entry core1 LUT | 352 x 4 + 128 = 1,536 | **-624** | **-1,024** |
-| depth 6 + item 内 snapshot + 64 entry core1 LUT | 352 x 6 + 128 = 2,240 | **+80** | **-320** |
-| depth 8 + item 内 snapshot + 64 entry core1 LUT | 352 x 8 + 128 = 2,944 | **+784** | **+384** |
-| (参考) depth 6 + version/valid 付き item + 外部 ring 6 段 + core1 LUT | 288 x 6 + 384 + 128 = 2,240 | +80 | -320 |
+| depth 4 + item 内 snapshot + 256 entry core1 LUT | 352 x 4 + 512 = 1,920 | **-240** | **-640** |
+| depth 6 + item 内 snapshot + 256 entry core1 LUT | 352 x 6 + 512 = 2,624 | **+464** | **+64** |
+| depth 8 + item 内 snapshot + 256 entry core1 LUT | 352 x 8 + 512 = 3,328 | **+1,168** | **+768** |
+| (参考) depth 6 + version/valid 付き item + 外部 ring 6 段 + core1 LUT | 288 x 6 + 384 + 512 = 2,624 | +464 | +64 |
 
 外部 ring 方式でも item 側に version/valid が必要なため、depth 6 の RAM は item 内方式と同じである。
 **RAM 上の利点がないのに競合の危険を抱える理由がない**ため、item 内方式を採る。
 
-depth 6 は条件付きの将来段階とする。queue 関連だけなら `1.1.27` 比 +80 byte だが、段階 2 で
+depth 6 は条件付きの将来段階とする。queue 関連だけなら `1.1.27` 比 +464 byte だが、段階 2 で
 `s_line_buffer` が -256 byte、`BackgroundOpaqueLine` が -256 byte、
 `g_bg_tile_pair_opaque4` が -256 byte になるため、列挙した主要 static 領域の小計は
-`1.1.27` 比 -688 byte、段階 1 比 -1,088 byte である。depth 4 基準で窓単位の queue wait を取り直し、
+`1.1.27` 比 -304 byte、段階 1 比 -704 byte である。depth 4 基準で窓単位の queue wait を取り直し、
 frame time に対して無視できないと確認できた場合だけ depth 6 を実装する。
-depth 8 を検討するのは、depth 6 後も queue wait の平均中央値が frame time の 1% 以上で、
-p95 が改善する場合だけである。そのとき queue 関連 `+784 byte` を許容する。
+depth 8 を検討するのは、depth 6 後も前述の窓ごとの queue wait 比率中央値が 1 ROM でも 1% 以上で、
+depth 6 の `p95_us` 中央値が depth 4 より改善する場合だけである。そのとき queue 関連
+`+1,168 byte` を許容する。
 
 `.bss` には余裕がある (`1.0.15` 時点で静的領域末尾から heap limit まで 122,328 byte)
-ため depth 8 の queue 関連 `+784 byte`（段階 2 の 3 配列削減込みでは `1.1.27` 比 `+16 byte`、
-段階 1 比 `-384 byte`）自体は問題にならないが、
+ため depth 8 の queue 関連 `+1,168 byte`（段階 2 の 3 配列削減込みでは `1.1.27` 比 `+400 byte`、
+段階 1 比 `0 byte`）自体は問題にならないが、
 「RAM 増なし」と書くのは誤りなので、増分を明示して判断する。
 
-段階 2 depth 4 で実際に削除・縮小する `.bss` は、queue `-1,024`、`s_line_buffer -256`、
-`BackgroundOpaqueLine -256`、`g_bg_tile_pair_opaque4 -256` の合計 `-1,792 byte` である。
-段階 1 通常 build の `bss=98952` から、段階 2 通常 build の期待値を `97160` と固定する。
+段階 2 depth 4 で実際に変わる `.bss` は、queue `-1,024`、core1 LUT `+384`、
+`s_line_buffer -256`、`BackgroundOpaqueLine -256`、`g_bg_tile_pair_opaque4 -256` の
+合計 `-1,408 byte` である。段階 1 通常 build の `bss=98952` から、段階 2 通常 build の
+期待値を `97544` と固定する。
 新しい mutable static buffer は追加しない。実測が一致しなければ map / `nm --size-sort` で差を説明してから
-実機へ進む。`black_lut[64]` は `static const` とし `.bss` へ置かない。
+実機へ進む。`black_lut[256]` は `static const` とし `.bss` へ置かない。
 
 ### copy 自体を消せる可能性
 
@@ -848,7 +854,10 @@ fps 比では削減された実時間が分からない。
 
 - version は **`1.1.29`** に更新する
 - index 描画は通常経路へ直接入れ、`NESCO_BG_INDEX` のような feature toggle は追加しない。
-  A/B は `1.1.27` の保存済み baseline log と段階 2 commit の比較で行い、戻す場合は commit 単位で revert する
+  A/B は source 変更前に新規取得する `1.1.28` baseline と段階 2 commit を、後述の無操作 30 窓で
+  比較する。戻す場合は commit 単位で revert する
+- source 変更前に `build-bg-index-baseline` を作り、`1.1.28` の計測 artifact を保存する
+- `display_perf_reset()` を `InfoNES_Init()` / `InfoNES_Reset()` から呼ぶ。`perf_reset()` 内には入れない
 - `renderBgTileFull()` / `renderPacked4()` を index 書き込みへ変更する
 - `BackgroundOpaqueLine` を廃止し、`compositeSpriteRange()` の opaque 判定を
   buffer 自身からの導出へ変更する
@@ -936,12 +945,12 @@ LINE item は段階 1 と同じく field を明示初期化し、item 全体の 
 palette と packer は次の共通契約にする。
 
 ```c
-static void display_build_palette_lut64(WORD dst[64], const WORD src[32]);
-static void display_pack_line_normal(BYTE *dst, const BYTE *src, const WORD lut[64]);
-static void display_pack_line_stretch_320(BYTE *dst, const BYTE *src, const WORD lut[64]);
+static void display_build_palette_lut256(WORD dst[256], const WORD src[32]);
+static void display_pack_line_normal(BYTE *dst, const BYTE *src, const WORD lut[256]);
+static void display_pack_line_stretch_320(BYTE *dst, const BYTE *src, const WORD lut[256]);
 ```
 
-`display_build_palette_lut64()` は前半 32 entry を copy し、後半 32 entry を `0x0000` にする。
+`display_build_palette_lut256()` は前半 32 entry を copy し、後半 224 entry を `0x0000` にする。
 core1 の snapshot apply と fallback の一時 LUT 作成は必ずこの helper を使う。
 normal / stretch と worker / fallback で別の index-to-color 規則を実装しない。
 
@@ -951,10 +960,10 @@ normal / stretch と worker / fallback で別の index-to-color 規則を実装�
   (`s0,s1,s2,s3,s3`) へ展開する
 - `display_lcd_worker_pack_stretch_line()` も `const BYTE *src` と `const WORD *lut` を受ける
 - core1 の正常 LINE は `s_lcd_worker_core1_palette` を packer へ渡す
-- fallback は submit 失敗後に stack 上の `WORD fallback_lut[64]` を現在の `PalTable` から作り、
+- fallback は submit 失敗後に stack 上の `WORD fallback_lut[256]` を現在の `PalTable` から作り、
   worker と同じ normal / stretch packer を呼ぶ。fallback 専用の色変換 loop は作らない
 
-protocol fault 用に全 entry 0 の `static const WORD black_lut[64]` を持つ。LINE 受信時に
+protocol fault 用に全 entry 0 の `static const WORD black_lut[256]` を持つ。LINE 受信時に
 palette snapshot を適用できた、または clean item の version が一致した場合だけ core1 LUT を選び、
 それ以外は fault を加算して `black_lut` を packer へ渡す。**段階 1 で入れた
 `memset(item.pixels, 0, sizeof(item.pixels))` は削除する。** index 0 は backdrop なので、これを
@@ -973,10 +982,13 @@ rg -n "BackgroundOpaqueLine|g_bg_tile_pair_opaque4|WORD \*WorkLine|InfoNES_SetLi
 
 - compile-time assertion が item `352 byte` を保証する
 - `arm-none-eabi-nm -S --size-sort` で `s_lcd_worker_queue` が `0x580` (1,408 byte)、
-  `s_line_buffer` が `0x100` (256 byte) である
-- 通常 build の `.bss` が期待値 `97160` である。異なる場合は実機前に全差分を説明する
+  `s_line_buffer` が `0x100` (256 byte)、core1 palette LUT が `0x200` (512 byte) である
+- `black_lut[256]` は `0x200` (512 byte) だが read-only section にあり `.bss` を消費しない
+- 通常 build の `.bss` が期待値 `97544` である。異なる場合は実機前に全差分を説明する
 - LINE item の full memset がなく、`FRAME_END` の full memset だけが残る
 - normal / stretch の worker と fallback が共通 packer を呼び、index-to-color loop が重複していない
+- `InfoNES.cpp` の `display_perf_reset()` 呼び出しは `InfoNES_Init()` / `InfoNES_Reset()` の 2 箇所だけで、
+  `perf_reset()` の関数本体には存在しない
 
 queue item の byte 化を将来の queue depth 変更と分けるのは、
 段階 2 の測定に queue traffic 削減が含まれるかどうかを曖昧にしないためである。
@@ -1042,23 +1054,33 @@ queue lock 下で共有 accumulator へ handoff する。これは段階 1 の
 
 `wait_us` と `flush_us` は fallback packer 専用の legacy counter で、worker 稼働中は 0 のまま
 である。`display_perf_take_window()` は窓の整合のためこれらも core0 lock なしで reset するが、
-worker の性能指標や LCD 帯域分析には使わない。`display_perf_reset()` は ROM/reset 境界での
-初期化専用として残す。
+worker の性能指標や LCD 帯域分析には使わない。
+
+`display_perf_reset()` は段階 2 で `InfoNES_Init()` と `InfoNES_Reset()` から明示的に呼び、
+ROM/reset 境界で core0 counter と core1 の published accumulator を初期化する。
+毎秒の窓終了にも使う `perf_reset()` の中へは入れない。そこへ入れると
+`display_perf_take_window()` の unlock 後に core1 が publish した次窓分を消す競合が生じるためである。
+core1 の frame 内 local accumulator は core0 から触らないため、遷移直後の最初の窓には最大 1 frame
+未満の持ち越しがあり得る。後述の A/B 手順はこの最初の窓を必ず捨てる。
 
 #### 段階 2 の A/B 比較と打ち切り
 
-比較 build は `NESCO_CORE1_BASELINE_LOG=ON` **のみ**とし、
+比較 build は段階 1 `1.1.28` と段階 2 `1.1.29` の双方で
+`NESCO_CORE1_BASELINE_LOG=ON` **のみ**とし、
 `NESCO_PALETTE_SNAPSHOT_LOG=OFF`、`NESCO_BG_TILE_SHARE_LOG=OFF` とする。build directory は
-`build-bg-index` に固定し、host compiler build と区別する。configure は次を使う。
+段階 1 baseline を `build-bg-index-baseline`、段階 2 を `build-bg-index` に固定し、host compiler build と
+区別する。段階 2 の source 変更前に baseline artifact と map/size 出力を保存する。configure は
+directory 名だけを切り替えて次を使う。
 
-`build-bg-index` が既に存在する場合は、configure 前に `CMakeCache.txt` の
+各 build directory が既に存在する場合は、configure 前に `CMakeCache.txt` の
 `CMAKE_C_COMPILER=/usr/bin/arm-none-eabi-gcc`、
 `CMAKE_CXX_COMPILER=/usr/bin/arm-none-eabi-g++`、
 `PICO_SDK_PATH=/home/fuyuki/pico/pico-sdk` を確認する。1 つでも異なる cache は再利用せず、
-削除対象を `build-bg-index` だけに限定して作り直す。
+削除対象を該当する build directory だけに限定して作り直す。
 
 ```sh
-cmake -S . -B build-bg-index \
+NESCO_BUILD_DIR=build-bg-index-baseline # 段階 2 では build-bg-index に置き換える
+cmake -S . -B "$NESCO_BUILD_DIR" \
   -DPICO_SDK_PATH=/home/fuyuki/pico/pico-sdk \
   -DCMAKE_C_COMPILER=/usr/bin/arm-none-eabi-gcc \
   -DCMAKE_CXX_COMPILER=/usr/bin/arm-none-eabi-g++ \
@@ -1066,24 +1088,35 @@ cmake -S . -B build-bg-index \
   -DNESCO_CORE1_BASELINE_LOG=ON \
   -DNESCO_PALETTE_SNAPSHOT_LOG=OFF \
   -DNESCO_BG_TILE_SHARE_LOG=OFF
-cmake --build build-bg-index --clean-first -j4
+cmake --build "$NESCO_BUILD_DIR" --clean-first -j4
 ```
 
-通常版 `build/` も clean build し、両方の banner が `1.1.29`、ELF が ARM EABI5 であること、
-`git diff --check` が通ることを確認してから、計測 artifact
-`build-bg-index/Picocalc_NESco.uf2` を実機へ渡す。段階 0 で取った
-`1.1.27` baseline と同一条件で、`LodeRunner.nes`、`Project_DART_V1.0.nes`、
-`Xevious.nes` の normal view をそれぞれ安定状態で 3 計測窓取る。
-ROM ごとに 3 窓の `frame_us` 平均の中央値と p95 の中央値を用い、次をすべて満たせば採用する。
+段階 1 baseline は banner `1.1.28`、段階 2 計測版と通常版 `build/` は banner `1.1.29`、
+すべての ELF が ARM EABI5 であること、`git diff --check` が通ることを確認する。
+`build-bg-index-baseline/Picocalc_NESco.uf2` と `build-bg-index/Picocalc_NESco.uf2` を順に実機へ渡し、
+`LodeRunner.nes`、`Project_DART_V1.0.nes`、`Xevious.nes` の normal view を双方で次の固定手順で測る。
+
+1. ROM を開始して normal view のまま操作しない
+2. `ROM_START` 後、最初の `[CORE1_BASE]` / `[FRAME_STATS]` 対を遷移窓として捨てる
+3. 続く **30 個の連続した対**を採用する。30 窓すべて `input_events=0` とする。
+   途中で input event、reset、表示 mode 変更、UART 欠落が
+   あった場合は、その ROM の計測を最初から取り直す
+4. ROM ごとに、30 窓の `[CORE1_BASE] frame_us_avg` の中央値と
+   `[FRAME_STATS] p95_us` の中央値を比較値にする
+
+窓や plateau を目視で選ばない。attract demo の場面によって LodeRunner の frame time が
+約 7% 移動し、3 窓では採用閾値 3% より位相差が大きいためである。既存 `1.1.27` / `1.1.28`
+ログには 30 窓中の操作入力が多数あり、この新規約の baseline には流用しない。
+次をすべて満たせば採用する。
 
 Xevious normal の baseline は 18.02 ms/frame で、LCD バス下限 15.73 ms までの余地は
 2.29 ms しかない。core0 の削減が LCD 下限へ近づくほど frame time 改善は頭打ちになるため、
 Xevious の結果はこの上限を踏まえて読む。ただし 3% 条件はこの余地より十分小さく、
 本案の採否基準は変えない。
 
-1. 各 ROM の `frame_us` 平均中央値が baseline より **3% 以上短い**
-2. 各 ROM の p95 中央値が baseline より **1% 超悪化しない**
-3. `protocol_faults=0`
+1. 各 ROM の `[CORE1_BASE] frame_us_avg` 中央値が baseline より **3% 以上短い**
+2. 各 ROM の `[FRAME_STATS] p95_us` 中央値が baseline より **1% 超悪化しない**
+3. 全 90 窓で `[CORE1_BASE] palette_protocol_faults=0`
 4. sprite 優先度、左端 clip、palette 途中変更で目視回帰がない
 
 最大値は UART 等で揺れる診断値であり、単独では採否に使わない。複数窓で再現する悪化は
@@ -1092,8 +1125,9 @@ Xevious の結果はこの上限を踏まえて読む。ただし 3% 条件は�
 `git revert <段階2のcommit>`、続けて `git revert <段階1のcommit>` を実行する。
 段階 3 へは進まない。
 
-normal 3 ROM と Xevious stretch の同じ baseline-log build で `lcd_empty_polls` を記録する。
-これ以外の core1 専用 build と時刻計測は作らない。
+同じ 30 窓で normal 3 ROM の `lcd_empty_polls` と queue wait も記録する。
+stretch は段階 2 の採否にも段階 3 の trigger にも使わず、追加の core1 専用 build と
+line 単位時刻計測は作らない。
 
 確認項目:
 
@@ -1112,27 +1146,34 @@ core0 側の buffer 形式とは独立である。
 
 ### 段階 3: queue depth の変更（条件付き、未計画）
 
-段階 2 採用後に、修正済みの窓単位 `lcd_queue_wait_us/count` で depth 4 基準を 3 ROM normal
-から取り直す。queue full 待ちの平均中央値が frame time の 1% 未満なら、この段階は実装しない。
-version も予約しない。
-
-1% 以上なら、そこで初めて別 commit・次の patch version で次を実装する。
+この段階の trigger と採否は **normal 3 ROM のみ**で決め、stretch の値を混ぜない。
+段階 2 の A/B で得た各 30 窓について、窓ごとに
+`lcd_queue_wait_us / (frames * frame_us_avg)` を計算し、ROM ごとの中央値を depth 4 基準とする。
+3 ROM すべてが 1% 未満なら、この段階は実装せず version も予約しない。いずれかが 1% 以上なら、
+そこで初めて depth 6 を別 commit・次の patch version で試す。
 
 - `DISPLAY_LCD_WORKER_QUEUE_DEPTH` を 4 から **6** へ変更する
-  （段階 2 完了時から `.bss +704 byte`、期待値 `97160 -> 97864`。
-  列挙した主要 static 領域の小計は `1.1.27` 比 -688 byte、段階 1 比 -1,088 byte）
+  （段階 2 完了時から `.bss +704 byte`、期待値 `97544 -> 98248`。
+  列挙した主要 static 領域の小計は `1.1.27` 比 -304 byte、段階 1 比 -704 byte）
 - `.bss` の増減と p95 を depth 4 と同条件で比較する
 
 段階 2 で queue item は既に byte 化されているため、
 この段階の変更は depth のみである。したがって測定結果は
 queue を深くしたことの効果だけを表す。
 
-段階 2 の `display_perf_take_window()` で `lcd_queue_wait_us/count` を 1 秒窓ごとに
-take-and-zero するよう修正してから、同条件の depth 4 基準を 3 ROM normal で取り直す。
+段階 1 で導入済みの `display_perf_take_window()` により `lcd_queue_wait_us/count` を 1 秒窓ごとに
+take-and-zero し、上記 30 窓をそのまま depth 4 基準にする。
 その後 depth 6 を同じ手順で比較する。既存ログの累積値はこの判断に使わない。
-queue depth を 8 にするのは、depth 6 でも queue wait の平均中央値が frame_us の 1% 以上で、
-かつ p95 が改善する場合だけとする。
+queue depth を 8 にするのは、depth 6 でも窓ごとの queue wait 比率中央値が 1 ROM でも 1% 以上で、
+かつ depth 6 の `p95_us` 中央値が depth 4 より改善する場合だけとする。
 併せて `lcd_empty_polls` を記録し、queue を深くしたことで worker の挙動が変わっていないことを確認する。
+
+stretch は別課題である。段階 1 log `pico20260731_203816.log` の LodeRunner stretch は、
+遷移直後の 1 窓を除く 35 窓の集計で queue wait が frame time の約 **22.1%**、
+`lcd_queue_wait_us / lcd_queue_wait_count` が約 **101.2 us** だった。これは Xevious ではない。
+100 us sleep を使う queue-full loop の量子化とほぼ一致するため、stretch を最適化するときは
+queue depth を増やす前に sleep 幅または通知方式を独立に比較する。queue wait から
+「4.5 ms の overlap を必ず回収できる」とは断定せず、現時点では改善候補として記録する。
 
 ### 段階 4 以降 (任意、別課題)
 
@@ -1156,6 +1197,19 @@ queue depth を 8 にするのは、depth 6 でも queue wait の平均中央値
   queue depth を超える回数の palette 変更が起きる ROM があるか
 
 ## この文書の改訂
+
+### 第 7 版から第 8 版へ (`perf/bg-tile-share-log`)
+
+段階 1 合格後のログ再レビューを反映し、段階 2 の比較手順と境界 reset を固定した。
+
+- attract demo の位相差が 3% の採用閾値より大きいため、3 窓比較を廃止し、段階 1 / 2 双方で
+  ROM 開始後の最初の窓を捨てた無操作の連続 30 窓を新規取得して中央値を比べる規約に固定した
+- `display_perf_reset()` は毎秒呼ばれる `perf_reset()` 内ではなく、`InfoNES_Init()` と
+  `InfoNES_Reset()` からだけ呼ぶ契約にした。遷移直後の窓は比較から除外する
+- hot path の branch を増やさず不正 byte の LUT 外 read を防ぐため、core1 / fallback / fault の
+  LUT を 256 entry へ拡張し、`.bss` 期待値を `97544` へ更新した
+- 段階 3 の判定範囲を normal 3 ROM に限定した。LodeRunner stretch の queue wait 約 22.1% と
+  100 us polling 量子化は、queue depth と分離した将来課題として記録した
 
 ### 第 6 版から第 7 版へ (`perf/bg-tile-share-log`)
 
