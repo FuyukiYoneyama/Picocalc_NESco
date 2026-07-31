@@ -141,6 +141,14 @@
     - 202 窓すべてで protocol fault 0、snapshot/applied 合計一致、全遷移で forced snapshot、
       実機の表示回帰なしを確認した。詳細は HISTORY の `1.1.28 palette snapshot 段階1 合格` を参照する
     - 次は段階 2 の index 描画 + queue item byte 化を独立 commit で実装する
+  - 段階 2 の実装前仕様確認 (2026-07-31): **完了**
+    - `WorkLine` / queue pixels を `BYTE[256]`、item を 352 byte、depth を 4 に固定した
+    - background は palette base と 2 bit index、sprite は `0x10..0x1f`、clear は `0x20` を書く
+    - `BackgroundOpaqueLine` と `g_bg_tile_pair_opaque4`、旧 RGB565 sprite 合成を同時に削除する
+    - worker / fallback は同じ 64 entry LUT 構築 helper と normal/stretch packer を使う
+    - protocol fault は pixel を index 0 clear せず、zero palette で元 line を pack する
+    - 実装順は InfoNES 型・renderer変更、display型・共通packer変更、fault/fallback接続、
+      version 1.1.29、通常版と `build-bg-index` の clean ARM build、実機A/Bとする
   - 段階 1 の固定契約:
     - `display_lcd_worker_palette_mark_dirty()` と
       `display_lcd_worker_palette_force_snapshot()` を core0 API とする
@@ -179,7 +187,8 @@
     - queue item が小さくなるため queue depth を増やせる
       - 64 entry core1 LUT 込みでは depth 6 の queue 関連は `+80 byte`、
         depth 8 は `+784 byte` である。段階 2 の buffer/opaque 配列削減を含めた全体では
-        depth 6 が `-432 byte`、depth 8 が `+272 byte` となる
+        `g_bg_tile_pair_opaque4` も削除するため、列挙した主要 static 領域の小計は
+        `1.1.27` 比で depth 6 が `-688 byte`、depth 8 が `+16 byte` となる
       - 修正後の窓単位 queue wait が frame time の 1% 以上なら depth 6 を検討し、
         depth 6 後も 1% 以上かつ p95 改善なら depth 8 を検討する
     - core1 が index から色への LUT を引く形になるため、
