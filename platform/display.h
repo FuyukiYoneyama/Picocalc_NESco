@@ -116,6 +116,7 @@ typedef struct {
     uint64_t lcd_flush_us;
     uint64_t lcd_queue_wait_us;
     uint32_t lcd_queue_wait_count;
+    uint32_t lcd_queue_wait_episodes;
     uint64_t frame_pacing_sleep_us;
     uint32_t frame_pacing_sleep_count;
     uint32_t palette_line_items;

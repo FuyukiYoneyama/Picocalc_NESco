@@ -81,6 +81,7 @@ static uint64_t s_perf_lcd_wait_us = 0;
 static uint64_t s_perf_lcd_flush_us = 0;
 static uint64_t s_perf_lcd_queue_wait_us = 0;
 static uint32_t s_perf_lcd_queue_wait_count = 0;
+static uint32_t s_perf_lcd_queue_wait_episodes = 0;
 static uint64_t s_perf_frame_pacing_sleep_us = 0;
 static uint32_t s_perf_frame_pacing_sleep_count = 0;
 static bool s_lcd_worker_palette_dirty = true;
@@ -598,6 +599,7 @@ void display_perf_reset(void) {
     s_perf_lcd_flush_us = 0;
     s_perf_lcd_queue_wait_us = 0;
     s_perf_lcd_queue_wait_count = 0;
+    s_perf_lcd_queue_wait_episodes = 0;
     s_perf_frame_pacing_sleep_us = 0;
     s_perf_frame_pacing_sleep_count = 0;
 #if defined(NESCO_PALETTE_SNAPSHOT_LOG)
@@ -630,6 +632,7 @@ void display_perf_take_window(display_perf_window_t *window) {
     window->lcd_flush_us = s_perf_lcd_flush_us;
     window->lcd_queue_wait_us = s_perf_lcd_queue_wait_us;
     window->lcd_queue_wait_count = s_perf_lcd_queue_wait_count;
+    window->lcd_queue_wait_episodes = s_perf_lcd_queue_wait_episodes;
     window->frame_pacing_sleep_us = s_perf_frame_pacing_sleep_us;
     window->frame_pacing_sleep_count = s_perf_frame_pacing_sleep_count;
     window->palette_version = s_lcd_worker_palette_version;
@@ -647,6 +650,7 @@ void display_perf_take_window(display_perf_window_t *window) {
     s_perf_lcd_flush_us = 0;
     s_perf_lcd_queue_wait_us = 0;
     s_perf_lcd_queue_wait_count = 0;
+    s_perf_lcd_queue_wait_episodes = 0;
     s_perf_frame_pacing_sleep_us = 0;
     s_perf_frame_pacing_sleep_count = 0;
 #if defined(NESCO_PALETTE_SNAPSHOT_LOG)
@@ -864,6 +868,7 @@ static bool display_lcd_worker_submit_line(int scanline, const BYTE *src) {
         if (!queue_waited) {
             queue_wait_start_us = time_us_64();
             queue_waited = true;
+            s_perf_lcd_queue_wait_episodes++;
         }
         s_perf_lcd_queue_wait_count++;
         sleep_us(100);
@@ -891,6 +896,7 @@ static bool display_lcd_worker_submit_line(int scanline, const BYTE *src) {
             if (!queue_waited) {
                 queue_wait_start_us = time_us_64();
                 queue_waited = true;
+                s_perf_lcd_queue_wait_episodes++;
             }
             s_perf_lcd_queue_wait_count++;
             sleep_us(100);

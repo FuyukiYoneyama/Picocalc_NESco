@@ -278,8 +278,6 @@ uint64_t g_perf_lcd_wait_us = 0;
 uint64_t g_perf_lcd_flush_us = 0;
 uint64_t g_perf_lcd_queue_wait_us = 0;
 uint32_t g_perf_lcd_queue_wait_count = 0;
-uint64_t g_perf_frame_pacing_sleep_us = 0;
-uint32_t g_perf_frame_pacing_sleep_count = 0;
 uint64_t g_perf_audio_wait_us = 0;
 uint32_t g_perf_audio_wait_count = 0;
 
@@ -427,7 +425,7 @@ inline void perf_log_if_due(uint64_t now_us)
           : 0;
   const unsigned input_events = input_consume_event_count();
 
-  NESCO_LOG_PERF("[CORE1_BASE] t_us=%llu frames=%lu fps_x100=%llu frame_us_avg=%llu frame_us_max=%llu lcd_wait_us=%llu lcd_flush_us=%llu lcd_queue_wait_us=%llu lcd_queue_wait_count=%lu lcd_empty_polls=%lu palette_protocol_faults=%lu pad_interval_us_avg=%llu pad_interval_us_max=%llu input_events=%u view_mode=%s\n",
+  NESCO_LOG_PERF("[CORE1_BASE] t_us=%llu frames=%lu fps_x100=%llu frame_us_avg=%llu frame_us_max=%llu lcd_wait_us=%llu lcd_flush_us=%llu lcd_queue_wait_us=%llu lcd_queue_wait_count=%lu lcd_empty_polls=%lu palette_protocol_faults=%lu pad_interval_us_avg=%llu pad_interval_us_max=%llu input_events=%u view_mode=%s lcd_queue_wait_episodes=%lu frame_pacing_sleep_us=%llu frame_pacing_sleep_count=%lu\n",
                  static_cast<unsigned long long>(now_us),
                  static_cast<unsigned long>(g_perf_frames),
                  static_cast<unsigned long long>(fps_x100),
@@ -442,7 +440,10 @@ inline void perf_log_if_due(uint64_t now_us)
                  static_cast<unsigned long long>(pad_interval_us_avg),
                  static_cast<unsigned long long>(g_perf_pad_interval_us_max),
                  input_events,
-                 view_mode);
+                 view_mode,
+                 static_cast<unsigned long>(display_window.lcd_queue_wait_episodes),
+                 static_cast<unsigned long long>(display_window.frame_pacing_sleep_us),
+                 static_cast<unsigned long>(display_window.frame_pacing_sleep_count));
 
 #if defined(NESCO_PALETTE_SNAPSHOT_LOG)
   NESCO_LOG_PERF("[PALETTE_SNAPSHOT] frames=%lu line_items=%lu snapshots=%lu forced=%lu applied=%lu protocol_faults=%lu version=%u\n",
@@ -497,8 +498,6 @@ inline void perf_log_if_due(uint64_t now_us)
                    static_cast<unsigned long>(g_perf_sprite_active_list_candidates));
   }
 
-  (void)display_window.frame_pacing_sleep_us;
-  (void)display_window.frame_pacing_sleep_count;
   std::fflush(stdout);
   perf_reset();
 }

@@ -6,6 +6,8 @@ build-bg-index/
 build-bg-index-baseline/
 build-palette-snapshot/
 build-palette-snapshot-arm/
+build-stretch-retry-baseline/
+build-stretch-retry-10us/
 *.elf
 *.uf2
 *.bin
