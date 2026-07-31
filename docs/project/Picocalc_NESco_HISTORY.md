@@ -21,9 +21,27 @@
 - build:
   - 通常版、baseline 版、BG share 版の clean configure / build に成功した
   - 通常版 size は `text=278844 data=0 bss=98548` で、1.1.26 の通常版履歴値と一致した
+- 実機計測:
+  - baseline log:
+    `/home/fuyuki/pico_dvl/codex/log/pico20260731_192451.log`
+    - `LodeRunner.nes`、`Project_DART_V1.0.nes`、`Xevious.nes` の normal を取得した
+    - `[CORE1_BASE]` と `[FRAME_STATS]` を確認した
+  - BG share log:
+    `/home/fuyuki/pico_dvl/codex/log/pico20260731_193201.log`
+    - 同じ 3 ROM の normal と、`Xevious.nes` の stretch を取得した
+    - `[BG_SHARE]` を確認した
+- 評価:
+  - `bg_tile_us_per_frame` は 3 ROM で概ね `6.6`〜`6.9 ms` だった
+  - background tile の判定基準 `4 ms 以上 8 ms 未満` に入るため、
+    palette index 化を段階 1、段階 2 の順に実装する
+  - 段階 2 では、3 ROM すべてで平均 `frame_us` の改善が `3%` 未満なら不採用とする
+  - `Xevious.nes` stretch は約 `36.7 fps` (`27.3 ms/frame`) であり、
+    LCD バス上限 `40.7 fps` には貼り付いていない。COLMOD 12 bit/pixel は BG 実装の後に判断する
+  - `lcd_queue_wait_us` / `lcd_queue_wait_count` は 1 秒窓ごとに reset されず累積して見える。
+    queue depth の判断に使う前に計測を修正し、baseline build だけを再計測する
 - 状態:
   - version は `1.1.27` とした
-  - 実機確認と UART log の取得は未実施である
+  - 実機計測は完了した。BG line buffer index 化は未実装である
 
 ## 1.1.26 sprite active list 採用 (2026-07-19)
 

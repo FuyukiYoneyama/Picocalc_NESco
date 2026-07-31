@@ -55,30 +55,28 @@
   - 着手する場合は COLMOD 12 bit/pixel から始める
     - `NesPalette` が RGB444 のため、色情報を落とさずに転送量を 25% 減らせる
     - panel 側の色展開が一致するかの実機確認が前提になる
-- `[pending]` 高速化に着手する前に、事前計測を 1 回の実機 session でまとめて取る
+- `[in_progress]` 256 表示の追加高速化を、事前計測結果に基づいて進める
+  - 段階 0 の計測用コード追加と実機計測は完了した。結果の正本は
+    `docs/project/Picocalc_NESco_HISTORY.md` の `1.1.27 計測 build 段階0` を参照する
+  - BG line buffer index 化は実装へ進める
+    - 3 ROM の `bg_tile_us_per_frame` は概ね `6.6`〜`6.9 ms`
+    - 判断基準の `4 ms 以上 8 ms 未満` に該当するため、段階 2 の実測で打ち切り判断を行う
+  - LCD queue wait の raw counter は 1 秒窓ごとに reset されず累積して見える
+    - queue depth を判断する前に計測を修正し、baseline build だけを再計測する
+    - BG line buffer 実装の着手条件ではない
   - 目的:
     - 実装後に効果を測れる基準値を先に作る
     - `1.1.26` の実測 fps は 3 ROM とも normal のバス下限 `15.73 ms` を上回っており、
       normal が core0 律速か LCD バス律速かを実装前に確定させる
     - core0 側の対象を決めるため、draw 内訳の現在値を得る
-  - **計測用のコード追加が先に必要である。現在の build では取れない**
-    - 出力 gate は `NESCO_CORE1_BASELINE_LOG` が必要で、
-      `kDetailedPerfLogToSerial` を true にしても出力されない
-    - `g_perf_ppu_bg_tile_us` を出力する処理が存在しない
-    - `g_perf_draw_us` は宣言のみで加算も参照もされていない (分母に使えない)
-    - 中央値 / 95 percentile の材料 (frame time の sample 列) が存在しない
-    - 詳細は `docs/design/BG_LINE_BUFFER_INDEX_REDESIGN_20260731.md` の段階 0
-  - build は 2 つ必要である。実機 session は 1 回で両方を流す
-    - build 1: `NESCO_CORE1_BASELINE_LOG=ON` のみ
-      - 計測 A (計測 1 を含む) と 計測 2 を取る
-    - build 2: `NESCO_BG_TILE_SHARE_LOG=ON` (段階 0 で追加する専用 option)
-      - 計測 3 を取る
-      - `kDetailedPerfLogToSerial` の全面有効化は使わない。
-        scanline あたり約 22 回の `time_us_64()` で `0.4`〜`0.5 ms/frame` の負荷が乗り、
-        比率の分母だけが膨らんで background 占有率が実態より低く出るため
-  - 実施順は 計測 3 → 計測 A (計測 1 を含む) → 計測 2 とする
-    - 計測 3 が不発なら core0 側の設計は不要になるため先に置く
-  - 計測 3: `1.1.26` の background tile 実時間
+  - 計測 build は 2 つ作成済みである
+    - baseline: `NESCO_CORE1_BASELINE_LOG=ON`
+      - log: `/home/fuyuki/pico_dvl/codex/log/pico20260731_192451.log`
+    - BG share: `NESCO_BG_TILE_SHARE_LOG=ON`
+      - log: `/home/fuyuki/pico_dvl/codex/log/pico20260731_193201.log`
+      - `NESCO_CORE1_BASELINE_LOG` を含意し、`[BG_SHARE]` も出力する
+  - 実機計測は baseline → BG share の順で実施した
+  - 計測 3: background tile 実時間 — **完了**
     - 正本は `docs/design/BG_LINE_BUFFER_INDEX_REDESIGN_20260731.md`
     - 主判定は **1 frame あたりの `bg_tile_us` 絶対値**とする
       - 比率は分母の選び方で結論が動くため判定に使わない
@@ -95,19 +93,23 @@
       - `bg_tile_us` が 8 ms 以上なら実装する
       - 4 ms 以上 8 ms 未満なら実装するが、段階 2 の実測で打ち切り判断を行う
       - 4 ms 未満なら見送り、`bg_us` / `sprite_us` を見て対象を選び直す
-  - 計測 1: `1.1.26` の stretch 実測 fps
+    - 実測値: 3 ROM で概ね `6.6`〜`6.9 ms/frame`。実装するが、段階 2 で
+      3 ROM すべての平均 `frame_us` 改善が `3%` 未満なら不採用とする
+  - 計測 1: stretch 実測 fps — **完了**
     - 対象は `Xevious.nes` stretch
     - 最後の stretch 実測は `1.0.15` の `36.34 fps` で、`1.1.26` の値が存在しない
     - stretch のバス上限は `40.7 fps` なので、天井に貼り付いているかどうかで
       COLMOD 12 bit/pixel の効果見積もりが変わる
-  - 計測 2: `lcd_queue_wait_us` / `lcd_queue_wait_count`
+    - 実測値: `Xevious.nes` stretch は約 `36.7 fps` (`27.3 ms/frame`)。
+      `40.7 fps` のバス上限に貼り付いていないため、COLMOD 12 bit/pixel は BG 実装より後に判断する
+  - 計測 2: `lcd_queue_wait_us` / `lcd_queue_wait_count` — **再計測待ち**
     - `NESCO_CORE1_BASELINE_LOG=ON` の `[CORE1_BASE]` から取得する
     - 計測機構は `1.1.1` で追加済みだが、実測値が履歴に残っていない
     - LCD worker queue depth は 4 scanline のため、core1 の strip DMA 待ちが
       core0 の `PostDrawLine` を止めている量がここに出る
     - normal 側で期待できる二次効果の大きさがこれで決まる
     - BG line buffer index 化における queue depth 8 化の効果見積もりも兼ねる
-  - 計測 A: 基準 frame time (build 1)
+  - 計測 A: 基準 frame time (build 1) — **normal 3 ROM は完了**
     - 対象は `LodeRunner.nes` `Xevious.nes` `Project_DART_V1.0.nes` の normal と
       `Xevious.nes` の stretch
     - 実装後の比較はこの値に対して行う
