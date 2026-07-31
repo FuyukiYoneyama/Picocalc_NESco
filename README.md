@@ -3,7 +3,7 @@
 `Picocalc_NESco` は、PicoCalc 向けに調整している NES エミュレーター firmware です。
 現在の実装は `infones` ベースで、PicoCalc の LCD、I2C keyboard、PWM audio、SD / flash ROM 選択 menu に接続しています。
 
-現在の埋め込み version は `1.1.26` です。
+現在の埋め込み version は `1.1.27` です。
 このプロジェクトは PicoCalc 専用 firmware を対象にしています。
 PicoCalc 向け以外の build は未検証なので、現在は明示的に無効化しています。
 `infones` 側にある他環境向け build は、このプロジェクトの対象外です。
@@ -101,6 +101,24 @@ cd build
 make clean
 make -j4
 ```
+
+計測用 build は通常 build と分けて生成します。baseline 版は `[CORE1_BASE]` と
+`[FRAME_STATS]` を出力し、BG share 版はそれに加えて `[BG_SHARE]` を出力します。
+
+```bash
+cmake -S . -B build-baseline \
+      -DPICO_SDK_PATH=/path/to/pico-sdk \
+      -DNESCO_CORE1_BASELINE_LOG=ON
+cmake --build build-baseline -j4
+
+cmake -S . -B build-bg-share \
+      -DPICO_SDK_PATH=/path/to/pico-sdk \
+      -DNESCO_BG_TILE_SHARE_LOG=ON
+cmake --build build-bg-share -j4
+```
+
+`NESCO_BG_TILE_SHARE_LOG=ON` は `NESCO_CORE1_BASELINE_LOG` も自動的に有効にします。
+これらは実機計測用であり、実機確認前の試作 build です。
 
 build 後は、生成物から次を自動表示するようにしています。
 

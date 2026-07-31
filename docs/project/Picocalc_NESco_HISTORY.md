@@ -10,6 +10,21 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## 1.1.27 計測 build 段階0 (2026-07-31)
+
+- 実装:
+  - `NESCO_BG_TILE_SHARE_LOG` CMake option を追加した
+  - `[CORE1_BASE]` に frame、LCD queue wait、入力、表示 mode の summary を追加した
+  - `[FRAME_STATS]` に frame time の平均、中央値、95 percentile、最大値を追加した
+  - `[BG_SHARE]` に background tile、background、sprite の実時間を追加した
+  - BG share option では必要な scanline 計測だけを有効にし、既存の詳細計測全体は有効化しない
+- build:
+  - 通常版、baseline 版、BG share 版の clean configure / build に成功した
+  - 通常版 size は `text=278844 data=0 bss=98548` で、1.1.26 の通常版履歴値と一致した
+- 状態:
+  - version は `1.1.27` とした
+  - 実機確認と UART log の取得は未実施である
+
 ## 1.1.26 sprite active list 採用 (2026-07-19)
 
 - 背景:

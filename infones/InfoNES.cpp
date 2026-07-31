@@ -209,7 +209,13 @@ inline void initBgTileRenderLut()
 }
 
 constexpr bool kPerfLogToSerial =
-#if defined(NESCO_CORE1_BASELINE_LOG)
+#if defined(NESCO_CORE1_BASELINE_LOG) || defined(NESCO_BG_TILE_SHARE_LOG)
+    true;
+#else
+    false;
+#endif
+constexpr bool kBgTileShareTiming =
+#if defined(NESCO_BG_TILE_SHARE_LOG)
     true;
 #else
     false;
@@ -228,6 +234,7 @@ constexpr bool kSpriteActiveListEnabled =
     false;
 #endif
 constexpr uint64_t kPerfWindowUs = 1000000;
+constexpr uint32_t kPerfFrameSampleCapacity = 64;
 constexpr int kNesViewScaleStretch320x300 = 1;
 
 uint64_t g_perf_window_start_us = 0;
@@ -235,6 +242,7 @@ uint64_t g_perf_last_frame_us = 0;
 uint64_t g_perf_frame_us_total = 0;
 uint64_t g_perf_frame_us_max = 0;
 uint32_t g_perf_frame_samples = 0;
+uint32_t g_perf_frame_us_samples[kPerfFrameSampleCapacity];
 uint64_t g_perf_last_pad_us = 0;
 uint64_t g_perf_pad_interval_us_total = 0;
 uint64_t g_perf_pad_interval_us_max = 0;
@@ -243,7 +251,6 @@ uint32_t g_perf_frames = 0;
 uint32_t g_perf_scanlines = 0;
 uint64_t g_perf_cpu_us = 0;
 uint64_t g_perf_apu_us = 0;
-uint64_t g_perf_draw_us = 0;
 uint64_t g_perf_ppu_bg_us = 0;
 uint64_t g_perf_ppu_bg_mapper_us = 0;
 uint64_t g_perf_ppu_bg_clear_us = 0;
@@ -291,7 +298,18 @@ uint32_t g_perf_audio_wait_count = 0;
 inline void perf_reset()
 {
   g_perf_window_start_us = time_us_64();
+  g_perf_last_frame_us = 0;
+  g_perf_frame_us_total = 0;
+  g_perf_frame_us_max = 0;
+  g_perf_frame_samples = 0;
+  g_perf_last_pad_us = 0;
+  g_perf_pad_interval_us_total = 0;
+  g_perf_pad_interval_us_max = 0;
+  g_perf_pad_interval_samples = 0;
   g_perf_frames = 0;
+  g_perf_ppu_bg_us = 0;
+  g_perf_ppu_bg_tile_us = 0;
+  g_perf_ppu_sprite_us = 0;
   g_perf_ppu_sprite_active_build_us = 0;
   g_perf_ppu_sprite_active_entries = 0;
   g_perf_ppu_sprite_active_lines = 0;
@@ -311,7 +329,11 @@ inline void perf_note_frame(uint64_t now_us)
     {
       g_perf_frame_us_max = frame_us;
     }
-    ++g_perf_frame_samples;
+    if (g_perf_frame_samples < kPerfFrameSampleCapacity)
+    {
+      g_perf_frame_us_samples[g_perf_frame_samples] = static_cast<uint32_t>(frame_us);
+      ++g_perf_frame_samples;
+    }
   }
   g_perf_last_frame_us = now_us;
 }
@@ -329,6 +351,57 @@ inline void perf_note_pad_poll(uint64_t now_us)
     ++g_perf_pad_interval_samples;
   }
   g_perf_last_pad_us = now_us;
+}
+
+inline void perf_sort_frame_samples()
+{
+  for (uint32_t i = 1; i < g_perf_frame_samples; ++i)
+  {
+    const uint32_t value = g_perf_frame_us_samples[i];
+    uint32_t j = i;
+    while (j > 0 && g_perf_frame_us_samples[j - 1] > value)
+    {
+      g_perf_frame_us_samples[j] = g_perf_frame_us_samples[j - 1];
+      --j;
+    }
+    g_perf_frame_us_samples[j] = value;
+  }
+}
+
+inline uint64_t perf_frame_avg_us()
+{
+  return g_perf_frame_samples != 0
+             ? g_perf_frame_us_total / g_perf_frame_samples
+             : 0;
+}
+
+inline uint64_t perf_frame_median_us()
+{
+  if (g_perf_frame_samples == 0)
+  {
+    return 0;
+  }
+
+  const uint32_t middle = g_perf_frame_samples / 2;
+  if ((g_perf_frame_samples & 1u) != 0)
+  {
+    return g_perf_frame_us_samples[middle];
+  }
+
+  return (static_cast<uint64_t>(g_perf_frame_us_samples[middle - 1]) +
+          g_perf_frame_us_samples[middle]) /
+         2;
+}
+
+inline uint64_t perf_frame_p95_us()
+{
+  if (g_perf_frame_samples == 0)
+  {
+    return 0;
+  }
+
+  const uint32_t rank = (g_perf_frame_samples * 95u + 99u) / 100u;
+  return g_perf_frame_us_samples[rank - 1u];
 }
 
 inline void perf_log_if_due(uint64_t now_us)
@@ -355,6 +428,66 @@ inline void perf_log_if_due(uint64_t now_us)
           ? "stretch"
           : "normal";
 
+  perf_sort_frame_samples();
+
+  uint64_t lcd_wait_us = 0;
+  uint64_t lcd_flush_us = 0;
+  uint64_t lcd_queue_wait_us = 0;
+  uint32_t lcd_queue_wait_count = 0;
+  uint64_t frame_pacing_sleep_us = 0;
+  uint32_t frame_pacing_sleep_count = 0;
+  display_perf_snapshot(&lcd_wait_us,
+                        &lcd_flush_us,
+                        &lcd_queue_wait_us,
+                        &lcd_queue_wait_count,
+                        &frame_pacing_sleep_us,
+                        &frame_pacing_sleep_count);
+
+  const uint64_t pad_interval_us_avg =
+      g_perf_pad_interval_samples != 0
+          ? g_perf_pad_interval_us_total / g_perf_pad_interval_samples
+          : 0;
+  const unsigned input_events = input_consume_event_count();
+
+  NESCO_LOG_PERF("[CORE1_BASE] t_us=%llu frames=%lu fps_x100=%llu frame_us_avg=%llu frame_us_max=%llu lcd_wait_us=%llu lcd_flush_us=%llu lcd_queue_wait_us=%llu lcd_queue_wait_count=%lu pad_interval_us_avg=%llu pad_interval_us_max=%llu input_events=%u view_mode=%s\n",
+                 static_cast<unsigned long long>(now_us),
+                 static_cast<unsigned long>(g_perf_frames),
+                 static_cast<unsigned long long>(fps_x100),
+                 static_cast<unsigned long long>(perf_frame_avg_us()),
+                 static_cast<unsigned long long>(g_perf_frame_us_max),
+                 static_cast<unsigned long long>(lcd_wait_us),
+                 static_cast<unsigned long long>(lcd_flush_us),
+                 static_cast<unsigned long long>(lcd_queue_wait_us),
+                 static_cast<unsigned long>(lcd_queue_wait_count),
+                 static_cast<unsigned long long>(pad_interval_us_avg),
+                 static_cast<unsigned long long>(g_perf_pad_interval_us_max),
+                 input_events,
+                 view_mode);
+
+  NESCO_LOG_PERF("[FRAME_STATS] avg_us=%llu median_us=%llu p95_us=%llu max_us=%llu\n",
+                 static_cast<unsigned long long>(perf_frame_avg_us()),
+                 static_cast<unsigned long long>(perf_frame_median_us()),
+                 static_cast<unsigned long long>(perf_frame_p95_us()),
+                 static_cast<unsigned long long>(g_perf_frame_us_max));
+
+  if constexpr (kBgTileShareTiming)
+  {
+    const uint64_t bg_tile_us_per_frame =
+        g_perf_frames != 0 ? g_perf_ppu_bg_tile_us / g_perf_frames : 0;
+    const uint64_t bg_tile_pct_x100 =
+        g_perf_frame_us_total != 0
+            ? (g_perf_ppu_bg_tile_us * 10000ull) / g_perf_frame_us_total
+            : 0;
+    NESCO_LOG_PERF("[BG_SHARE] frames=%lu bg_tile_us=%llu bg_us=%llu sprite_us=%llu bg_tile_us_per_frame=%llu bg_tile_pct_x100=%llu view_mode=%s\n",
+                   static_cast<unsigned long>(g_perf_frames),
+                   static_cast<unsigned long long>(g_perf_ppu_bg_tile_us),
+                   static_cast<unsigned long long>(g_perf_ppu_bg_us),
+                   static_cast<unsigned long long>(g_perf_ppu_sprite_us),
+                   static_cast<unsigned long long>(bg_tile_us_per_frame),
+                   static_cast<unsigned long long>(bg_tile_pct_x100),
+                   view_mode);
+  }
+
   NESCO_LOG_PERF("[FPS_SUMMARY] t_us=%llu frames=%lu fps_x100=%llu view_mode=%s\n",
                  static_cast<unsigned long long>(now_us),
                  static_cast<unsigned long>(g_perf_frames),
@@ -373,6 +506,9 @@ inline void perf_log_if_due(uint64_t now_us)
                    static_cast<unsigned long>(g_perf_sprite_active_list_candidates));
   }
 
+  (void)frame_pacing_sleep_us;
+  (void)frame_pacing_sleep_count;
+  std::fflush(stdout);
   perf_reset();
 }
 }
@@ -1251,8 +1387,13 @@ int __not_in_flash_func(InfoNES_HSync)()
     {
       // Transfer the contents of work frame on the screen
       InfoNES_LoadFrame();
+      const uint64_t frame_now_us = time_us_64();
+      if constexpr (kPerfLogToSerial)
+      {
+        perf_note_frame(frame_now_us);
+      }
       ++g_perf_frames;
-      perf_log_if_due(time_us_64());
+      perf_log_if_due(frame_now_us);
 
 #if 0
         // Switching of the double buffer
@@ -1282,6 +1423,10 @@ int __not_in_flash_func(InfoNES_HSync)()
 
     // Get the condition of the joypad
     InfoNES_PadState(&PAD1_Latch, &PAD2_Latch, &PAD_System);
+    if constexpr (kPerfLogToSerial)
+    {
+      perf_note_pad_poll(time_us_64());
+    }
 #if INFONES_ENABLE_BOKOSUKA_STATE_LOG
     InfoNES_BokosukaHeartbeat();
 #endif
@@ -1556,7 +1701,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
   /*  Render Background                                                */
   /*-------------------------------------------------------------------*/
 
-  if constexpr (kDetailedPerfLogToSerial)
+  if constexpr (kBgTileShareTiming)
   {
     bg_start_us = time_us_64();
   }
@@ -1721,6 +1866,9 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     if constexpr (kDetailedPerfLogToSerial)
     {
       g_perf_ppu_bg_setup_us += time_us_64() - bg_setup_start_us;
+    }
+    if constexpr (kBgTileShareTiming)
+    {
       bg_tile_start_us = time_us_64();
     }
     emitBgTile(pbyNameTable,
@@ -1795,9 +1943,12 @@ void __not_in_flash_func(InfoNES_DrawLine)()
                pOpaquePoint,
                0,
                PPU_Scr_H_Bit);
-    if constexpr (kDetailedPerfLogToSerial)
+    if constexpr (kBgTileShareTiming)
     {
       g_perf_ppu_bg_tile_us += time_us_64() - bg_tile_start_us;
+    }
+    if constexpr (kDetailedPerfLogToSerial)
+    {
       bg_clip_start_us = time_us_64();
     }
 
@@ -1834,7 +1985,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
   }
 
   //util::WorkMeterMark(MARKER_BG);
-  if constexpr (kDetailedPerfLogToSerial)
+  if constexpr (kBgTileShareTiming)
   {
     g_perf_ppu_bg_us += time_us_64() - bg_start_us;
     sprite_start_us = time_us_64();
@@ -2214,7 +2365,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     }
   }
 
-  if constexpr (kDetailedPerfLogToSerial)
+  if constexpr (kBgTileShareTiming)
   {
     g_perf_ppu_sprite_us += time_us_64() - sprite_start_us;
   }
