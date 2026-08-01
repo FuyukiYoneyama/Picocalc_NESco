@@ -81,6 +81,7 @@ void display_get_viewport(int *x, int *y, int *w, int *h);
  */
 void display_set_mode(display_mode_t mode);
 void display_toggle_nes_view_scale(void);
+void display_toggle_stretch_frame_policy(void);
 nes_view_scale_mode_t display_get_nes_view_scale(void);
 display_lcd_worker_state_t display_lcd_worker_get_state(void);
 void display_lcd_worker_prepare_nes_view(void);

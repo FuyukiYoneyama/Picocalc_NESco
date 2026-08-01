@@ -11,6 +11,7 @@
  *   F1                 → PAD_SYS_RESET
  *   F5                → PAD_SYS_SCREENSHOT
  *   Shift+W            → PAD_SYS_VIEW_TOGGLE
+ *   Shift+F            → PAD_SYS_FRAME_POLICY_TOGGLE
  *
  * Part of Picocalc_NESco
  * MIT License
@@ -48,6 +49,7 @@ enum {
 #define KEY_LBRACK  '['
 #define KEY_RBRACK  ']'
 #define KEY_W_UPPER 'W'
+#define KEY_F_UPPER 'F'
 #define KEY_ESC     0xB1
 #define KEY_F1      0x81
 #define KEY_F5      0x85
@@ -189,6 +191,8 @@ void input_poll(DWORD *pad1, DWORD *pad2, DWORD *system) {
         if (state == KEY_STATE_PRESSED) {
             if (key == KEY_W_UPPER) {
                 sys_bits |= PAD_SYS_VIEW_TOGGLE;
+            } else if (key == KEY_F_UPPER) {
+                sys_bits |= PAD_SYS_FRAME_POLICY_TOGGLE;
             } else if (key == KEY_ESC) {
                 sys_bits |= PAD_SYS_QUIT;
             } else if (key == KEY_F5) {

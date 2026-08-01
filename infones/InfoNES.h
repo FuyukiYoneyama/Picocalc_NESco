@@ -254,6 +254,7 @@ extern DWORD PAD2_Bit;
 #define PAD_SYS_RESET 0x80
 #define PAD_SYS_VIEW_TOGGLE 0x100
 #define PAD_SYS_SCREENSHOT 0x200
+#define PAD_SYS_FRAME_POLICY_TOGGLE 0x400
 
 #define PAD_PUSH(a, b) (((a) & (b)) != 0)
 

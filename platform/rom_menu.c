@@ -532,6 +532,8 @@ static void menu_render_help(int help_page, BYTE last_key, BYTE last_state, cons
         menu_draw_text_span(12, 218, 296, "F1 : RESET   F5 : SCREENSHOT", MENU_DIM, MENU_BG);
         menu_draw_text_span(12, 232, 296, "` : SELECT   - : START", MENU_DIM, MENU_BG);
         menu_draw_text_span(12, 246, 296, "[ : B BUTTON   ] : A BUTTON", MENU_DIM, MENU_BG);
+        menu_draw_text_span(12, 258, 296, "SHIFT+W : NORMAL / STRETCH", MENU_DIM, MENU_BG);
+        menu_draw_text_span(12, 270, 296, "SHIFT+F : 30FPS / FAST (STRETCH)", MENU_DIM, MENU_BG);
     } else if (help_page == HELP_PAGE_VERSION) {
         snprintf(version_line, sizeof(version_line), "Ver. %s", PICOCALC_NESCO_VERSION);
         menu_draw_text_span_scaled(32, 90, 256, "PicoCalc NESco", MENU_ACCENT, MENU_BG, 2, 10);
@@ -560,7 +562,7 @@ static void menu_render_help(int help_page, BYTE last_key, BYTE last_state, cons
         menu_draw_text_span(12, 194, 296, "Check tree files for exact texts.", MENU_DIM, MENU_BG);
     }
 
-    menu_fill_rect(8, 280, 304, 2, MENU_ACCENT);
+    menu_fill_rect(8, 284, 304, 2, MENU_ACCENT);
     if (status_text && *status_text) {
         menu_draw_text_span(8, 304, 270, status_text, MENU_STATUS, MENU_BG);
     } else {

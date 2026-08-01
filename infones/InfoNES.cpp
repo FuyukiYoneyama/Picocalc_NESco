@@ -1461,6 +1461,11 @@ int __not_in_flash_func(InfoNES_HSync)()
       display_toggle_nes_view_scale();
     }
 
+    if (PAD_PUSH(PAD_System, PAD_SYS_FRAME_POLICY_TOGGLE))
+    {
+      display_toggle_stretch_frame_policy();
+    }
+
     break;
   }
 
