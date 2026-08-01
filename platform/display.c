@@ -1190,8 +1190,13 @@ void InfoNES_PostDrawLine(int scanline, bool frommenu) {
 }
 
 /* =====================================================================
- *  InfoNES_LoadFrame — frame skip calculation
+ *  InfoNES_LoadFrame — frame pacing and frame skip calculation
  *  Returns 0 to render all frames (platform can implement FPS control).
+ *
+ *  Stretch view deliberately presents every other emulated frame.  The
+ *  existing 16,667 us pacing target therefore produces an approximately
+ *  30 fps display cadence and avoids the variable 0/1/2 skip pattern that
+ *  can make scrolling appear uneven.
  * ===================================================================== */
 int InfoNES_LoadFrame(void) {
 #ifdef PICO_BUILD
@@ -1215,7 +1220,9 @@ int InfoNES_LoadFrame(void) {
         late_us = now_us - s_next_frame_deadline_us;
     }
 
-    if (late_us > 20000u) {
+    if (display_get_nes_view_scale() == NES_VIEW_SCALE_STRETCH_320X300) {
+        FrameSkip = 1;
+    } else if (late_us > 20000u) {
         FrameSkip = 2;
     } else if (late_us > 6000u) {
         FrameSkip = 1;
