@@ -213,6 +213,7 @@ static void display_draw_text_span_scaled_cropped(int x,
                                                   int crop_top_rows);
 static int display_measure_text_width(const char *text, int char_advance, int glyph_w, int scale);
 static void display_apply_nes_viewport(void);
+static void display_draw_nes_view_hint(void);
 static void display_build_palette_lut256(WORD dst[256], const WORD src[32]);
 static void display_pack_line_normal(BYTE *dst, const BYTE *src, const WORD lut[256]);
 static void display_pack_line_stretch_320(BYTE *dst, const BYTE *src, const WORD lut[256]);
@@ -329,23 +330,32 @@ void display_lcd_worker_stop_and_drain(void) {
 
 static void display_prepare_nes_view_surface(void) {
     static const WORD bg = 0x0000;
-    static const WORD fg = 0x7BEF;
-    static const char *hint_normal = "Shift+W Stretch Screen";
-    static const char *hint_stretch = "Shift+W Normal Screen";
-    int hint_w;
 
     display_set_viewport(0, 0, 320, 320);
     display_clear_rgb565(bg);
+    display_draw_nes_view_hint();
+    display_apply_nes_viewport();
+}
+
+static void display_draw_nes_view_hint(void) {
+    static const WORD bg = 0x0000;
+    static const WORD fg = 0x7BEF;
+    static const char *hint_normal = "Shift+W Stretch Screen";
+    static const char *hint_stretch_fixed = "Shift+W Normal  30fps FIXED";
+    static const char *hint_stretch_fast = "Shift+W Normal  FAST ADAPTIVE";
 
     if (s_nes_view_scale == NES_VIEW_SCALE_NORMAL) {
-        hint_w = display_measure_text_width(hint_normal, 6, MENU_FONT_PIXELMPLUS_WIDTH, 1);
+        const int hint_w = display_measure_text_width(hint_normal,
+                                                       6,
+                                                       MENU_FONT_PIXELMPLUS_WIDTH,
+                                                       1);
         display_draw_text_span_scaled(8, 309, hint_w, hint_normal, fg, bg, 1, 6);
     } else {
-        hint_w = display_measure_text_width(hint_stretch, 6, MENU_FONT_PIXELMPLUS_WIDTH, 1);
-        display_draw_text_span_scaled_cropped(8, 310, hint_w, hint_stretch, fg, bg, 1, 6, 1);
+        const char *hint = s_stretch_fixed_frame_skip
+                               ? hint_stretch_fixed
+                               : hint_stretch_fast;
+        display_draw_text_span_scaled_cropped(8, 310, 312, hint, fg, bg, 1, 6, 1);
     }
-
-    display_apply_nes_viewport();
 }
 
 /* =====================================================================
@@ -612,7 +622,12 @@ nes_view_scale_mode_t display_get_nes_view_scale(void) {
 
 void display_toggle_stretch_frame_policy(void) {
     if (s_nes_view_scale == NES_VIEW_SCALE_STRETCH_320X300) {
+        display_lcd_worker_stop_and_drain();
         s_stretch_fixed_frame_skip = !s_stretch_fixed_frame_skip;
+        if (s_display_mode == DISPLAY_MODE_NES_VIEW) {
+            display_draw_nes_view_hint();
+            display_lcd_worker_prepare_nes_view();
+        }
     }
 }
 
