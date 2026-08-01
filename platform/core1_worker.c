@@ -28,6 +28,7 @@ enum {
     KEY_LBRACK = '[',
     KEY_RBRACK = ']',
     KEY_W_UPPER = 'W',
+    KEY_F_UPPER = 'F',
     KEY_ESC = 0xB1,
     KEY_F1 = 0x81,
     KEY_F5 = 0x85,
@@ -49,6 +50,7 @@ enum {
     PAD_SYS_RESET_LOCAL = 0x80,
     PAD_SYS_VIEW_TOGGLE_LOCAL = 0x100,
     PAD_SYS_SCREENSHOT_LOCAL = 0x200,
+    PAD_SYS_FRAME_POLICY_TOGGLE_LOCAL = 0x400,
 };
 
 static bool s_core1_worker_started = false;
@@ -97,6 +99,8 @@ static void core1_keyboard_poll_once(void) {
         if (state == KEY_STATE_PRESSED) {
             if (key == KEY_W_UPPER) {
                 system_bits |= PAD_SYS_VIEW_TOGGLE_LOCAL;
+            } else if (key == KEY_F_UPPER) {
+                system_bits |= PAD_SYS_FRAME_POLICY_TOGGLE_LOCAL;
             } else if (key == KEY_ESC) {
                 system_bits |= PAD_SYS_QUIT_LOCAL;
             } else if (key == KEY_F5) {

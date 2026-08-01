@@ -101,6 +101,7 @@ static WORD s_active_frame_skip = 0;
 
 static display_mode_t s_display_mode = DISPLAY_MODE_NES_VIEW;
 static nes_view_scale_mode_t s_nes_view_scale = NES_VIEW_SCALE_NORMAL;
+static bool s_stretch_fixed_frame_skip = true;
 static volatile display_lcd_worker_state_t s_lcd_worker_state = DISPLAY_LCD_WORKER_STOPPED;
 
 /*
@@ -607,6 +608,12 @@ void display_toggle_nes_view_scale(void) {
 
 nes_view_scale_mode_t display_get_nes_view_scale(void) {
     return s_nes_view_scale;
+}
+
+void display_toggle_stretch_frame_policy(void) {
+    if (s_nes_view_scale == NES_VIEW_SCALE_STRETCH_320X300) {
+        s_stretch_fixed_frame_skip = !s_stretch_fixed_frame_skip;
+    }
 }
 
 void display_perf_reset(void) {
@@ -1220,7 +1227,8 @@ int InfoNES_LoadFrame(void) {
         late_us = now_us - s_next_frame_deadline_us;
     }
 
-    if (display_get_nes_view_scale() == NES_VIEW_SCALE_STRETCH_320X300) {
+    if (display_get_nes_view_scale() == NES_VIEW_SCALE_STRETCH_320X300 &&
+        s_stretch_fixed_frame_skip) {
         FrameSkip = 1;
     } else if (late_us > 20000u) {
         FrameSkip = 2;

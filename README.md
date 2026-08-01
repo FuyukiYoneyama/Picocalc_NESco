@@ -77,6 +77,7 @@ In game:
 - `F1` : reset
 - `F5` : screenshot
 - `Shift+W` : `256x240` / `320x300` view toggle
+- `Shift+F` : stretch の `30fps固定` / `高速adaptive` 切り替え
 
 ## ビルド
 
