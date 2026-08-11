@@ -181,10 +181,17 @@ void Map9_Write( WORD wAddr, BYTE byData )
 /*-------------------------------------------------------------------*/
 void Map9_PPU( WORD wAddr )
 {
-  /* Control Latch Selector */ 
-  switch ( wAddr & 0x3ff0 )
+  const WORD wLatchAddr = wAddr & 0x3fff;
+
+  /* Control Latch Selector.
+   *
+   * MMC2 differs between the left and right pattern table:
+   *  - $0FD8 / $0FE8 are single-address triggers.
+   *  - $1FD8-$1FDF / $1FE8-$1FEF are range triggers.
+   */
+  switch ( wLatchAddr )
   {
-    case 0x0fd0:
+    case 0x0fd8:
       /* Latch Control */
       latch1.state = 0xfd;
       /* Set PPU Banks */
@@ -195,7 +202,7 @@ void Map9_PPU( WORD wAddr )
       InfoNES_SetupChr();
       break;
 
-    case 0x0fe0:
+    case 0x0fe8:
       /* Latch Control */
       latch1.state = 0xfe;
       /* Set PPU Banks */
@@ -206,7 +213,14 @@ void Map9_PPU( WORD wAddr )
       InfoNES_SetupChr();      
       break;
 
-    case 0x1fd0:
+    case 0x1fd8:
+    case 0x1fd9:
+    case 0x1fda:
+    case 0x1fdb:
+    case 0x1fdc:
+    case 0x1fdd:
+    case 0x1fde:
+    case 0x1fdf:
       /* Latch Control */
       latch2.state = 0xfd;
       /* Set PPU Banks */
@@ -217,7 +231,14 @@ void Map9_PPU( WORD wAddr )
       InfoNES_SetupChr();
       break;      
 
-    case 0x1fe0:
+    case 0x1fe8:
+    case 0x1fe9:
+    case 0x1fea:
+    case 0x1feb:
+    case 0x1fec:
+    case 0x1fed:
+    case 0x1fee:
+    case 0x1fef:
       /* Latch Control */
       latch2.state = 0xfe;
       /* Set PPU Banks */

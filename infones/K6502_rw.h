@@ -454,6 +454,13 @@ static inline BYTE __not_in_flash_func(K6502_Read)(WORD wAddr)
       PPU_Addr += PPU_Increment;
       addr &= 0x3fff;
 
+      /*
+       * A CPU $2007 read is also a PPU VRAM bus read.  MMC2/MMC4
+       * mappers use these reads to update their CHR latches, so notify
+       * the mapper before fetching the new read-buffer value.
+       */
+      MapperPPU(addr);
+
       // Set return value;
       byRet = PPU_R7;
 

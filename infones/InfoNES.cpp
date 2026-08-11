@@ -1482,6 +1482,7 @@ namespace
   struct BgTileDescriptor
   {
     const BYTE *pattern_row;
+    WORD ppu_pattern_address;
     BYTE palette_base;
     BYTE *dst;
     BYTE clip_left;
@@ -1740,6 +1741,13 @@ void __not_in_flash_func(InfoNES_DrawLine)()
       const int addrOfs = ((ch & 63) << 4) + yOfsModBG;
 
       desc.pattern_row = PPUBANK[bank] + addrOfs;
+      /* Mapper 9/10 latch on the high-plane byte ($FD8/$FE8), which is
+       * eight bytes after the low-plane row used by the direct renderer.
+       * The PPU address is based on the tile number, not the currently
+       * mapped 1 KiB bank selected by the mapper. */
+      desc.ppu_pattern_address = static_cast<WORD>((patternTableIdBG << 12) +
+                                                    (ch << 4) +
+                                                    yOfsModBG + 8);
       desc.palette_base = paletteBase;
       desc.dst = dst;
       desc.clip_left = (BYTE)clipLeft;
@@ -1772,8 +1780,13 @@ void __not_in_flash_func(InfoNES_DrawLine)()
 
       renderBgTile(desc);
 
-      pbyChrData = const_cast<BYTE *>(desc.pattern_row);
-      MapperPPU(PATTBL(pbyChrData));
+      /*
+       * The direct renderer reads the pattern row from VROM.  PATTBL()
+       * is only valid for the old ChrBuf-backed renderer, so derive the
+       * actual PPU pattern address from the pattern-table and tile instead.
+       * Mapper 9/10 use this callback to observe the $FD/$FE latch tiles.
+       */
+      MapperPPU(desc.ppu_pattern_address);
     };
 
     /*-------------------------------------------------------------------*/
