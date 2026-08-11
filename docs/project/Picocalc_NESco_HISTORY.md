@@ -10,6 +10,24 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## `1.2.2` Mapper 7 compatibility fix — hardware verification pending (2026-08-11)
+
+- Mapper 7 / AxROM の既存実装に、NES 2.0 submapper 2 の AND bus conflict と
+  Mesen2 の AXROM と同じ 4 bit PRG bank select を追加した。
+- iNES header では submapper を表現できないため、Mesen2 database が HVC-AMROM
+  と判定する既知の legacy PRG CRC も Mapper 7 の bus conflict 対象として扱う。
+- release build は runtime / performance log を無効にし、version を `1.2.2` に更新した。
+- 正規版 build は `PicoCalc NESco Ver. 1.2.2 Build Aug 11 2026 22:14:12`、
+  `text=280124 data=0 bss=97552` で成功した。
+- `build/Picocalc_NESco.uf2` SHA-256 は
+  `db7938173cf16ca925d358cb41d361943ca8c3c1345ef5570a5e7be671db606a`、
+  ELF SHA-256 は
+  `bc55e1a6e5bcaadaf5465d01a661da8469d42106293aeb2aa371208a5e27cf52`。
+- 独自の Mapper 7 emulator 検証は `mapper7_validation/` 側へ記録し、GitHub 向けの
+  公開文書には検証用 ROM や詳細な判定値を含めない。
+- 既知の Mapper 7 nametable / background 崩れは未解決の不具合として `TASKS.md` に残す。
+- 次の判断はユーザーによる `build/Picocalc_NESco.uf2` の実機確認後に行う。
+
 ## `1.2.0` release (2026-08-01)
 
 - release方針:
