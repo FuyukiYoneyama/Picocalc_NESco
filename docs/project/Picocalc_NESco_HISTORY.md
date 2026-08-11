@@ -28,6 +28,23 @@
 - 既知の Mapper 7 nametable / background 崩れは未解決の不具合として `TASKS.md` に残す。
 - 次の判断はユーザーによる `build/Picocalc_NESco.uf2` の実機確認後に行う。
 
+## `1.2.3` Mapper 7 sprite-0 hit NMI correction — hardware verified (2026-08-12)
+
+- Mesen2 と Picocalc 側の同一 ROM の PPU / NMI 時系列を照合した。
+- `PPUCTRL` bit 6 は NMI enable ではなく master/slave select であるため、sprite-0 hit 時に
+  `NMI_REQ` を発行していた処理を削除した。
+- sprite-0 hit の `PPUSTATUS` bit 6 設定は維持し、VBlank NMI は従来どおり残した。
+- これにより、Solstice で表示中の約 scanline 80 に発生していた余分な NMI と、そこから生じる
+  palette / nametable 更新の表示中実行、および音楽の進行過多を止める設計になった。
+- emulator の起動シナリオは修正版で完走した。
+- ユーザー実機でタイトル画面 / HUD の乱れが解消され、音楽速度も正常であることを確認した。
+  この不具合は検収済みとし、`TASKS.md` から完了扱いで移動した。
+- 正規版 build は `PicoCalc NESco Ver. 1.2.3 Build Aug 12 2026 00:51:35`、
+  `text=280108 data=0 bss=97552` で成功した。
+- `build/Picocalc_NESco.uf2` SHA-256 は
+  `89c2e738975759a38bf5fb0fdaf94b95d407dd159f4878eab21eb4928eabbaab`。
+- runtime / performance log は従来どおり無効。実機用 UF2 は `build/Picocalc_NESco.uf2` を上書きする。
+
 ## `1.2.0` release (2026-08-01)
 
 - release方針:

@@ -1128,9 +1128,9 @@ void __not_in_flash_func(InfoNES_Cycle)()
               if ((PPU_R1 & R1_SHOW_SP) && (PPU_R1 & R1_SHOW_SCR))
                   PPU_R2 |= R2_HIT_SP;
 
-              // NMI is required if there is necessity
-              if ((PPU_R0 & R0_NMI_SP) && (PPU_R1 & R1_SHOW_SP))
-                  NMI_REQ;
+              // Sprite-0 hit only updates PPUSTATUS.  PPUCTRL bit 6 is the
+              // master/slave select and is not an NMI enable bit; the NES
+              // generates NMI at VBlank only.
 
               // Execute instructions
               K6502_Step(STEP_PER_SCANLINE - nStep);

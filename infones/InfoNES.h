@@ -122,7 +122,6 @@ extern BYTE PPU_Latch_Flag;
 extern BYTE PPU_UpDown_Clip;
 
 #define R0_NMI_VB 0x80
-#define R0_NMI_SP 0x40
 #define R0_SP_SIZE 0x20
 #define R0_BG_ADDR 0x10
 #define R0_SP_ADDR 0x08
