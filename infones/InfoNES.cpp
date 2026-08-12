@@ -60,6 +60,35 @@
 
 //#include <util/work_meter.h>
 
+#if defined(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
+#include <cstring>
+
+static bool g_mapper19_irq_fixture_active = false;
+static bool g_mapper19_irq_fixture_reported = false;
+
+static bool mapper19_irq_fixture_matches(const char *path,
+                                         BYTE mapper,
+                                         BYTE prg16,
+                                         BYTE chr8)
+{
+  if (mapper != 19 || prg16 != 2 || chr8 != 1 || !path)
+  {
+    return false;
+  }
+
+  const char *basename = path;
+  for (const char *p = path; *p != '\0'; ++p)
+  {
+    if (*p == '/' || *p == '\\')
+    {
+      basename = p + 1;
+    }
+  }
+
+  return std::strcmp(basename, "n163_irq_cpu_cycle.nes") == 0;
+}
+#endif
+
 constexpr uint16_t makeTag(int r, int g, int b)
 {
   return (r << 10) | (g << 5) | (b);
@@ -817,6 +846,11 @@ void InfoNES_Fin()
 
   // Release a memory for ROM
   InfoNES_ReleaseRom();
+
+#if defined(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
+  g_mapper19_irq_fixture_active = false;
+  g_mapper19_irq_fixture_reported = false;
+#endif
 }
 
 /*===================================================================*/
@@ -842,6 +876,11 @@ int InfoNES_Load(const char *pszFileName)
    *    Reset InfoNES.
    */
 
+#if defined(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
+  g_mapper19_irq_fixture_active = false;
+  g_mapper19_irq_fixture_reported = false;
+#endif
+
   // Release a memory for ROM
   InfoNES_ReleaseRom();
 
@@ -864,6 +903,14 @@ int InfoNES_Load(const char *pszFileName)
     sram_store_clear_session();
     return -1;
   }
+
+#if defined(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
+  g_mapper19_irq_fixture_active = mapper19_irq_fixture_matches(
+      pszFileName,
+      MapperNo,
+      NesHeader.byRomSize,
+      NesHeader.byVRomSize);
+#endif
 
   sram_store_restore_for_current_rom();
 
@@ -1595,6 +1642,32 @@ int __not_in_flash_func(InfoNES_HSync)()
         WorkFrame = DoubleFrame[ WorkFrameIdx ];
 #endif
     }
+#if defined(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
+    if (g_mapper19_irq_fixture_active &&
+        !g_mapper19_irq_fixture_reported &&
+        RAM[0x00f9] != 0)
+    {
+      g_mapper19_irq_fixture_reported = true;
+      std::printf("[M19_IRQ_DIAG] done=%02X f9=%02X f0=%02X f1=%02X f2=%02X f3=%02X "
+                  "f4=%02X f5=%02X f6=%02X f7=%02X irq_count=%02X "
+                  "irq_mode=%02X marker_after=%02X irq_marker_seen=%02X\n",
+                  static_cast<unsigned>(RAM[0x00f9]),
+                  static_cast<unsigned>(RAM[0x00f9]),
+                  static_cast<unsigned>(RAM[0x00f0]),
+                  static_cast<unsigned>(RAM[0x00f1]),
+                  static_cast<unsigned>(RAM[0x00f2]),
+                  static_cast<unsigned>(RAM[0x00f3]),
+                  static_cast<unsigned>(RAM[0x00f4]),
+                  static_cast<unsigned>(RAM[0x00f5]),
+                  static_cast<unsigned>(RAM[0x00f6]),
+                  static_cast<unsigned>(RAM[0x00f7]),
+                  static_cast<unsigned>(RAM[0x00fa]),
+                  static_cast<unsigned>(RAM[0x00fb]),
+                  static_cast<unsigned>(RAM[0x00fc]),
+                  static_cast<unsigned>(RAM[0x00fd]));
+      std::fflush(stdout);
+    }
+#endif
     break;
 
   case SCAN_VBLANK_START:

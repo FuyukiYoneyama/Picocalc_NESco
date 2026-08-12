@@ -33,6 +33,8 @@ option(NESCO_MAPPER4_FRACTIONAL_TIMING
        "Use NTSC 341-dot fractional timing for Mapper 4" ON)
 option(NESCO_MAPPER4_A12_SINGLE_SOURCE
        "Use the Mapper 4 A12 edge model instead of tile-callback double clocking" ON)
+option(NESCO_MAPPER19_IRQ_DIAGNOSTICS
+       "Enable one-shot RAM diagnostics for the local Mapper 19 IRQ fixture" OFF)
 
 # Probe slightly larger linker-reserved heap without modifying the Pico SDK.
 # Disable malloc panic so heap diagnostics can measure allocation ceilings safely.
@@ -137,6 +139,12 @@ if(PICO_BUILD)
     if(NESCO_PALETTE_SNAPSHOT_LOG)
         target_compile_definitions(Picocalc_NESco PRIVATE
             NESCO_PALETTE_SNAPSHOT_LOG=1
+        )
+    endif()
+
+    if(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_MAPPER19_IRQ_DIAGNOSTICS=1
         )
     endif()
 
