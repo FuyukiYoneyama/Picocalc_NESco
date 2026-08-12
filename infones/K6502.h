@@ -55,6 +55,8 @@ void K6502_Init();
 void K6502_Reset();
 void K6502_Set_Int_Wiring(BYTE byNMI_Wiring, BYTE byIRQ_Wiring);
 void K6502_Step(int wClocks);
+/* Run CPU clocks without polling the interrupt pins at the entry point. */
+void K6502_Step_NoInterrupt(int wClocks);
 
 // I/O Operation (User definition)
 static inline BYTE K6502_Read(WORD wAddr);
@@ -85,5 +87,8 @@ extern BYTE Y;
 // The number of the clocks that it passed
 //extern WORD g_wPassedClocks;
 WORD getPassedClocks();
+
+/* Temporary Mapper4 timing probe; remove with the probe implementation. */
+int getCurrentClocks32();
 
 #endif /* !K6502_H_INCLUDED */

@@ -301,6 +301,10 @@ extern struct NesHeader_tag NesHeader;
 /* Mapper No. */
 extern BYTE MapperNo;
 
+/* Mapper 4 WRAM access state (used by the common $6000 path). */
+extern BYTE Map4_Wram_Enabled;
+extern BYTE Map4_Wram_Write_Enabled;
+
 /* Other */
 extern BYTE ROM_Mirroring;
 extern BYTE ROM_SRAM;

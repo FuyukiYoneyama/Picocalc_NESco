@@ -93,7 +93,7 @@ void Map3_Write(WORD wAddr, BYTE byData);
 
 void Map4_Init();
 void Map4_Write(WORD wAddr, BYTE byData);
-void Map4_HSync();
+void Map4_PPU(WORD wAddr);
 void Map4_Set_CPU_Banks();
 void Map4_Set_PPU_Banks();
 

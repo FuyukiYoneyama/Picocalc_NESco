@@ -314,11 +314,46 @@ BYTE NMI_Wiring;
 // The number of the clocks that it passed
 int g_wPassedClocks;
 int g_wCurrentClocks;
+static int g_wStepBasePassedClocks;
+static bool g_wStepActive;
 
 WORD getPassedClocks()
 {
   return g_wCurrentClocks;
 }
+
+int getCurrentClocks32()
+{
+  /*
+   * Mapper PPU callbacks can run in the middle of a K6502 step.  Include
+   * the instruction clocks already consumed in that step so MMC3's A12
+   * low-time filter can distinguish adjacent $2006/$2007 accesses.
+   */
+  return g_wCurrentClocks +
+         (g_wStepActive ? (g_wPassedClocks - g_wStepBasePassedClocks) : 0);
+}
+
+#if defined(NESCO_MAPPER4_TIMING_TRACE)
+static unsigned g_mapper4_irq_service_trace_count;
+
+static inline void __not_in_flash_func(mapper4_trace_irq_service)(const char *path)
+{
+  if (MapperNo != 4 || g_mapper4_irq_service_trace_count >= 16u)
+    return;
+
+  ++g_mapper4_irq_service_trace_count;
+  printf("[M4_IRQ_SERVICE] n=%u path=%s cpu=%d sl=%u fs=%u pc=%04X irq=%u f=%02X\n",
+         g_mapper4_irq_service_trace_count,
+         path,
+         getCurrentClocks32(),
+         (unsigned)PPU_Scanline,
+         (unsigned)FrameStep,
+         (unsigned)PC,
+         (unsigned)IRQ_State,
+         (unsigned)F);
+  fflush(stdout);
+}
+#endif
 
 // A table for the test
 BYTE g_byTestTable[256];
@@ -702,6 +737,9 @@ static void __not_in_flash_func(procNMI)()
     // Execute IRQ if an I flag isn't being set
     if (!(F & FLAG_I))
     {
+#if defined(NESCO_MAPPER4_TIMING_TRACE)
+      mapper4_trace_irq_service("procNMI");
+#endif
       IRQ_State = IRQ_Wiring;
       CLK(7);
 
@@ -734,6 +772,8 @@ static void __not_in_flash_func(step)(int wClocks)
   WORD wD0;
 
   auto prePassedClocks = g_wPassedClocks;
+  g_wStepBasePassedClocks = prePassedClocks;
+  g_wStepActive = true;
 
   // It has a loop until a constant clock passes
   while (g_wPassedClocks < wClocks)
@@ -1176,6 +1216,9 @@ static void __not_in_flash_func(step)(int wClocks)
       CLK(2);
       if ((byD0 & FLAG_I) && IRQ_State != IRQ_Wiring)
       {
+#if defined(NESCO_MAPPER4_TIMING_TRACE)
+        mapper4_trace_irq_service("CLI");
+#endif
         IRQ_State = IRQ_Wiring;
         CLK(7);
 
@@ -1708,6 +1751,7 @@ static void __not_in_flash_func(step)(int wClocks)
   // Correct the number of the clocks
   g_wCurrentClocks += (g_wPassedClocks - prePassedClocks);
   g_wPassedClocks -= wClocks;
+  g_wStepActive = false;
 }
 
 /*===================================================================*/
@@ -1725,6 +1769,11 @@ void __not_in_flash_func(K6502_Step)(int wClocks)
     wClocks -= 7;
   }
   procNMI();
+  step(wClocks);
+}
+
+void __not_in_flash_func(K6502_Step_NoInterrupt)(int wClocks)
+{
   step(wClocks);
 }
 

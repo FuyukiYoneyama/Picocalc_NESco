@@ -66,3 +66,15 @@ if(NESCO_SPRITE_ACTIVE_LIST)
         NESCO_SPRITE_ACTIVE_LIST=1
     )
 endif()
+
+if(NESCO_MAPPER4_FRACTIONAL_TIMING)
+    target_compile_definitions(infones PUBLIC
+        NESCO_MAPPER4_FRACTIONAL_TIMING=1
+    )
+endif()
+
+if(NESCO_MAPPER4_A12_SINGLE_SOURCE)
+    target_compile_definitions(infones PUBLIC
+        NESCO_MAPPER4_A12_SINGLE_SOURCE=1
+    )
+endif()

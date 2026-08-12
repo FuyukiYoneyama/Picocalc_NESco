@@ -29,6 +29,10 @@ option(NESCO_BG_TILE_SHARE_LOG "Enable low-overhead background tile share measur
 option(NESCO_PALETTE_SNAPSHOT_LOG "Enable palette snapshot protocol verification logs" OFF)
 option(NESCO_SPRITE_ACTIVE_LIST_METRICS "Enable one-second sprite active-list metrics" OFF)
 option(NESCO_SPRITE_ACTIVE_LIST "Use the precomputed per-scanline sprite active list" ON)
+option(NESCO_MAPPER4_FRACTIONAL_TIMING
+       "Use NTSC 341-dot fractional timing for Mapper 4" ON)
+option(NESCO_MAPPER4_A12_SINGLE_SOURCE
+       "Use the Mapper 4 A12 edge model instead of tile-callback double clocking" ON)
 
 # Probe slightly larger linker-reserved heap without modifying the Pico SDK.
 # Disable malloc panic so heap diagnostics can measure allocation ceilings safely.

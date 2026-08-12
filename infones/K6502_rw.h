@@ -455,11 +455,11 @@ static inline BYTE __not_in_flash_func(K6502_Read)(WORD wAddr)
       addr &= 0x3fff;
 
       /*
-       * A CPU $2007 read is also a PPU VRAM bus read.  MMC2/MMC4
-       * mappers use these reads to update their CHR latches, so notify
-       * the mapper before fetching the new read-buffer value.
+       * The PPU bus address changes after a $2007 access.  MMC3 observes
+       * the resulting A12 transition; MMC2/MMC4 also use the PPU access
+       * itself for their CHR latches.
        */
-      MapperPPU(addr);
+      MapperPPU(PPU_Addr & 0x3fff);
 
       // Set return value;
       byRet = PPU_R7;
@@ -579,6 +579,10 @@ static inline BYTE __not_in_flash_func(K6502_Read)(WORD wAddr)
     // The other sound registers are not readable.
 
   case 0x6000: /* SRAM */
+    if (MapperNo == 4 && !Map4_Wram_Enabled)
+    {
+      return 0xff;
+    }
     if (ROM_SRAM)
     {
       return SRAM[wAddr & 0x1fff];
@@ -798,6 +802,7 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
 #else
         PPU_Temp = (PPU_Temp & 0xFF00) | (((WORD)byData) & 0x00FF);
         PPU_Addr = PPU_Temp;
+        MapperPPU(PPU_Addr & 0x3fff);
 #endif
         if (!(PPU_R2 & R2_IN_VBLANK))
           InfoNES_SetupScr();
@@ -841,6 +846,7 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
         PPU_Addr += PPU_Increment;
       }
       addr &= 0x3fff;
+      MapperPPU(PPU_Addr & 0x3fff);
       WORD addr_after = PPU_Addr & 0x3fff;
       const char* area = (addr < 0x2000) ? "PATTERN" : ((addr < 0x3f00) ? "NAMETABLE" : "PALETTE");
       structured_log_note_initial_ppu_write(7, addr);
@@ -1040,13 +1046,16 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
     break;
 
   case 0x6000: /* SRAM */
-    SRAM[wAddr & 0x1fff] = byData;
-    SRAMwritten = true;
-
-    /* Write to SRAM, when no SRAM */
-    if (!ROM_SRAM)
+    if (MapperNo != 4 || Map4_Wram_Write_Enabled)
     {
-      MapperSram(wAddr, byData);
+      SRAM[wAddr & 0x1fff] = byData;
+      SRAMwritten = true;
+
+      /* Write to SRAM, when no SRAM */
+      if (!ROM_SRAM)
+      {
+        MapperSram(wAddr, byData);
+      }
     }
     break;
 

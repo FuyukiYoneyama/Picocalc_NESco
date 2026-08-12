@@ -16,6 +16,7 @@
 #include "K6502.h"
 #include <pico.h>
 #include <new>
+#include <stdio.h>
 
 /*-------------------------------------------------------------------*/
 /*  Mapper resources                                                 */

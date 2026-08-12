@@ -236,6 +236,21 @@ uint64_t g_perf_pad_interval_us_total = 0;
 uint64_t g_perf_pad_interval_us_max = 0;
 uint32_t g_perf_pad_interval_samples = 0;
 uint32_t g_perf_frames = 0;
+#if defined(NESCO_MAPPER4_FRAME_PROGRESS)
+static uint32_t g_mapper4_ppu_frames = 0;
+#endif
+
+#if defined(NESCO_MAPPER4_FRACTIONAL_TIMING)
+/*
+ * Mapper 4 diagnostic timing only.  The PPU advances 341 dots per
+ * scanline, while the 6502 advances at one CPU cycle per three PPU dots.
+ * Keep the dot remainder between scanlines instead of rounding every line
+ * to 114 CPU cycles.  Mesen2 starts with an odd NTSC frame, whose rendered
+ * pre-render line is one dot shorter.
+ */
+static uint8_t g_mapper4_ppu_dot_remainder = 0;
+static bool g_mapper4_odd_frame = true;
+#endif
 uint32_t g_perf_scanlines = 0;
 uint64_t g_perf_cpu_us = 0;
 uint64_t g_perf_apu_us = 0;
@@ -293,6 +308,9 @@ inline void perf_reset()
   g_perf_pad_interval_us_max = 0;
   g_perf_pad_interval_samples = 0;
   g_perf_frames = 0;
+#if defined(NESCO_MAPPER4_FRAME_PROGRESS)
+  g_mapper4_ppu_frames = 0;
+#endif
   g_perf_ppu_bg_us = 0;
   g_perf_ppu_bg_tile_us = 0;
   g_perf_ppu_sprite_us = 0;
@@ -1009,6 +1027,14 @@ void InfoNES_SetupPPU()
   // Reset scanline
   PPU_Scanline = 0;
 
+#if defined(NESCO_MAPPER4_FRACTIONAL_TIMING)
+  if (MapperNo == 4)
+  {
+    g_mapper4_ppu_dot_remainder = 0;
+    g_mapper4_odd_frame = true;
+  }
+#endif
+
   // Reset hit position of sprite #0
   SpriteJustHit = 0;
 
@@ -1114,15 +1140,164 @@ void __not_in_flash_func(InfoNES_Cycle)()
     //util::WorkMeterMark(MARKER_START);
       if (!micromenu)
       {
+          int scanline_clocks = STEP_PER_SCANLINE;
+
+#if defined(NESCO_MAPPER4_FRACTIONAL_TIMING)
+          if (MapperNo == 4)
+          {
+              const bool odd_frame_pre_render =
+                  g_mapper4_odd_frame &&
+                  PPU_Scanline == SCAN_VBLANK_END &&
+                  (PPU_R1 & (R1_SHOW_SCR | R1_SHOW_SP));
+              const int scanline_dots = odd_frame_pre_render ? 340 : 341;
+              const int dots_with_remainder =
+                  scanline_dots + g_mapper4_ppu_dot_remainder;
+              scanline_clocks = dots_with_remainder / 3;
+              g_mapper4_ppu_dot_remainder = dots_with_remainder % 3;
+
+#if defined(NESCO_MAPPER4_TIMING_TRACE)
+              static unsigned mapper4_clock_trace_count;
+              if (mapper4_clock_trace_count < 8u)
+              {
+                  printf("[M4_CLOCK] n=%u sl=%u dots=%d clocks=%d rem=%u odd=%u r1=%02X\n",
+                         mapper4_clock_trace_count,
+                         (unsigned)PPU_Scanline,
+                         scanline_dots,
+                         scanline_clocks,
+                         (unsigned)g_mapper4_ppu_dot_remainder,
+                         odd_frame_pre_render ? 1u : 0u,
+                         (unsigned)PPU_R1);
+                  fflush(stdout);
+                  ++mapper4_clock_trace_count;
+              }
+#endif
+          }
+#endif
+
+#if defined(NESCO_MAPPER4_TIMING_TRACE)
+          static unsigned mapper4_cycle_trace_count;
+          static unsigned mapper4_state_trace_count;
+          if (MapperNo == 4 && mapper4_state_trace_count < 8u)
+          {
+              printf("[M4_STATE] n=%u sl=%u fs=%u r0=%02X r1=%02X frame=%u cnt=%u pc=%04X\n",
+                     mapper4_state_trace_count,
+                     (unsigned)PPU_Scanline,
+                     (unsigned)FrameStep,
+                     (unsigned)PPU_R0,
+                     (unsigned)PPU_R1,
+                     (unsigned)FrameCnt,
+                     (unsigned)g_perf_frames,
+                     (unsigned)PC);
+              fflush(stdout);
+              ++mapper4_state_trace_count;
+          }
+#endif
+
+          const bool mapper4_scanline_irq =
+              MapperNo == 4 &&
+              (PPU_R1 & (R1_SHOW_SCR | R1_SHOW_SP)) &&
+              (PPU_Scanline < SCAN_UNKNOWN_START ||
+               PPU_Scanline == SCAN_VBLANK_END);
+#if defined(NESCO_MAPPER4_A12_SINGLE_SOURCE)
+          /*
+           * Mesen2 observes the MMC3 A12 edge at PPU cycle 261 on the
+           * rendering scanline.  This is a request position, not the later
+           * CPU IRQ acceptance point.
+           */
+          constexpr int mapper4_event_offset = 87;
+#else
+          const int mapper4_event_offset =
+              (PPU_Scanline == SCAN_VBLANK_END)
+                  ? scanline_clocks - 23
+                  : ((PPU_R0 & R0_SP_ADDR) ? 87 : 0);
+#endif
+          int mapper4_elapsed = 0;
+          bool mapper4_event_done = false;
+          auto step_scanline_part = [&](int clocks)
+          {
+              if (mapper4_scanline_irq &&
+                  !mapper4_event_done &&
+                  mapper4_event_offset >= mapper4_elapsed &&
+                  mapper4_event_offset <= mapper4_elapsed + clocks)
+              {
+#if defined(NESCO_MAPPER4_TIMING_TRACE)
+                  if (mapper4_cycle_trace_count < 4u)
+                  {
+                      printf("[M4_EDGE] sl=%u fs=%u r0=%02X r1=%02X offset=%d elapsed=%d clocks=%d pc=%04X cpu=%d\n",
+                             (unsigned)PPU_Scanline,
+                             (unsigned)FrameStep,
+                             (unsigned)PPU_R0,
+                             (unsigned)PPU_R1,
+                             mapper4_event_offset,
+                             mapper4_elapsed,
+                             clocks,
+                             (unsigned)PC,
+                             getCurrentClocks32());
+                      fflush(stdout);
+                      ++mapper4_cycle_trace_count;
+                  }
+#endif
+                  const int before_event = mapper4_event_offset - mapper4_elapsed;
+                  if (before_event > 0)
+                      K6502_Step(before_event);
+
+                  /* One PPU A12 high phase for this scanline. */
+#if defined(NESCO_MAPPER4_A12_SINGLE_SOURCE)
+                  MapperPPU(0x1000);
+#else
+                  /* One PPU A12 low-to-high transition for this scanline. */
+                  MapperPPU(0x0000);
+                  MapperPPU(0x1000);
+#endif
+                  /* Let a newly asserted mapper IRQ be observed at this edge. */
+#if defined(NESCO_MAPPER4_A12_SINGLE_SOURCE)
+                  /*
+                   * The A12 edge is the IRQ request.  Mesen2 accepts it at
+                   * the following CPU instruction boundary; do not call
+                   * procNMI immediately at the request point.
+                   */
+                  constexpr int mapper4_irq_accept_delay = 4;
+#else
+                  constexpr int mapper4_irq_accept_delay = 0;
+#endif
+                  mapper4_event_done = true;
+
+                  const int after_event = clocks - before_event;
+                  if (after_event > mapper4_irq_accept_delay)
+                  {
+                      if (mapper4_irq_accept_delay > 0)
+                          K6502_Step_NoInterrupt(mapper4_irq_accept_delay);
+                      K6502_Step(after_event - mapper4_irq_accept_delay);
+                  }
+                  else if (after_event > 0)
+                  {
+                      K6502_Step(after_event);
+                  }
+              }
+              else
+              {
+                  K6502_Step(clocks);
+              }
+              mapper4_elapsed += clocks;
+          };
+
+#if defined(NESCO_MAPPER4_A12_SINGLE_SOURCE)
+          if (mapper4_scanline_irq)
+          {
+              /* Start the low interval at the beginning of this scanline. */
+              MapperPPU(0x0000);
+          }
+#endif
+
           // Set a flag if a scanning line is a hit in the sprite #0
           if (SpriteJustHit == PPU_Scanline &&
               PPU_ScanTable[PPU_Scanline] == SCAN_ON_SCREEN)
           {
               // # of Steps to execute before sprite #0 hit
-              int nStep = SPRRAM[SPR_X] * STEP_PER_SCANLINE / NES_DISP_WIDTH;
+              int nStep = SPRRAM[SPR_X] * scanline_clocks / NES_DISP_WIDTH;
 
               // Execute instructions
-              K6502_Step(nStep);
+              step_scanline_part(nStep);
 
               // Set a sprite hit flag
               if ((PPU_R1 & R1_SHOW_SP) && (PPU_R1 & R1_SHOW_SCR))
@@ -1133,16 +1308,16 @@ void __not_in_flash_func(InfoNES_Cycle)()
               // generates NMI at VBlank only.
 
               // Execute instructions
-              K6502_Step(STEP_PER_SCANLINE - nStep);
+              step_scanline_part(scanline_clocks - nStep);
           }
           else
           {
               // Execute instructions
-              K6502_Step(STEP_PER_SCANLINE);
+              step_scanline_part(scanline_clocks);
           }
 
           // Frame IRQ in H-Sync
-          FrameStep += STEP_PER_SCANLINE;
+          FrameStep += scanline_clocks;
           if (FrameStep > STEP_PER_FRAME && FrameIRQ_Enable)
           {
               FrameStep %= STEP_PER_FRAME;
@@ -1358,6 +1533,12 @@ int __not_in_flash_func(InfoNES_HSync)()
   /*-------------------------------------------------------------------*/
   /*  Operation in the specific scanning line                          */
   /*-------------------------------------------------------------------*/
+#if defined(NESCO_MAPPER4_FRACTIONAL_TIMING)
+  if (MapperNo == 4 && PPU_Scanline == 0)
+  {
+    g_mapper4_odd_frame = !g_mapper4_odd_frame;
+  }
+#endif
   switch (PPU_Scanline)
   {
   case SCAN_TOP_OFF_SCREEN:
@@ -1377,6 +1558,25 @@ int __not_in_flash_func(InfoNES_HSync)()
     break;
 
   case SCAN_UNKNOWN_START:
+#if defined(NESCO_MAPPER4_FRAME_PROGRESS)
+    ++g_mapper4_ppu_frames;
+    if (MapperNo == 4 &&
+        (g_mapper4_ppu_frames == 1u || g_mapper4_ppu_frames == 30u ||
+         g_mapper4_ppu_frames == 54u || g_mapper4_ppu_frames == 71u ||
+         g_mapper4_ppu_frames == 120u))
+    {
+      printf("[M4_FRAME_PROGRESS] ppu_frame=%lu scanline=%u pc=%04X a=%02X x=%02X y=%02X r1=%02X result_f8=%02X\n",
+             static_cast<unsigned long>(g_mapper4_ppu_frames),
+             static_cast<unsigned>(PPU_Scanline),
+             static_cast<unsigned>(PC),
+             static_cast<unsigned>(A),
+             static_cast<unsigned>(X),
+             static_cast<unsigned>(Y),
+             static_cast<unsigned>(PPU_R1),
+             static_cast<unsigned>(RAM[0x00f8]));
+      fflush(stdout);
+    }
+#endif
     if (FrameCnt == 0)
     {
       // Transfer the contents of work frame on the screen
@@ -1786,7 +1986,12 @@ void __not_in_flash_func(InfoNES_DrawLine)()
        * actual PPU pattern address from the pattern-table and tile instead.
        * Mapper 9/10 use this callback to observe the $FD/$FE latch tiles.
        */
+#if defined(NESCO_MAPPER4_A12_SINGLE_SOURCE)
+      if (MapperNo != 4)
+        MapperPPU(desc.ppu_pattern_address);
+#else
       MapperPPU(desc.ppu_pattern_address);
+#endif
     };
 
     /*-------------------------------------------------------------------*/
