@@ -93,6 +93,9 @@ void Map19_Init()
 
   /* Set up wiring of the interrupt pin */
   K6502_Set_Int_Wiring(1, 1);
+  Map19_IRQ_Cnt = 0;
+  Map19_IRQ_Enable = 0;
+  IRQ_State = 1;
 }
 
 /*-------------------------------------------------------------------*/
@@ -301,11 +304,13 @@ void Map19_Apu(WORD wAddr, BYTE byData)
 
   case 0x5000: /* $5000-57ff */
     Map19_IRQ_Cnt = (Map19_IRQ_Cnt & 0xff00) | byData;
+    IRQ_State = 1;
     break;
 
   case 0x5800: /* $5800-5fff */
     Map19_IRQ_Cnt = (Map19_IRQ_Cnt & 0x00ff) | ((DWORD)(byData & 0x7f) << 8);
     Map19_IRQ_Enable = (byData & 0x80) >> 7;
+    IRQ_State = 1;
     break;
   }
 }
@@ -328,7 +333,7 @@ BYTE Map19_ReadApu(WORD wAddr)
     return (BYTE)(Map19_IRQ_Cnt & 0x00ff);
 
   case 0x5800: /* $5800-5fff */
-    return (BYTE)((Map19_IRQ_Cnt & 0x7f00) >> 8);
+    return (BYTE)(((Map19_IRQ_Cnt & 0x7f00) >> 8) | (Map19_IRQ_Enable << 7));
 
   default:
     return (BYTE)(wAddr >> 8);
