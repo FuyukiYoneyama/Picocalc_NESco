@@ -491,10 +491,24 @@ static void AUDIO_MIX_RAMFUNC(audio_sound_output_impl)(int nch,
             (int)buf4[i] +
             n163Mix;
         const int mixedMagnitude = mixed < 0 ? -mixed : mixed;
+#if defined(NESCO_AUDIO_MIX_FAST_DIVISION)
+        /*
+         * For the current APU/N163 input bounds mixedMagnitude is <= 300.
+         * Since floor(floor(x / 32) / 35) == floor(x / 1120), this is an
+         * exact replacement for (magnitude * 255 + 560) / 1120 over that
+         * complete domain.  The second reciprocal is exact for the resulting
+         * x <= 2408 and keeps the hot path free of __aeabi_uidiv.
+         */
+        const uint32_t roundedNumerator =
+            (uint32_t)mixedMagnitude * 255u + 560u;
+        const int scaledMagnitude =
+            (int)(((roundedNumerator >> 5) * 1873u) >> 16);
+#else
         const int scaledMagnitude =
             (int)(((mixedMagnitude * (int)AUDIO_MIX_OUTPUT_SCALE) +
                    (int)AUDIO_MIX_ROUND_BIAS) /
                   (int)AUDIO_MIX_DIVISOR);
+#endif
         int mix = mixed < 0 ? -scaledMagnitude : scaledMagnitude;
         if (mix > 255) mix = 255;
 

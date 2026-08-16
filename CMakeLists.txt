@@ -47,6 +47,8 @@ option(NESCO_MAPPER19_N163_INCREMENTAL_SUM
        "Maintain the Mapper 19 N163 active-channel sum by channel delta" OFF)
 option(NESCO_MAPPER19_N163_CACHE_CHANNEL_COUNT
        "Cache the Mapper 19 N163 active-channel count outside the audio hot path" OFF)
+option(NESCO_AUDIO_MIX_FAST_DIVISION
+       "Use an exact fixed-point path for the audio mix scale division" OFF)
 option(NESCO_AUDIO_HSYNC_BATCH
        "Batch Mapper 19 HSync audio into 16-sample output calls" OFF)
 option(NESCO_AUDIO_HSYNC_BATCH32
@@ -221,6 +223,12 @@ if(PICO_BUILD)
     if(NESCO_MAPPER19_N163_CACHE_CHANNEL_COUNT)
         target_compile_definitions(Picocalc_NESco PRIVATE
             NESCO_MAPPER19_N163_CACHE_CHANNEL_COUNT=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_MIX_FAST_DIVISION)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_MIX_FAST_DIVISION=1
         )
     endif()
 
