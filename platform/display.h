@@ -12,9 +12,13 @@
  * InfoNES integration:
  *   - InfoNES_PreDrawLine() gives the PPU a 256-pixel palette-index line buffer.
  *   - InfoNES_PostDrawLine() is called after the PPU has filled that line.
- *   - Lines are batched into 8-source-line strips before being sent to LCD.
- *   - In normal view, 8 NES lines become 8 LCD lines at 256 pixels wide.
- *   - In stretch view, 8 NES lines become 10 LCD lines at 320 pixels wide.
+ *   - Lines are batched into STRIP_HEIGHT source-line strips before being sent
+ *     to the LCD. The standard burst is 8 lines; the experimental arbitration
+ *     candidate uses 4 lines.
+ *   - In normal view, STRIP_HEIGHT NES lines become STRIP_HEIGHT LCD lines at
+ *     256 pixels wide.
+ *   - In stretch view, STRIP_HEIGHT NES lines become the corresponding scaled
+ *     number of LCD lines at 320 pixels wide.
  *
  * LCD ownership rule:
  *   - DISPLAY_MODE_NES_VIEW is for game rendering through this pipeline.
@@ -39,14 +43,18 @@ extern "C" {
 #endif
 
 /*
- * 8 source NES lines are the batching unit.
+ * Source NES lines are the batching unit.
  *
  * The LCD driver exposes a staging buffer large enough for either:
- *   - 8 lines x 256 pixels x 2 bytes in normal view, or
- *   - 10 lines x 320 pixels x 2 bytes in stretch view
+ *   - STRIP_HEIGHT lines x 256 pixels x 2 bytes in normal view, or
+ *   - the scaled STRIP_HEIGHT line count x 320 pixels x 2 bytes in stretch view
  *     because every fourth NES line is repeated.
  */
+#ifdef NESCO_LCD_DMA_STRIP4
+#define STRIP_HEIGHT  4
+#else
 #define STRIP_HEIGHT  8
+#endif
 
 typedef enum {
     DISPLAY_MODE_FULLSCREEN = 0,
