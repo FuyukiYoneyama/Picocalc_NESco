@@ -84,6 +84,12 @@ if(NESCO_MAPPER19_N163_CACHE_CHANNEL_COUNT)
     )
 endif()
 
+if(NESCO_MAPPER19_N163_RENDER_FAST_DIVISION)
+    target_compile_definitions(infones PUBLIC
+        NESCO_MAPPER19_N163_RENDER_FAST_DIVISION=1
+    )
+endif()
+
 if(NESCO_AUDIO_HSYNC_BATCH)
     target_compile_definitions(infones PUBLIC
         NESCO_AUDIO_HSYNC_BATCH=1

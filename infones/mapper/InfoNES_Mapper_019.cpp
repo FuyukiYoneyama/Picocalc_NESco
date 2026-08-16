@@ -153,6 +153,55 @@ static int __not_in_flash_func(Map19_N163_Average)(int nSum, BYTE byCount)
 #endif
 }
 
+#if defined(NESCO_MAPPER19_N163_RENDER_FAST_DIVISION)
+/*
+ * Map19_RenderAudioSlice normally receives one or two output samples per
+ * HSync.  In that path the weighted event average is divided by a width in
+ * the 48..128 cycle range.  The table stores ceil(2^16 / width); the product
+ * is exact for the bounded N163 level range after one correction step.  Keep
+ * it in time-critical RAM so the render path does not trade a flash divide
+ * for a flash table read.
+ */
+#define MAP19_N163_RENDER_RECIPROCAL_MIN 48u
+#define MAP19_N163_RENDER_RECIPROCAL_MAX 128u
+static const uint16_t __not_in_flash("map19_n163_render_reciprocal")
+    Map19_N163_RenderReciprocalQ16[] = {
+    0x0556, 0x053a, 0x051f, 0x0506, 0x04ed, 0x04d5, 0x04be, 0x04a8, 0x0493, 0x047e, 0x046a, 0x0457,
+    0x0445, 0x0433, 0x0422, 0x0411, 0x0400, 0x03f1, 0x03e1, 0x03d3, 0x03c4, 0x03b6, 0x03a9, 0x039c,
+    0x038f, 0x0382, 0x0376, 0x036a, 0x035f, 0x0354, 0x0349, 0x033e, 0x0334, 0x032a, 0x0320, 0x0316,
+    0x030d, 0x0304, 0x02fb, 0x02f2, 0x02e9, 0x02e1, 0x02d9, 0x02d1, 0x02c9, 0x02c1, 0x02ba, 0x02b2,
+    0x02ab, 0x02a4, 0x029d, 0x0296, 0x0290, 0x0289, 0x0283, 0x027d, 0x0277, 0x0271, 0x026b, 0x0265,
+    0x025f, 0x025a, 0x0254, 0x024f, 0x024a, 0x0244, 0x023f, 0x023a, 0x0235, 0x0231, 0x022c, 0x0227,
+    0x0223, 0x021e, 0x021a, 0x0215, 0x0211, 0x020d, 0x0209, 0x0205, 0x0200,
+};
+
+static int __not_in_flash("map19_n163_render_round_divide")
+Map19_N163_RenderRoundDivide(int nValue, uint32_t denominator)
+{
+  if (denominator >= MAP19_N163_RENDER_RECIPROCAL_MIN &&
+      denominator <= MAP19_N163_RENDER_RECIPROCAL_MAX)
+  {
+    const uint32_t magnitude = (uint32_t)(nValue < 0 ? -nValue : nValue);
+    const uint32_t numerator = magnitude + denominator / 2u;
+    const uint32_t reciprocal =
+        Map19_N163_RenderReciprocalQ16[denominator -
+                                       MAP19_N163_RENDER_RECIPROCAL_MIN];
+    uint32_t quotient = (numerator * reciprocal) >> 16;
+
+    /* ceil reciprocal can overshoot by one; it cannot undershoot here. */
+    if (quotient * denominator > numerator)
+    {
+      --quotient;
+    }
+
+    const int result = (int)quotient;
+    return nValue < 0 ? -result : result;
+  }
+
+  return denominator == 0u ? 0 : nValue / (int)denominator;
+}
+#endif
+
 static void __not_in_flash_func(Map19_N163_AudioCommitOutput)(BYTE byCount, int nSum)
 {
   const int16_t newOutput = (int16_t)Map19_N163_Average(nSum, byCount);
@@ -763,8 +812,25 @@ void __attribute__((optimize("Os"), noinline)) __not_in_flash_func(Map19_RenderA
 
     for (int i = 0; i < n; ++i)
     {
+#if defined(NESCO_MAPPER19_N163_RENDER_FAST_DIVISION)
+      uint32_t sampleEnd;
+      if (n == 1)
+      {
+        sampleEnd = sliceCycles;
+      }
+      else if (n == 2)
+      {
+        sampleEnd = (i == 0) ? ((uint32_t)sliceCycles >> 1) : sliceCycles;
+      }
+      else
+      {
+        sampleEnd = ((uint32_t)(i + 1) * (uint32_t)sliceCycles) /
+                    (uint32_t)n;
+      }
+#else
       const uint32_t sampleEnd =
           ((uint32_t)(i + 1) * (uint32_t)sliceCycles) / (uint32_t)n;
+#endif
       const int32_t sampleWidth = (int32_t)(sampleEnd - sampleStart);
 
       if (sampleWidth <= 0)
@@ -794,6 +860,10 @@ void __attribute__((optimize("Os"), noinline)) __not_in_flash_func(Map19_RenderA
 
       weightedSum += (int32_t)(sampleEnd - cursor) * (int32_t)currentOutput;
 
+#if defined(NESCO_MAPPER19_N163_RENDER_FAST_DIVISION)
+      dst[i] = (int16_t)Map19_N163_RenderRoundDivide(weightedSum,
+                                                      (uint32_t)sampleWidth);
+#else
       if (weightedSum >= 0)
       {
         weightedSum += sampleWidth / 2;
@@ -804,6 +874,7 @@ void __attribute__((optimize("Os"), noinline)) __not_in_flash_func(Map19_RenderA
         weightedSum -= sampleWidth / 2;
         dst[i] = (int16_t)(weightedSum / sampleWidth);
       }
+#endif
       sampleStart = sampleEnd;
     }
   }
