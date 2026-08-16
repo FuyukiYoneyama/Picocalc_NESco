@@ -72,6 +72,12 @@ if(NESCO_MAPPER19_N163_SKIP_SAME_OUTPUT)
     )
 endif()
 
+if(NESCO_MAPPER19_N163_INCREMENTAL_SUM)
+    target_compile_definitions(infones PUBLIC
+        NESCO_MAPPER19_N163_INCREMENTAL_SUM=1
+    )
+endif()
+
 if(NESCO_AUDIO_HSYNC_BATCH)
     target_compile_definitions(infones PUBLIC
         NESCO_AUDIO_HSYNC_BATCH=1

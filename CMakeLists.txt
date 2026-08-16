@@ -43,6 +43,8 @@ option(NESCO_MAPPER19_N163_AVERAGE_FAST
        "Use exact constant-divisor fast paths for the Mapper 19 N163 channel average" OFF)
 option(NESCO_MAPPER19_N163_SKIP_SAME_OUTPUT
        "Skip Mapper 19 N163 average recomputation when a channel output is unchanged" OFF)
+option(NESCO_MAPPER19_N163_INCREMENTAL_SUM
+       "Maintain the Mapper 19 N163 active-channel sum by channel delta" OFF)
 option(NESCO_AUDIO_HSYNC_BATCH
        "Batch Mapper 19 HSync audio into 16-sample output calls" OFF)
 option(NESCO_AUDIO_HSYNC_BATCH32
@@ -205,6 +207,12 @@ if(PICO_BUILD)
     if(NESCO_MAPPER19_N163_SKIP_SAME_OUTPUT)
         target_compile_definitions(Picocalc_NESco PRIVATE
             NESCO_MAPPER19_N163_SKIP_SAME_OUTPUT=1
+        )
+    endif()
+
+    if(NESCO_MAPPER19_N163_INCREMENTAL_SUM)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_MAPPER19_N163_INCREMENTAL_SUM=1
         )
     endif()
 

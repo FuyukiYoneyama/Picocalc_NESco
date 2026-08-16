@@ -40,6 +40,7 @@ static BYTE Map19_N163_AudioCurrentChannel;
 static uint32_t Map19_N163_PendingAudioCycles;
 static uint16_t Map19_N163_AudioSliceCycles;
 static int16_t Map19_N163_AudioOutput;
+static int16_t Map19_N163_AudioSum;
 static int16_t Map19_N163_AudioSliceStartOutput;
 static BYTE Map19_N163_SoundDisabled;
 
@@ -140,6 +141,16 @@ static int __not_in_flash_func(Map19_N163_Average)(int nSum, BYTE byCount)
 #endif
 }
 
+static void __not_in_flash_func(Map19_N163_AudioCommitOutput)(BYTE byCount, int nSum)
+{
+  const int16_t newOutput = (int16_t)Map19_N163_Average(nSum, byCount);
+  if (newOutput != Map19_N163_AudioOutput)
+  {
+    Map19_N163_AudioOutput = newOutput;
+    Map19_N163_AudioAppendEvent();
+  }
+}
+
 static void __not_in_flash_func(Map19_N163_AudioUpdateOutput)()
 {
   const BYTE byCount = Map19_N163_AudioChannelCount();
@@ -150,12 +161,8 @@ static void __not_in_flash_func(Map19_N163_AudioUpdateOutput)()
     nSum += Map19_N163_ChannelOutput[i];
   }
 
-  const int16_t newOutput = (int16_t)Map19_N163_Average(nSum, byCount);
-  if (newOutput != Map19_N163_AudioOutput)
-  {
-    Map19_N163_AudioOutput = newOutput;
-    Map19_N163_AudioAppendEvent();
-  }
+  Map19_N163_AudioSum = (int16_t)nSum;
+  Map19_N163_AudioCommitOutput(byCount, nSum);
 }
 
 static void __not_in_flash_func(Map19_N163_AudioUpdateChannel)(int nChannel)
@@ -190,7 +197,19 @@ static void __not_in_flash_func(Map19_N163_AudioUpdateChannel)(int nChannel)
     return;
   }
 #endif
+  const int16_t previousChannelOutput = Map19_N163_ChannelOutput[nChannel];
   Map19_N163_ChannelOutput[nChannel] = newChannelOutput;
+#if defined(NESCO_MAPPER19_N163_INCREMENTAL_SUM)
+  const BYTE byCount = Map19_N163_AudioChannelCount();
+  if (nChannel >= (int)(8 - byCount))
+  {
+    Map19_N163_AudioSum = (int16_t)(Map19_N163_AudioSum +
+                                    (int)newChannelOutput -
+                                    (int)previousChannelOutput);
+    Map19_N163_AudioCommitOutput(byCount, Map19_N163_AudioSum);
+    return;
+  }
+#endif
   Map19_N163_AudioUpdateOutput();
 }
 
@@ -207,6 +226,7 @@ static void Map19_N163_ResetAudioState()
   Map19_N163_PendingAudioCycles = 0;
   Map19_N163_AudioSliceCycles = 0;
   Map19_N163_AudioOutput = 0;
+  Map19_N163_AudioSum = 0;
   Map19_N163_AudioSliceStartOutput = 0;
   Map19_N163_SoundDisabled = 0;
 }
