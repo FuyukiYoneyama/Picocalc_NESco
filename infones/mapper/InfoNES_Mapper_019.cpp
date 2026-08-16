@@ -95,7 +95,49 @@ static void __not_in_flash_func(Map19_N163_AudioAppendEvent)()
 
 static int __not_in_flash_func(Map19_N163_Average)(int nSum, BYTE byCount)
 {
+#if defined(NESCO_MAPPER19_N163_AVERAGE_FAST)
+  /*
+   * The N163 channel count is always 1..8.  A channel output is
+   * (sample - 8) * volume, hence it is bounded to [-120, 105] and nSum is
+   * bounded to [-960, 840].  The reciprocal constants below therefore give
+   * the exact quotient for this complete input domain.  Applying the sign
+   * after the magnitude calculation preserves C/C++ signed truncation toward
+   * zero without calling RP2040's variable-divisor software helper.
+   */
+  const int nMagnitude = nSum < 0 ? -nSum : nSum;
+  int nQuotient;
+  switch (byCount)
+  {
+  case 1:
+    return nSum;
+  case 2:
+    nQuotient = nMagnitude >> 1;
+    break;
+  case 3:
+    nQuotient = (nMagnitude * 0x5556) >> 16;
+    break;
+  case 4:
+    nQuotient = nMagnitude >> 2;
+    break;
+  case 5:
+    nQuotient = (nMagnitude * 0x3334) >> 16;
+    break;
+  case 6:
+    nQuotient = (nMagnitude * 0x2aab) >> 16;
+    break;
+  case 7:
+    nQuotient = (nMagnitude * 0x2493) >> 16;
+    break;
+  case 8:
+    nQuotient = nMagnitude >> 3;
+    break;
+  default:
+    return 0;
+  }
+  return nSum < 0 ? -nQuotient : nQuotient;
+#else
   return nSum / byCount;
+#endif
 }
 
 static void __not_in_flash_func(Map19_N163_AudioUpdateOutput)()

@@ -39,6 +39,8 @@ option(NESCO_MAPPER19_N163_MUTE_DIAGNOSTIC
        "Mute N163 expansion audio at the final mixer for Mapper 19 diagnosis" OFF)
 option(NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC
        "Route only the raw Mapper 19 N163 level to the audio ring for generator comparison" OFF)
+option(NESCO_MAPPER19_N163_AVERAGE_FAST
+       "Use exact constant-divisor fast paths for the Mapper 19 N163 channel average" OFF)
 option(NESCO_AUDIO_HSYNC_BATCH
        "Batch Mapper 19 HSync audio into 16-sample output calls" OFF)
 option(NESCO_AUDIO_HSYNC_BATCH32
@@ -189,6 +191,12 @@ if(PICO_BUILD)
     if(NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC)
         target_compile_definitions(Picocalc_NESco PRIVATE
             NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC=1
+        )
+    endif()
+
+    if(NESCO_MAPPER19_N163_AVERAGE_FAST)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_MAPPER19_N163_AVERAGE_FAST=1
         )
     endif()
 

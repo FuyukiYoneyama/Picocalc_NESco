@@ -60,6 +60,12 @@ if(NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC)
     )
 endif()
 
+if(NESCO_MAPPER19_N163_AVERAGE_FAST)
+    target_compile_definitions(infones PUBLIC
+        NESCO_MAPPER19_N163_AVERAGE_FAST=1
+    )
+endif()
+
 if(NESCO_AUDIO_HSYNC_BATCH)
     target_compile_definitions(infones PUBLIC
         NESCO_AUDIO_HSYNC_BATCH=1
