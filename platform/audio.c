@@ -173,6 +173,17 @@ static void audio_ring_push_ui_sample(BYTE sample)
     s_ring_write = next_write;
 }
 
+#ifdef NESCO_AUDIO_PREFILL
+#define AUDIO_PREFILL_SAMPLES 2048u
+
+static void audio_prefill_silence(void)
+{
+    for (unsigned i = 0; i < AUDIO_PREFILL_SAMPLES; ++i) {
+        audio_ring_push_ui_sample(128u);
+    }
+}
+#endif
+
 void audio_play_ui_tone(unsigned freq_hz, unsigned duration_ms, BYTE amplitude)
 {
     unsigned sample_rate;
@@ -312,8 +323,16 @@ void InfoNES_SoundInit(void) {
 int InfoNES_SoundOpen(int samples_per_sync, int sample_rate) {
     s_open_samples_per_sync = samples_per_sync;
     s_open_clock_per_sync = sample_rate;
+
+#ifdef NESCO_AUDIO_PREFILL
+    /* Stop consuming the old menu/session ring while the new ROM is opened.
+     * The producer starts only after InfoNES_SoundOpen returns, so this is the
+     * only safe point to establish a known startup reserve. */
+    s_audio_paused = true;
+    pwm_audio_set_paused(1);
+#endif
+
     audio_reset_runtime_state();
-    s_audio_paused = false;
     /* Keep PWM/DMA alive across ROM starts; re-init only if the hardware
      * sample rate really changes. */
     if (!s_audio_hw_ready || s_audio_hw_sample_rate != sample_rate) {
@@ -321,9 +340,20 @@ int InfoNES_SoundOpen(int samples_per_sync, int sample_rate) {
         s_audio_hw_sample_rate = sample_rate;
         s_audio_hw_ready = true;
     }
+#ifdef NESCO_AUDIO_PREFILL
+    s_audio_paused = true;
+    pwm_audio_set_paused(1);
+    audio_prefill_silence();
+#else
+    s_audio_paused = false;
+#endif
     /* Reset driver-side counters here so each ROM start gets a fresh
      * comparison window without tearing audio hardware down. */
     pwm_audio_reset_stats();
+#ifdef NESCO_AUDIO_PREFILL
+    pwm_audio_set_paused(0);
+    s_audio_paused = false;
+#endif
     return 0;
 }
 

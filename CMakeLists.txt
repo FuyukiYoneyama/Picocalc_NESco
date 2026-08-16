@@ -41,6 +41,8 @@ option(NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC
        "Route only the raw Mapper 19 N163 level to the audio ring for generator comparison" OFF)
 option(NESCO_AUDIO_HSYNC_BATCH
        "Batch Mapper 19 HSync audio into 16-sample output calls" OFF)
+option(NESCO_AUDIO_PREFILL
+       "Prefill the audio ring before enabling the ROM audio stream" OFF)
 option(NESCO_AUDIO_RAMFUNC
        "Place audio producer and DMA refill hot paths in RAM" OFF)
 option(NESCO_AUDIO_DMA64
@@ -177,6 +179,12 @@ if(PICO_BUILD)
     if(NESCO_AUDIO_HSYNC_BATCH)
         target_compile_definitions(Picocalc_NESco PRIVATE
             NESCO_AUDIO_HSYNC_BATCH=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_PREFILL)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_PREFILL=1
         )
     endif()
 
