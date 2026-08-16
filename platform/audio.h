@@ -16,7 +16,11 @@
 extern "C" {
 #endif
 
+#ifdef NESCO_AUDIO_RING_8192
+#define AUDIO_RING_SIZE   8192   /* 8 KB ring buffer */
+#else
 #define AUDIO_RING_SIZE   4096   /* 4 KB ring buffer */
+#endif
 #define AUDIO_DMA_CHUNK   512    /* Legacy chunk constant; active PWM DMA half size is driver-local */
 
 extern BYTE g_audio_ring[AUDIO_RING_SIZE];

@@ -43,6 +43,8 @@ option(NESCO_AUDIO_HSYNC_BATCH
        "Batch Mapper 19 HSync audio into 16-sample output calls" OFF)
 option(NESCO_AUDIO_PREFILL
        "Prefill the audio ring before enabling the ROM audio stream" OFF)
+option(NESCO_AUDIO_RING_8192
+       "Use an 8192-sample audio ring for producer jitter absorption" OFF)
 option(NESCO_AUDIO_RAMFUNC
        "Place audio producer and DMA refill hot paths in RAM" OFF)
 option(NESCO_AUDIO_DMA64
@@ -185,6 +187,12 @@ if(PICO_BUILD)
     if(NESCO_AUDIO_PREFILL)
         target_compile_definitions(Picocalc_NESco PRIVATE
             NESCO_AUDIO_PREFILL=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_RING_8192)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_RING_8192=1
         )
     endif()
 
