@@ -99,6 +99,45 @@ static uint32_t s_sample_rate = 22050u;
 static volatile bool s_ui_busy_active = false;
 static volatile uint32_t s_ui_busy_pos = 0;
 
+#if defined(NESCO_AUDIO_DYNAMIC_PRIORITY)
+enum {
+    PICO_AUDIO_DYNAMIC_PRIORITY_LOW_WATERMARK = 192,
+    PICO_AUDIO_DYNAMIC_PRIORITY_RESUME_WATERMARK = 768,
+};
+static bool s_audio_dynamic_priority_high = false;
+static uint32_t s_audio_dynamic_priority_boosts = 0;
+
+static void pwm_audio_update_dynamic_priority(int available) {
+    bool high = s_audio_dynamic_priority_high;
+    if (!high && available <= PICO_AUDIO_DYNAMIC_PRIORITY_LOW_WATERMARK) {
+        high = true;
+    } else if (high && available >= PICO_AUDIO_DYNAMIC_PRIORITY_RESUME_WATERMARK) {
+        high = false;
+    }
+
+    if (high == s_audio_dynamic_priority_high) {
+        return;
+    }
+
+    for (uint half = 0u; half < 2u; ++half) {
+        if (s_dma_chan[half] < 0) {
+            continue;
+        }
+        if (high) {
+            hw_set_bits(&dma_channel_hw_addr((uint)s_dma_chan[half])->al1_ctrl,
+                        DMA_CH0_CTRL_TRIG_HIGH_PRIORITY_BITS);
+        } else {
+            hw_clear_bits(&dma_channel_hw_addr((uint)s_dma_chan[half])->al1_ctrl,
+                          DMA_CH0_CTRL_TRIG_HIGH_PRIORITY_BITS);
+        }
+    }
+    s_audio_dynamic_priority_high = high;
+    if (high) {
+        s_audio_dynamic_priority_boosts++;
+    }
+}
+#endif
+
 void pwm_audio_close(void);
 void pwm_audio_reset_stats(void);
 
@@ -222,6 +261,9 @@ static void AUDIO_REFILL_RAMFUNC(pwm_audio_refill_half)(uint half_index) {
     }
 
     int available = audio_ring_available();
+#if defined(NESCO_AUDIO_DYNAMIC_PRIORITY)
+    pwm_audio_update_dynamic_priority(available);
+#endif
     if (available < s_min_available) s_min_available = available;
     if (available > s_max_available) s_max_available = available;
     s_available_sum += (uint32_t)available;
@@ -466,6 +508,10 @@ void pwm_audio_close(void) {
     s_dma_timer = -1;
     s_audio_paused = false;
     s_dma_active_half = 0u;
+#if defined(NESCO_AUDIO_DYNAMIC_PRIORITY)
+    s_audio_dynamic_priority_high = false;
+    s_audio_dynamic_priority_boosts = 0;
+#endif
 }
 
 void pwm_audio_reset_stats(void) {
@@ -482,6 +528,10 @@ void pwm_audio_reset_stats(void) {
     s_output_sample_count = 0;
     s_output_peak = 0;
     s_last_debug_us = time_us_64();
+#if defined(NESCO_AUDIO_DYNAMIC_PRIORITY)
+    pwm_audio_update_dynamic_priority(AUDIO_RING_SIZE);
+    s_audio_dynamic_priority_boosts = 0;
+#endif
 }
 
 void pwm_audio_debug_poll(void) {
@@ -519,6 +569,11 @@ void pwm_audio_debug_poll(void) {
                (unsigned long)s_dma_refill_shortage_samples,
                (unsigned long)s_dma_silence_fill_samples,
                (unsigned int)s_dma_active_half);
+#if defined(NESCO_AUDIO_DYNAMIC_PRIORITY)
+    NESCO_LOGF("[AUDIO_DMA_PRIORITY] boosts=%lu high=%u\r\n",
+               (unsigned long)s_audio_dynamic_priority_boosts,
+               s_audio_dynamic_priority_high ? 1u : 0u);
+#endif
 #else
     (void)available;
 #endif

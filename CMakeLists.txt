@@ -57,6 +57,8 @@ option(NESCO_AUDIO_DMA64
        "Use 64 samples per PWM DMA half-buffer" OFF)
 option(NESCO_AUDIO_HIGH_PRIORITY
        "Give the PWM audio DMA channels RP2040 high-priority arbitration" OFF)
+option(NESCO_AUDIO_DYNAMIC_PRIORITY
+       "Raise PWM audio DMA priority only while the audio ring is below its low watermark" OFF)
 option(NESCO_LCD_DMA_STRIP4
        "Use four source lines per LCD DMA burst for audio/display arbitration" OFF)
 option(NESCO_AUDIO_DISPLAY_BACKOFF
@@ -242,6 +244,12 @@ if(PICO_BUILD)
     if(NESCO_AUDIO_HIGH_PRIORITY)
         target_compile_definitions(Picocalc_NESco PRIVATE
             NESCO_AUDIO_HIGH_PRIORITY=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_DYNAMIC_PRIORITY)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_DYNAMIC_PRIORITY=1
         )
     endif()
 
