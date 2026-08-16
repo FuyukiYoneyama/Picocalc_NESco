@@ -49,6 +49,10 @@ option(NESCO_AUDIO_RING_8192
        "Use an 8192-sample audio ring for producer jitter absorption" OFF)
 option(NESCO_AUDIO_RAMFUNC
        "Place audio producer and DMA refill hot paths in RAM" OFF)
+option(NESCO_AUDIO_MIX_RAMFUNC
+       "Place only the audio mixer producer function in RAM" OFF)
+option(NESCO_AUDIO_DMA_REFILL_RAMFUNC
+       "Place only the PWM DMA refill function in RAM" OFF)
 option(NESCO_AUDIO_DMA64
        "Use 64 samples per PWM DMA half-buffer" OFF)
 option(NESCO_AUDIO_HIGH_PRIORITY
@@ -210,6 +214,18 @@ if(PICO_BUILD)
     if(NESCO_AUDIO_RAMFUNC)
         target_compile_definitions(Picocalc_NESco PRIVATE
             NESCO_AUDIO_RAMFUNC=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_MIX_RAMFUNC)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_MIX_RAMFUNC=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_DMA_REFILL_RAMFUNC)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_DMA_REFILL_RAMFUNC=1
         )
     endif()
 

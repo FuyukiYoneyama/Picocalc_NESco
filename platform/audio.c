@@ -28,6 +28,12 @@
 #define AUDIO_RAMFUNC(function_name) function_name
 #endif
 
+#if defined(PICO_BUILD) && (defined(NESCO_AUDIO_RAMFUNC) || defined(NESCO_AUDIO_MIX_RAMFUNC))
+#define AUDIO_MIX_RAMFUNC(function_name) __not_in_flash_func(function_name)
+#else
+#define AUDIO_MIX_RAMFUNC(function_name) function_name
+#endif
+
 #define AUDIO_WAIT_LOOPS_MAX 2000
 #define AUDIO_WAIT_SLEEP_US 50
 #define AUDIO_MIX_NOISE_WEIGHT 4u
@@ -410,7 +416,7 @@ int InfoNES_GetSoundBufferSize(void) {
  *    then normalized to 8-bit with named gain constants so we can
  *    compare whole-output gain changes without touching channel balance.
  * ===================================================================== */
-static void AUDIO_RAMFUNC(audio_sound_output_impl)(int nch,
+static void AUDIO_MIX_RAMFUNC(audio_sound_output_impl)(int nch,
                                                    BYTE *buf0, BYTE *buf1,
                                                    BYTE *buf2, BYTE *buf3, BYTE *buf4,
                                                    const int16_t *n163, int n163_samples) {

@@ -35,6 +35,12 @@
 #define AUDIO_RAMFUNC(function_name) function_name
 #endif
 
+#if defined(NESCO_AUDIO_RAMFUNC) || defined(NESCO_AUDIO_DMA_REFILL_RAMFUNC)
+#define AUDIO_REFILL_RAMFUNC(function_name) RAMFUNC(function_name)
+#else
+#define AUDIO_REFILL_RAMFUNC(function_name) function_name
+#endif
+
 #if defined(NESCO_AUDIO_HIGH_PRIORITY)
 #define PICO_AUDIO_HIGH_PRIORITY_VALUE 1u
 #else
@@ -181,7 +187,7 @@ static BYTE AUDIO_RAMFUNC(pwm_audio_ui_busy_sample)(void) {
                : (BYTE)(128u + PICO_AUDIO_UI_BUSY_AMPLITUDE);
 }
 
-static void AUDIO_RAMFUNC(pwm_audio_refill_half)(uint half_index) {
+static void AUDIO_REFILL_RAMFUNC(pwm_audio_refill_half)(uint half_index) {
     if (s_ui_busy_active) {
         for (int i = 0; i < PICO_AUDIO_DMA_HALF_SAMPLES; i++) {
             s_dma_buffer[half_index][i] = pwm_audio_pack_sample(pwm_audio_ui_busy_sample());
