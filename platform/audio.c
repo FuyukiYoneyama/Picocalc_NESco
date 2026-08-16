@@ -72,6 +72,18 @@ static uint32_t s_perf_audio_wait_count = 0;
 static uint64_t s_audio_debug_last_us = 0;
 #endif
 
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_MEASURE)
+/* Stage A contract: this interval begins after the first normal producer
+ * block following ROM open.  It deliberately excludes prefill and the DMA
+ * setup path, while leaving the existing one-second diagnostics unchanged. */
+static bool s_audio_measure_pending = false;
+static bool s_audio_measure_active = false;
+static uint64_t s_audio_measure_begin_us = 0;
+static int s_audio_measure_ring_start = 0;
+static uint32_t s_audio_measure_push_samples = 0;
+static uint32_t s_audio_measure_drop_samples = 0;
+#endif
+
 #ifdef NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC
 #define AUDIO_N163_DIAG_CAPTURE_SAMPLES 4096u
 static uint32_t s_n163_diag_sample_count = 0;
@@ -260,6 +272,14 @@ void audio_reset_runtime_state(void) {
 #ifdef PICO_BUILD
     s_audio_debug_last_us = time_us_64();
 #endif
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_MEASURE)
+    s_audio_measure_pending = false;
+    s_audio_measure_active = false;
+    s_audio_measure_begin_us = 0;
+    s_audio_measure_ring_start = 0;
+    s_audio_measure_push_samples = 0;
+    s_audio_measure_drop_samples = 0;
+#endif
 }
 
 void audio_init(void) {
@@ -290,7 +310,20 @@ void audio_debug_poll(void) {
     if (s_prod_call_count > 0u) {
         prod_avg_nch = s_prod_nch_sum / s_prod_call_count;
     }
+#if defined(NESCO_AUDIO_MEASURE)
+    uint64_t measure_window_us = 0;
+    uint32_t measure_push_samples = 0;
+    uint32_t measure_drop_samples = 0;
+    int measure_ring_end = audio_ring_available();
+    if (s_audio_measure_active) {
+        measure_window_us = now - s_audio_measure_begin_us;
+        measure_push_samples = s_audio_measure_push_samples;
+        measure_drop_samples = s_audio_measure_drop_samples;
+    }
+    NESCO_LOGF("[AUDIO_MIX] overrun=%lu mix_peak=%u noise_peak=%u dpcm_peak=%u push_samples=%lu drop_samples=%lu calls=%lu nch_sum=%lu nch_avg=%lu max_nch=%lu open_sps=%d open_cps=%d window_us=%llu cumulative_push=%lu cumulative_drop=%lu ring_start=%d ring_end=%d\r\n",
+#else
     NESCO_LOGF("[AUDIO_MIX] overrun=%lu mix_peak=%u noise_peak=%u dpcm_peak=%u push_samples=%lu drop_samples=%lu calls=%lu nch_sum=%lu nch_avg=%lu max_nch=%lu open_sps=%d open_cps=%d\r\n",
+#endif
                (unsigned long)s_ring_overrun_count,
                s_mix_peak,
                s_noise_peak,
@@ -302,7 +335,15 @@ void audio_debug_poll(void) {
                (unsigned long)prod_avg_nch,
                (unsigned long)s_prod_max_nch,
                s_open_samples_per_sync,
-               s_open_clock_per_sync);
+               s_open_clock_per_sync
+#if defined(NESCO_AUDIO_MEASURE)
+               , (unsigned long long)measure_window_us,
+               (unsigned long)measure_push_samples,
+               (unsigned long)measure_drop_samples,
+               s_audio_measure_ring_start,
+               measure_ring_end
+#endif
+               );
 #endif
 
     s_ring_overrun_count = 0;
@@ -359,6 +400,10 @@ int InfoNES_SoundOpen(int samples_per_sync, int sample_rate) {
 #ifdef NESCO_AUDIO_PREFILL
     pwm_audio_set_paused(0);
     s_audio_paused = false;
+#endif
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_MEASURE)
+    s_audio_measure_pending = true;
+    s_audio_measure_active = false;
 #endif
     return 0;
 }
@@ -533,12 +578,41 @@ static void AUDIO_MIX_RAMFUNC(audio_sound_output_impl)(int nch,
             g_audio_ring[s_ring_write] = (BYTE)mix;
             s_ring_write = next_write;
             s_prod_push_samples++;
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_MEASURE)
+            if (s_audio_measure_active) {
+                s_audio_measure_push_samples++;
+            }
+#endif
         } else {
             s_ring_overrun_count++;
             s_prod_drop_samples++;
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_MEASURE)
+            if (s_audio_measure_active) {
+                s_audio_measure_drop_samples++;
+            }
+#endif
         }
         /* If ring full: drop sample and count it for diagnostics. */
     }
+
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_MEASURE)
+    if (s_audio_measure_pending && nch > 0) {
+        /* The first normal block is intentionally excluded from the
+         * cumulative interval.  It only establishes a post-prefill reserve;
+         * the marker and counters begin immediately after that block. */
+        pwm_audio_reset_stats();
+        s_audio_measure_ring_start = audio_ring_available();
+        s_audio_measure_push_samples = 0;
+        s_audio_measure_drop_samples = 0;
+        s_audio_measure_begin_us = time_us_64();
+        s_audio_measure_active = true;
+        s_audio_measure_pending = false;
+        NESCO_LOGF("[AUDIO_MEASURE_BEGIN] rate=%d ring_start=%d first_block=%d\r\n",
+                   s_open_clock_per_sync,
+                   s_audio_measure_ring_start,
+                   nch);
+    }
+#endif
 }
 
 void InfoNES_SoundOutput(int nch,
