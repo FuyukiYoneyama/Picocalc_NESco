@@ -20,12 +20,29 @@
 #include <stdio.h>
 #include <pico.h>
 
+extern int g_wPassedClocks;
+K6502_CpuCycleCallback g_k6502_cpu_cycle_callback = nullptr;
+int g_k6502_bus_cycles_since_clock = 0;
+static bool g_k6502_poll_irq_each_instruction = false;
+
+static inline void k6502_clock(int clocks)
+{
+  g_wPassedClocks += clocks;
+  if (g_k6502_cpu_cycle_callback != nullptr)
+  {
+    const int internal_clocks = clocks - g_k6502_bus_cycles_since_clock;
+    if (internal_clocks > 0)
+      g_k6502_cpu_cycle_callback(internal_clocks);
+  }
+  g_k6502_bus_cycles_since_clock = 0;
+}
+
 /*-------------------------------------------------------------------*/
 /*  Operation Macros                                                 */
 /*-------------------------------------------------------------------*/
 
 // Clock Op.
-#define CLK(a) g_wPassedClocks += (a);
+#define CLK(a) k6502_clock((a));
 
 // Addressing Op.
 // Address
@@ -555,6 +572,9 @@ void K6502_Init()
   // The establishment of the IRQ pin
   NMI_Wiring = NMI_State = 1;
   IRQ_Wiring = IRQ_State = 1;
+  g_k6502_cpu_cycle_callback = nullptr;
+  g_k6502_bus_cycles_since_clock = 0;
+  g_k6502_poll_irq_each_instruction = false;
 
   for (int code = 0; code < 256; ++code)
   {
@@ -696,6 +716,7 @@ void K6502_Reset()
   // Reset Passed Clocks
   g_wPassedClocks = 0;
   g_wCurrentClocks = 0;
+  g_k6502_bus_cycles_since_clock = 0;
 }
 
 /*===================================================================*/
@@ -712,6 +733,13 @@ void K6502_Set_Int_Wiring(BYTE byNMI_Wiring, BYTE byIRQ_Wiring)
 
   NMI_Wiring = byNMI_Wiring;
   IRQ_Wiring = byIRQ_Wiring;
+}
+
+void K6502_Set_CpuCycleCallback(K6502_CpuCycleCallback callback)
+{
+  g_k6502_cpu_cycle_callback = callback;
+  g_k6502_bus_cycles_since_clock = 0;
+  g_k6502_poll_irq_each_instruction = callback != nullptr;
 }
 
 static void __not_in_flash_func(procNMI)()
@@ -1745,6 +1773,11 @@ static void __not_in_flash_func(step)(int wClocks)
       break;
 
     } /* end of switch ( byCode ) */
+
+    /* Mapper 19 needs an instruction-boundary IRQ poll after a cycle hook
+       can assert the line in the middle of an instruction. */
+    if (g_k6502_poll_irq_each_instruction)
+      procNMI();
 
   } /* end of while ... */
 

@@ -151,6 +151,7 @@ void Map19_Release();
 void Map19_Write(WORD wAddr, BYTE byData);
 void Map19_Apu(WORD wAddr, BYTE byData);
 BYTE Map19_ReadApu(WORD wAddr);
+void Map19_CpuClock(int clocks);
 void Map19_HSync();
 
 void Map21_Init();

@@ -63,17 +63,17 @@
 #if defined(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
 #include <cstring>
 
-static bool g_mapper19_irq_fixture_active = false;
+static int g_mapper19_irq_fixture_kind = 0;
 static bool g_mapper19_irq_fixture_reported = false;
 
-static bool mapper19_irq_fixture_matches(const char *path,
-                                         BYTE mapper,
-                                         BYTE prg16,
-                                         BYTE chr8)
+static int mapper19_irq_fixture_kind_for_path(const char *path,
+                                              BYTE mapper,
+                                              BYTE prg16,
+                                              BYTE chr8)
 {
   if (mapper != 19 || prg16 != 2 || chr8 != 1 || !path)
   {
-    return false;
+    return 0;
   }
 
   const char *basename = path;
@@ -85,7 +85,11 @@ static bool mapper19_irq_fixture_matches(const char *path,
     }
   }
 
-  return std::strcmp(basename, "n163_irq_cpu_cycle.nes") == 0;
+  if (std::strcmp(basename, "n163_irq_cpu_cycle.nes") == 0)
+    return 1;
+  if (std::strcmp(basename, "n163_irq_post_ack_test.nes") == 0)
+    return 2;
+  return 0;
 }
 #endif
 
@@ -848,7 +852,7 @@ void InfoNES_Fin()
   InfoNES_ReleaseRom();
 
 #if defined(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
-  g_mapper19_irq_fixture_active = false;
+  g_mapper19_irq_fixture_kind = 0;
   g_mapper19_irq_fixture_reported = false;
 #endif
 }
@@ -877,7 +881,7 @@ int InfoNES_Load(const char *pszFileName)
    */
 
 #if defined(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
-  g_mapper19_irq_fixture_active = false;
+  g_mapper19_irq_fixture_kind = 0;
   g_mapper19_irq_fixture_reported = false;
 #endif
 
@@ -905,7 +909,7 @@ int InfoNES_Load(const char *pszFileName)
   }
 
 #if defined(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
-  g_mapper19_irq_fixture_active = mapper19_irq_fixture_matches(
+  g_mapper19_irq_fixture_kind = mapper19_irq_fixture_kind_for_path(
       pszFileName,
       MapperNo,
       NesHeader.byRomSize,
@@ -1018,6 +1022,7 @@ int InfoNES_Reset()
   }
 
   // Set up a mapper initialization function
+  K6502_Set_CpuCycleCallback(nullptr);
   MapperTable[nIdx].pMapperInit();
 
   /*-------------------------------------------------------------------*/
@@ -1643,28 +1648,43 @@ int __not_in_flash_func(InfoNES_HSync)()
 #endif
     }
 #if defined(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
-    if (g_mapper19_irq_fixture_active &&
+    if (g_mapper19_irq_fixture_kind != 0 &&
         !g_mapper19_irq_fixture_reported &&
         RAM[0x00f9] != 0)
     {
       g_mapper19_irq_fixture_reported = true;
-      std::printf("[M19_IRQ_DIAG] done=%02X f9=%02X f0=%02X f1=%02X f2=%02X f3=%02X "
-                  "f4=%02X f5=%02X f6=%02X f7=%02X irq_count=%02X "
-                  "irq_mode=%02X marker_after=%02X irq_marker_seen=%02X\n",
-                  static_cast<unsigned>(RAM[0x00f9]),
-                  static_cast<unsigned>(RAM[0x00f9]),
-                  static_cast<unsigned>(RAM[0x00f0]),
-                  static_cast<unsigned>(RAM[0x00f1]),
-                  static_cast<unsigned>(RAM[0x00f2]),
-                  static_cast<unsigned>(RAM[0x00f3]),
-                  static_cast<unsigned>(RAM[0x00f4]),
-                  static_cast<unsigned>(RAM[0x00f5]),
-                  static_cast<unsigned>(RAM[0x00f6]),
-                  static_cast<unsigned>(RAM[0x00f7]),
-                  static_cast<unsigned>(RAM[0x00fa]),
-                  static_cast<unsigned>(RAM[0x00fb]),
-                  static_cast<unsigned>(RAM[0x00fc]),
-                  static_cast<unsigned>(RAM[0x00fd]));
+      if (g_mapper19_irq_fixture_kind == 1)
+      {
+        std::printf("[M19_IRQ_DIAG] done=%02X f9=%02X f0=%02X f1=%02X f2=%02X f3=%02X "
+                    "f4=%02X f5=%02X f6=%02X f7=%02X irq_count=%02X "
+                    "irq_mode=%02X marker_after=%02X irq_marker_seen=%02X\n",
+                    static_cast<unsigned>(RAM[0x00f9]),
+                    static_cast<unsigned>(RAM[0x00f9]),
+                    static_cast<unsigned>(RAM[0x00f0]),
+                    static_cast<unsigned>(RAM[0x00f1]),
+                    static_cast<unsigned>(RAM[0x00f2]),
+                    static_cast<unsigned>(RAM[0x00f3]),
+                    static_cast<unsigned>(RAM[0x00f4]),
+                    static_cast<unsigned>(RAM[0x00f5]),
+                    static_cast<unsigned>(RAM[0x00f6]),
+                    static_cast<unsigned>(RAM[0x00f7]),
+                    static_cast<unsigned>(RAM[0x00fa]),
+                    static_cast<unsigned>(RAM[0x00fb]),
+                    static_cast<unsigned>(RAM[0x00fc]),
+                    static_cast<unsigned>(RAM[0x00fd]));
+      }
+      else
+      {
+        std::printf("[M19_POST_ACK_DIAG] done=%02X f9=%02X read_reassert=%02X "
+                    "low_ack=%02X high_ack=%02X irq_count=%02X irq_mode=%02X\n",
+                    static_cast<unsigned>(RAM[0x00f9]),
+                    static_cast<unsigned>(RAM[0x00f9]),
+                    static_cast<unsigned>(RAM[0x00f0]),
+                    static_cast<unsigned>(RAM[0x00f1]),
+                    static_cast<unsigned>(RAM[0x00f2]),
+                    static_cast<unsigned>(RAM[0x00fa]),
+                    static_cast<unsigned>(RAM[0x00fb]));
+      }
       std::fflush(stdout);
     }
 #endif

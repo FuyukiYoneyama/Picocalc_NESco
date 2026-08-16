@@ -8,6 +8,7 @@ BYTE Map19_Regs[2];
 
 BYTE Map19_IRQ_Enable;
 DWORD Map19_IRQ_Cnt;
+static BYTE Map19_IRQ_Pending;
 
 static BYTE *Map19_Chr_Ram_Alloc = nullptr;
 
@@ -16,6 +17,7 @@ static BYTE *Map19_Chr_Ram_Alloc = nullptr;
 
 void Map19_Release()
 {
+  K6502_Set_CpuCycleCallback(nullptr);
   delete[] Map19_Chr_Ram_Alloc;
   Map19_Chr_Ram_Alloc = nullptr;
   Map19_Chr_Ram = nullptr;
@@ -95,7 +97,9 @@ void Map19_Init()
   K6502_Set_Int_Wiring(1, 1);
   Map19_IRQ_Cnt = 0;
   Map19_IRQ_Enable = 0;
+  Map19_IRQ_Pending = 0;
   IRQ_State = 1;
+  K6502_Set_CpuCycleCallback(Map19_CpuClock);
 }
 
 /*-------------------------------------------------------------------*/
@@ -304,12 +308,14 @@ void Map19_Apu(WORD wAddr, BYTE byData)
 
   case 0x5000: /* $5000-57ff */
     Map19_IRQ_Cnt = (Map19_IRQ_Cnt & 0xff00) | byData;
+    Map19_IRQ_Pending = 0;
     IRQ_State = 1;
     break;
 
   case 0x5800: /* $5800-5fff */
     Map19_IRQ_Cnt = (Map19_IRQ_Cnt & 0x00ff) | ((DWORD)(byData & 0x7f) << 8);
     Map19_IRQ_Enable = (byData & 0x80) >> 7;
+    Map19_IRQ_Pending = 0;
     IRQ_State = 1;
     break;
   }
@@ -343,24 +349,35 @@ BYTE Map19_ReadApu(WORD wAddr)
 /*-------------------------------------------------------------------*/
 /*  Mapper 19 H-Sync Function                                        */
 /*-------------------------------------------------------------------*/
+void Map19_CpuClock(int clocks)
+{
+  if (clocks <= 0 || !Map19_IRQ_Enable)
+    return;
+
+  /* A pending source remains asserted until a $5000/$5800 write. */
+  if (Map19_IRQ_Pending)
+  {
+    IRQ_REQ;
+    return;
+  }
+
+  if (Map19_IRQ_Cnt >= 0x7fff)
+    return;
+
+  const DWORD next = Map19_IRQ_Cnt + (DWORD)clocks;
+  if (next >= 0x7fff)
+  {
+    Map19_IRQ_Cnt = 0x7fff;
+    Map19_IRQ_Pending = 1;
+    IRQ_REQ;
+  }
+  else
+  {
+    Map19_IRQ_Cnt = next;
+  }
+}
+
 void Map19_HSync()
 {
-  /*
- *  Callback at HSync
- *
- */
-  BYTE Map19_IRQ_Timing = 113;
-
-  if (Map19_IRQ_Enable)
-  {
-    if (Map19_IRQ_Cnt >= (DWORD)(0x7fff - Map19_IRQ_Timing))
-    {
-      Map19_IRQ_Cnt = 0x7fff;
-      IRQ_REQ;
-    }
-    else
-    {
-      Map19_IRQ_Cnt += Map19_IRQ_Timing;
-    }
-  }
+  /* Mapper 19 IRQs are clocked by the CPU hook, not by scanline timing. */
 }

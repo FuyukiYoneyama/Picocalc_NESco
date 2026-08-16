@@ -58,6 +58,23 @@ void K6502_Step(int wClocks);
 /* Run CPU clocks without polling the interrupt pins at the entry point. */
 void K6502_Step_NoInterrupt(int wClocks);
 
+/* Optional mapper-owned hook for elapsed 6502 cycles. */
+typedef void (*K6502_CpuCycleCallback)(int clocks);
+void K6502_Set_CpuCycleCallback(K6502_CpuCycleCallback callback);
+extern K6502_CpuCycleCallback g_k6502_cpu_cycle_callback;
+extern int g_k6502_bus_cycles_since_clock;
+
+/* Notify the mapper at the start of a CPU bus cycle.  The CPU core charges
+   any remaining internal cycles from CLK(a) after the bus accesses. */
+static inline void K6502_CpuBusCycle()
+{
+  if (g_k6502_cpu_cycle_callback != nullptr)
+  {
+    ++g_k6502_bus_cycles_since_clock;
+    g_k6502_cpu_cycle_callback(1);
+  }
+}
+
 // I/O Operation (User definition)
 static inline BYTE K6502_Read(WORD wAddr);
 static inline WORD K6502_ReadW(WORD wAddr);

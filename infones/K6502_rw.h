@@ -126,6 +126,7 @@ static inline BYTE K6502_ReadZp(BYTE byAddr)
    *    Read Data
    */
 
+  K6502_CpuBusCycle();
   return RAM[byAddr];
 }
 
@@ -434,6 +435,8 @@ static inline BYTE __not_in_flash_func(K6502_Read)(WORD wAddr)
    */
   BYTE byRet;
 
+  K6502_CpuBusCycle();
+
   if (wAddr >= 0x8000)
   {
     byRet = ROMBANK[(wAddr - 0x8000) >> 13][wAddr & 0x1fff];
@@ -634,6 +637,8 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
    *    0x8000 - 0xffff  ROM
    *
    */
+
+  K6502_CpuBusCycle();
 
   switch (wAddr & 0xe000)
   {
