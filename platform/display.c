@@ -108,6 +108,18 @@ enum {
 static bool s_audio_display_backoff = false;
 #endif
 
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_LCD_RING_GUARD)
+enum {
+    AUDIO_LCD_RING_GUARD_LOW_WATERMARK = 192,
+    AUDIO_LCD_RING_GUARD_RESUME_WATERMARK = 768,
+    AUDIO_LCD_RING_GUARD_MAX_WAIT_US = 750,
+    AUDIO_LCD_RING_GUARD_POLL_US = 25,
+};
+static uint32_t s_audio_lcd_guard_wait_count = 0;
+static uint64_t s_audio_lcd_guard_wait_us = 0;
+static uint64_t s_audio_lcd_guard_last_log_us = 0;
+#endif
+
 static display_mode_t s_display_mode = DISPLAY_MODE_NES_VIEW;
 static nes_view_scale_mode_t s_nes_view_scale = NES_VIEW_SCALE_NORMAL;
 static bool s_stretch_fixed_frame_skip = true;
@@ -654,6 +666,11 @@ void display_perf_reset(void) {
     s_perf_lcd_queue_wait_episodes = 0;
     s_perf_frame_pacing_sleep_us = 0;
     s_perf_frame_pacing_sleep_count = 0;
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_LCD_RING_GUARD)
+    s_audio_lcd_guard_wait_count = 0;
+    s_audio_lcd_guard_wait_us = 0;
+    s_audio_lcd_guard_last_log_us = 0;
+#endif
 #if defined(NESCO_PALETTE_SNAPSHOT_LOG)
     s_perf_palette_line_items = 0;
     s_perf_palette_snapshots = 0;
@@ -665,6 +682,39 @@ void display_perf_reset(void) {
     display_lcd_worker_unlock();
 #endif
 }
+
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_LCD_RING_GUARD)
+static void display_lcd_worker_audio_guard(void) {
+    const int initial_level = audio_ring_available();
+    if (initial_level > AUDIO_LCD_RING_GUARD_LOW_WATERMARK) {
+        return;
+    }
+
+    const uint64_t start_us = time_us_64();
+    const uint64_t deadline_us = start_us + AUDIO_LCD_RING_GUARD_MAX_WAIT_US;
+    int final_level = initial_level;
+    while (final_level < AUDIO_LCD_RING_GUARD_RESUME_WATERMARK &&
+           time_us_64() < deadline_us) {
+        sleep_us(AUDIO_LCD_RING_GUARD_POLL_US);
+        final_level = audio_ring_available();
+    }
+
+    const uint64_t waited_us = time_us_64() - start_us;
+    s_audio_lcd_guard_wait_count++;
+    s_audio_lcd_guard_wait_us += waited_us;
+
+    const uint64_t now_us = time_us_64();
+    if (s_audio_lcd_guard_last_log_us == 0 ||
+        now_us - s_audio_lcd_guard_last_log_us >= 1000000ull) {
+        NESCO_LOGF("[AUDIO_LCD_GUARD] waits=%lu wait_us=%llu initial=%d final=%d\r\n",
+                   (unsigned long)s_audio_lcd_guard_wait_count,
+                   (unsigned long long)s_audio_lcd_guard_wait_us,
+                   initial_level,
+                   final_level);
+        s_audio_lcd_guard_last_log_us = now_us;
+    }
+}
+#endif
 
 void display_reset_frame_pacing(void) {
 #ifdef PICO_BUILD
@@ -996,6 +1046,9 @@ static void display_lcd_worker_flush_normal_strip(const display_lcd_worker_item_
     const uint64_t dma_wait_start_us = time_us_64();
 #endif
     lcd_dma_wait();
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_LCD_RING_GUARD)
+    display_lcd_worker_audio_guard();
+#endif
 #if defined(NESCO_CORE1_BASELINE_LOG) && defined(PICO_BUILD)
     s_lcd_worker_core1_local_window.dma_wait_us += time_us_64() - dma_wait_start_us;
     s_lcd_worker_core1_local_window.dma_wait_count++;
@@ -1045,6 +1098,9 @@ static void display_lcd_worker_flush_stretch_strip(const display_lcd_worker_item
     const uint64_t dma_wait_start_us = time_us_64();
 #endif
     lcd_dma_wait();
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_LCD_RING_GUARD)
+    display_lcd_worker_audio_guard();
+#endif
 #if defined(NESCO_CORE1_BASELINE_LOG) && defined(PICO_BUILD)
     s_lcd_worker_core1_local_window.dma_wait_us += time_us_64() - dma_wait_start_us;
     s_lcd_worker_core1_local_window.dma_wait_count++;

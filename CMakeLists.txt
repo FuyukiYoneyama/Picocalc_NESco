@@ -61,6 +61,8 @@ option(NESCO_LCD_DMA_STRIP4
        "Use four source lines per LCD DMA burst for audio/display arbitration" OFF)
 option(NESCO_AUDIO_DISPLAY_BACKOFF
        "Skip a display frame while the audio ring is below its low watermark" OFF)
+option(NESCO_AUDIO_LCD_RING_GUARD
+       "Defer LCD strip DMA briefly while the audio ring is below its low watermark" OFF)
 option(NESCO_DIAGNOSTIC_AUTOSTART_BUILTIN
        "Diagnostic-only direct launch of the staged builtin ROM; default OFF" OFF)
 
@@ -252,6 +254,12 @@ if(PICO_BUILD)
     if(NESCO_AUDIO_DISPLAY_BACKOFF)
         target_compile_definitions(Picocalc_NESco PRIVATE
             NESCO_AUDIO_DISPLAY_BACKOFF=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_LCD_RING_GUARD)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_LCD_RING_GUARD=1
         )
     endif()
 
