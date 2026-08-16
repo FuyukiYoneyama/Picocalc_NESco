@@ -21,12 +21,21 @@
 #include "pico/time.h"
 #endif
 
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_RAMFUNC)
+#define AUDIO_RAMFUNC(function_name) __not_in_flash_func(function_name)
+#else
+#define AUDIO_RAMFUNC(function_name) function_name
+#endif
+
 #define AUDIO_WAIT_LOOPS_MAX 2000
 #define AUDIO_WAIT_SLEEP_US 50
 #define AUDIO_MIX_NOISE_WEIGHT 4u
 #define AUDIO_MIX_OUTPUT_SCALE 255u
 #define AUDIO_MIX_DIVISOR 1120u
 #define AUDIO_MIX_ROUND_BIAS (AUDIO_MIX_DIVISOR / 2u)
+#define AUDIO_MIX_N163_GAIN_NUM 1
+#define AUDIO_MIX_N163_GAIN_DEN 2
+#define AUDIO_MIX_N163_GAIN_ROUND_BIAS (AUDIO_MIX_N163_GAIN_DEN / 2)
 
 /* =====================================================================
  *  Ring buffer state
@@ -288,9 +297,10 @@ int InfoNES_GetSoundBufferSize(void) {
  *    then normalized to 8-bit with named gain constants so we can
  *    compare whole-output gain changes without touching channel balance.
  * ===================================================================== */
-void InfoNES_SoundOutput(int nch,
-                         BYTE *buf0, BYTE *buf1,
-                         BYTE *buf2, BYTE *buf3, BYTE *buf4) {
+static void AUDIO_RAMFUNC(audio_sound_output_impl)(int nch,
+                                                   BYTE *buf0, BYTE *buf1,
+                                                   BYTE *buf2, BYTE *buf3, BYTE *buf4,
+                                                   const int16_t *n163, int n163_samples) {
     if (s_audio_paused) {
         return;
     }
@@ -324,21 +334,39 @@ void InfoNES_SoundOutput(int nch,
 #endif
 
     for (int i = 0; i < nch; i++) {
-        const uint32_t noise = (uint32_t)buf3[i] * AUDIO_MIX_NOISE_WEIGHT;
-        const uint32_t mixed =
-            (uint32_t)buf0[i] +
-            (uint32_t)buf1[i] +
-            (uint32_t)buf2[i] +
+        const int noise = (int)buf3[i] * (int)AUDIO_MIX_NOISE_WEIGHT;
+        int n163Mix = 0;
+        if (n163 != NULL && i < n163_samples) {
+            const int raw = (int)n163[i];
+            const int magnitude = raw < 0 ? -raw : raw;
+            const int rounded =
+                (magnitude * AUDIO_MIX_N163_GAIN_NUM +
+                 AUDIO_MIX_N163_GAIN_ROUND_BIAS) /
+                AUDIO_MIX_N163_GAIN_DEN;
+            n163Mix = raw < 0 ? -rounded : rounded;
+        }
+#ifdef NESCO_MAPPER19_N163_MUTE_DIAGNOSTIC
+        n163Mix = 0;
+#endif
+        const int mixed =
+            (int)buf0[i] +
+            (int)buf1[i] +
+            (int)buf2[i] +
             noise +
-            (uint32_t)buf4[i];
-        int mix = (int)(((mixed * AUDIO_MIX_OUTPUT_SCALE) + AUDIO_MIX_ROUND_BIAS) /
-                        AUDIO_MIX_DIVISOR);
+            (int)buf4[i] +
+            n163Mix;
+        const int mixedMagnitude = mixed < 0 ? -mixed : mixed;
+        const int scaledMagnitude =
+            (int)(((mixedMagnitude * (int)AUDIO_MIX_OUTPUT_SCALE) +
+                   (int)AUDIO_MIX_ROUND_BIAS) /
+                  (int)AUDIO_MIX_DIVISOR);
+        int mix = mixed < 0 ? -scaledMagnitude : scaledMagnitude;
         if (mix > 255) mix = 255;
 
         /* Convert the unipolar mix into a PWM-friendly centered signal.
          * A slow DC tracker keeps long-term silence near 128 instead of 0,
          * which reduces large idle bias/noise on the PicoCalc output path. */
-        s_mix_dc_estimate += (((mix << 8) - s_mix_dc_estimate) >> 6);
+        s_mix_dc_estimate += (((mix * 256) - s_mix_dc_estimate) >> 6);
         mix = 128 + mix - (s_mix_dc_estimate >> 8);
 
         if (mix > 255) mix = 255;
@@ -363,10 +391,26 @@ void InfoNES_SoundOutput(int nch,
     }
 }
 
+void InfoNES_SoundOutput(int nch,
+                         BYTE *buf0, BYTE *buf1,
+                         BYTE *buf2, BYTE *buf3, BYTE *buf4) {
+    audio_sound_output_impl(nch, buf0, buf1, buf2, buf3, buf4, NULL, 0);
+}
+
+#ifdef PICO_BUILD
+void InfoNES_SoundOutputN163(int nch,
+                             BYTE *buf0, BYTE *buf1,
+                             BYTE *buf2, BYTE *buf3, BYTE *buf4,
+                             const int16_t *n163, int n163_samples) {
+    audio_sound_output_impl(nch, buf0, buf1, buf2, buf3, buf4,
+                            n163, n163_samples);
+}
+#endif
+
 /* =====================================================================
  *  audio_ring_pop_sample — consume one sample for platform audio output
  * ===================================================================== */
-BYTE audio_ring_pop_sample(void) {
+BYTE AUDIO_RAMFUNC(audio_ring_pop_sample)(void) {
     if (s_ring_read == s_ring_write) {
         return 128u;
     }
@@ -376,7 +420,7 @@ BYTE audio_ring_pop_sample(void) {
     return sample;
 }
 
-int audio_ring_available(void) {
+int AUDIO_RAMFUNC(audio_ring_available)(void) {
     int write = s_ring_write;
     int read = s_ring_read;
     if (write >= read) {

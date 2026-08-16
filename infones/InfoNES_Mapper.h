@@ -14,6 +14,7 @@
 /*-------------------------------------------------------------------*/
 
 #include "InfoNES_Types.h"
+#include <stdint.h>
 
 /*-------------------------------------------------------------------*/
 /*  Constants                                                        */
@@ -147,11 +148,22 @@ void Map18_Write(WORD wAddr, BYTE byData);
 void Map18_HSync();
 
 void Map19_Init();
+bool Map19_WramWriteAllowed(WORD wAddr);
+extern BYTE Map19_IRQ_Enable;
+extern BYTE Map19_IRQ_Terminal;
+extern BYTE Map19_IRQ_Pending;
+void Map19_ClockCpuCycles(int clocks);
+void Map19_CommitCpuBoundary();
+void Map19_RenderAudioSlice(int16_t *dst, int n, bool enabled);
 void Map19_Release();
 void Map19_Write(WORD wAddr, BYTE byData);
 void Map19_Apu(WORD wAddr, BYTE byData);
 BYTE Map19_ReadApu(WORD wAddr);
 void Map19_HSync();
+void Map19_N163_GetBatteryRam(const BYTE **data, unsigned *size);
+void Map19_N163_RestoreBatteryRam(const BYTE *data, unsigned size);
+bool Map19_N163_IsBatteryRamDirty();
+void Map19_N163_ClearBatteryRamDirty();
 
 void Map21_Init();
 void Map21_Write(WORD wAddr, BYTE byData);

@@ -36,6 +36,13 @@ void audio_stop_ui_busy_indicator(void);
 void audio_perf_reset(void);
 void audio_perf_snapshot(uint64_t *wait_us, uint32_t *wait_count);
 
+#ifdef PICO_BUILD
+void InfoNES_SoundOutputN163(int samples,
+                             BYTE *wave1, BYTE *wave2, BYTE *wave3,
+                             BYTE *wave4, BYTE *wave5,
+                             const int16_t *n163, int n163_samples);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

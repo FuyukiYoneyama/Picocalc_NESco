@@ -12,6 +12,7 @@
 
 #include "K6502.h"
 #include "InfoNES.h"
+#include "InfoNES_Mapper.h"
 #include "InfoNES_System.h"
 #include "display.h"
 #include "InfoNES_StructuredLog.h"
@@ -331,6 +332,31 @@ int getCurrentClocks32()
    */
   return g_wCurrentClocks +
          (g_wStepActive ? (g_wPassedClocks - g_wStepBasePassedClocks) : 0);
+}
+
+void __not_in_flash_func(K6502_ApplyOamDmaStall)()
+{
+  const int dmaCpuClock = getCurrentClocks32();
+  /*
+   * NES OAM DMA halts the CPU for 513 cycles and needs one additional
+   * alignment cycle when it begins on an odd CPU cycle.
+   */
+  const int dmaStall = 513 + (dmaCpuClock & 1);
+  g_wPassedClocks += dmaStall;
+
+#if defined(NESCO_MAPPER19_OAM_DMA_DIAGNOSTICS)
+  static unsigned mapper19OamDmaDiagnosticCount;
+  if (MapperNo == 19 && mapper19OamDmaDiagnosticCount < 8u)
+  {
+    printf("[M19_OAM_DMA] n=%u sl=%u cpu=%d stall=%d\n",
+           mapper19OamDmaDiagnosticCount,
+           (unsigned)PPU_Scanline,
+           dmaCpuClock,
+           dmaStall);
+    fflush(stdout);
+    ++mapper19OamDmaDiagnosticCount;
+  }
+#endif
 }
 
 #if defined(NESCO_MAPPER4_TIMING_TRACE)
@@ -754,6 +780,24 @@ static void __not_in_flash_func(procNMI)()
   }
 }
 
+template <bool Mapper19>
+static inline void __not_in_flash_func(mapper19_instruction_boundary)(int instructionStartClocks)
+{
+  if constexpr (Mapper19)
+  {
+    Map19_ClockCpuCycles(g_wPassedClocks - instructionStartClocks);
+    Map19_CommitCpuBoundary();
+    if (Map19_IRQ_Pending)
+    {
+      const int interruptStartClocks = g_wPassedClocks;
+      IRQ_REQ;
+      procNMI();
+      Map19_ClockCpuCycles(g_wPassedClocks - interruptStartClocks);
+    }
+  }
+}
+
+template <bool Mapper19>
 static void __not_in_flash_func(step)(int wClocks)
 {
   /*
@@ -778,6 +822,7 @@ static void __not_in_flash_func(step)(int wClocks)
   // It has a loop until a constant clock passes
   while (g_wPassedClocks < wClocks)
   {
+    const int instructionStartClocks = g_wPassedClocks;
     // if (PC == 0xc449 || PC == 0xc955)
     // {
     //   printf("%04x:%02x\n", PC, A);
@@ -927,6 +972,7 @@ static void __not_in_flash_func(step)(int wClocks)
 
     if (g_unofficialOpcodeTable[byCode] && K6502_RunUnofficial(byCode))
     {
+      mapper19_instruction_boundary<Mapper19>(instructionStartClocks);
       continue;
     }
 
@@ -1746,6 +1792,8 @@ static void __not_in_flash_func(step)(int wClocks)
 
     } /* end of switch ( byCode ) */
 
+    mapper19_instruction_boundary<Mapper19>(instructionStartClocks);
+
   } /* end of while ... */
 
   // Correct the number of the clocks
@@ -1760,21 +1808,39 @@ static void __not_in_flash_func(step)(int wClocks)
 /*          Only the specified number of the clocks execute Op.      */
 /*                                                                   */
 /*===================================================================*/
-void __not_in_flash_func(K6502_Step)(int wClocks)
+template <bool Mapper19>
+static void __not_in_flash_func(step_with_interrupts)(int wClocks)
 {
   if (NMI_State != NMI_Wiring)
   {
     // NMI前に少し実行したい
-    step(7);
+    step<Mapper19>(7);
     wClocks -= 7;
   }
+  const int serviceStartClocks = g_wPassedClocks;
   procNMI();
-  step(wClocks);
+  if constexpr (Mapper19)
+  {
+    Map19_ClockCpuCycles(g_wPassedClocks - serviceStartClocks);
+  }
+  step<Mapper19>(wClocks);
+}
+
+void __not_in_flash_func(K6502_Step)(int wClocks)
+{
+  if (MapperNo == 19)
+  {
+    step_with_interrupts<true>(wClocks);
+  }
+  else
+  {
+    step_with_interrupts<false>(wClocks);
+  }
 }
 
 void __not_in_flash_func(K6502_Step_NoInterrupt)(int wClocks)
 {
-  step(wClocks);
+  step<false>(wClocks);
 }
 
 // Addressing Op.

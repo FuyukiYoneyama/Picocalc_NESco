@@ -11,9 +11,11 @@
 /*-------------------------------------------------------------------*/
 #include "K6502.h"
 #include "display.h"
+#include "InfoNES_Mapper.h"
 #include "K6502_rw.h"
 #include "InfoNES_System.h"
 #include "InfoNES_pAPU.h"
+#include "audio.h"
 #include <algorithm>
 #include <string.h>
 
@@ -96,6 +98,7 @@ ApuWritefunc pAPUSoundRegs[20] =
 /*-------------------------------------------------------------------*/
 
 BYTE wave_buffers[5][735]; /* 44100 / 60 = 735 samples per sync */
+static int16_t map19_audio_buffer[735];
 
 BYTE ApuCtrl;
 BYTE ApuCtrlNew;
@@ -514,6 +517,7 @@ int __not_in_flash_func(ApuWriteWave1)(int cycles, int event)
         }
 
         ApuC1EnvVol = 15;
+        ApuC1EnvPhase = ApuC1EnvDelay;
         break;
       }
     }
@@ -615,6 +619,7 @@ int __not_in_flash_func(ApuWriteWave2)(int cycles, int event)
           ApuC2Skip = 0;
         }
         ApuC2EnvVol = 15;
+        ApuC2EnvPhase = ApuC2EnvDelay;
         break;
       }
     }
@@ -781,15 +786,6 @@ int __not_in_flash_func(ApuWriteWave4)(int cycles, int event)
 
       case 2:
         ApuC4c = ApuEventQueue[event].data;
-        if (ApuC4Small)
-        {
-          ApuC4Sr = 0x001f;
-        }
-        else
-        {
-          ApuC4Sr = 0x01ff;
-        }
-
         /* Frequency */
         if (ApuC4Freq)
         {
@@ -816,6 +812,7 @@ int __not_in_flash_func(ApuWriteWave4)(int cycles, int event)
         }
         ApuC4Atl = ApuC4LengthCounter;
         ApuC4EnvVol = 15;
+        ApuC4EnvPhase = ApuC4EnvDelay;
       }
     }
     else if (ApuEventQueue[event].type == APUET_W_CTRL)
@@ -849,27 +846,22 @@ void __not_in_flash_func(ApuRenderingWave4)(int n)
       ApuC4Index += ApuC4Skip;
       if (ApuC4Index > 0xffffff)
       {
-        if (ApuC4Small)
-        {
-          ApuC4Sr |= ((!(ApuC4Sr & 1)) ^ (!(ApuC4Sr & 4))) << 5;
-        }
-        else
-        {
-          ApuC4Sr |= ((!(ApuC4Sr & 1)) ^ (!(ApuC4Sr & 16))) << 9;
-        }
+        const DWORD feedback =
+            (ApuC4Sr & 1) ^ ((ApuC4Sr >> (ApuC4Small ? 6 : 1)) & 1);
         ApuC4Sr >>= 1;
+        ApuC4Sr |= feedback << 14;
         ApuC4Index &= 0xffffff;
       }
 
-      if (ApuC4Sr & 1)
+      if (!(ApuC4Sr & 1))
       {
-        if (!ApuC4Env)
+        if (ApuC4Env)
         {
           wave_buffers[3][i] = ApuC4Vol;
         }
         else
         {
-          wave_buffers[3][i] = ApuC4EnvVol ^ 0x0f;
+          wave_buffers[3][i] = ApuC4EnvVol;
         }
       }
       else
@@ -1164,6 +1156,71 @@ void InfoNES_pAPUVsync()
 
 uint32_t leftSamples16 = 0;
 
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_HSYNC_BATCH)
+static constexpr int AUDIO_HSYNC_BATCH_SAMPLES = 16;
+static BYTE audio_hsync_batch[5][AUDIO_HSYNC_BATCH_SAMPLES];
+static int16_t audio_hsync_n163_batch[AUDIO_HSYNC_BATCH_SAMPLES];
+static int audio_hsync_batch_count = 0;
+
+static void audio_hsync_batch_reset(void)
+{
+  audio_hsync_batch_count = 0;
+}
+
+static void __not_in_flash_func(audio_hsync_batch_append)(int n, int n163Samples)
+{
+  int srcOffset = 0;
+
+  while (srcOffset < n)
+  {
+    const int room = AUDIO_HSYNC_BATCH_SAMPLES - audio_hsync_batch_count;
+    const int take = std::min(room, n - srcOffset);
+
+    if (take == 1)
+    {
+      /* HSync normally contributes one sample. Keep this hot case entirely
+       * in the RAM-resident caller instead of calling flash memcpy/memset for
+       * one or two bytes. */
+      audio_hsync_batch[0][audio_hsync_batch_count] = wave_buffers[0][srcOffset];
+      audio_hsync_batch[1][audio_hsync_batch_count] = wave_buffers[1][srcOffset];
+      audio_hsync_batch[2][audio_hsync_batch_count] = wave_buffers[2][srcOffset];
+      audio_hsync_batch[3][audio_hsync_batch_count] = wave_buffers[3][srcOffset];
+      audio_hsync_batch[4][audio_hsync_batch_count] = wave_buffers[4][srcOffset];
+      audio_hsync_n163_batch[audio_hsync_batch_count] =
+          (srcOffset < n163Samples) ? map19_audio_buffer[srcOffset] : 0;
+    }
+    else
+    {
+      for (int offset = 0; offset < take; ++offset)
+      {
+        const int batchIndex = audio_hsync_batch_count + offset;
+        const int sourceIndex = srcOffset + offset;
+        audio_hsync_batch[0][batchIndex] = wave_buffers[0][sourceIndex];
+        audio_hsync_batch[1][batchIndex] = wave_buffers[1][sourceIndex];
+        audio_hsync_batch[2][batchIndex] = wave_buffers[2][sourceIndex];
+        audio_hsync_batch[3][batchIndex] = wave_buffers[3][sourceIndex];
+        audio_hsync_batch[4][batchIndex] = wave_buffers[4][sourceIndex];
+        audio_hsync_n163_batch[batchIndex] =
+            (sourceIndex < n163Samples) ? map19_audio_buffer[sourceIndex] : 0;
+      }
+    }
+
+    audio_hsync_batch_count += take;
+    srcOffset += take;
+
+    if (audio_hsync_batch_count == AUDIO_HSYNC_BATCH_SAMPLES)
+    {
+      InfoNES_SoundOutputN163(AUDIO_HSYNC_BATCH_SAMPLES,
+                              audio_hsync_batch[0], audio_hsync_batch[1],
+                              audio_hsync_batch[2], audio_hsync_batch[3],
+                              audio_hsync_batch[4], audio_hsync_n163_batch,
+                              AUDIO_HSYNC_BATCH_SAMPLES);
+      audio_hsync_batch_count = 0;
+    }
+  }
+}
+#endif
+
 void __not_in_flash_func(InfoNES_pAPUHsync)(bool enabled)
 {
   auto n16 = ApuSamplesPerSync16 + leftSamples16;
@@ -1191,9 +1248,31 @@ void __not_in_flash_func(InfoNES_pAPUHsync)(bool enabled)
     memset(&wave_buffers[4][0], 0, n);
   }
 
+#ifdef PICO_BUILD
+  if (MapperNo == 19)
+  {
+    const int n163Samples = (n > 735) ? 735 : n;
+    Map19_RenderAudioSlice(map19_audio_buffer, n163Samples, enabled);
+#ifdef NESCO_AUDIO_HSYNC_BATCH
+    audio_hsync_batch_append(n, n163Samples);
+#else
+    InfoNES_SoundOutputN163(n,
+                            wave_buffers[0], wave_buffers[1], wave_buffers[2],
+                            wave_buffers[3], wave_buffers[4],
+                            map19_audio_buffer, n163Samples);
+#endif
+  }
+  else
+  {
+    InfoNES_SoundOutput(n,
+                        wave_buffers[0], wave_buffers[1], wave_buffers[2],
+                        wave_buffers[3], wave_buffers[4]);
+  }
+#else
   InfoNES_SoundOutput(n,
                       wave_buffers[0], wave_buffers[1], wave_buffers[2],
                       wave_buffers[3], wave_buffers[4]);
+#endif
 
   entertime = getPassedClocks();
   cur_event = 0;
@@ -1270,6 +1349,12 @@ void InfoNES_pAPUInit(void)
   InfoNES_MemorySet((void *)wave_buffers[3], 0, 735);
   InfoNES_MemorySet((void *)wave_buffers[4], 0, 735);
 
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_HSYNC_BATCH)
+  /* A partial batch belongs to the previous emulation session. Drop it so
+   * ROM switches and resets cannot prepend stale samples to the next ROM. */
+  audio_hsync_batch_reset();
+#endif
+
   entertime = getPassedClocks();
   cur_event = 0;
 }
@@ -1282,6 +1367,9 @@ void InfoNES_pAPUInit(void)
 
 void InfoNES_pAPUDone(void)
 {
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_HSYNC_BATCH)
+  audio_hsync_batch_reset();
+#endif
   InfoNES_SoundClose();
 }
 

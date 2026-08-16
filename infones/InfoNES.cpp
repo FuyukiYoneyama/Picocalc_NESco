@@ -65,6 +65,12 @@
 
 static bool g_mapper19_irq_fixture_active = false;
 static bool g_mapper19_irq_fixture_reported = false;
+static bool g_mapper19_core_fixture_active = false;
+static bool g_mapper19_core_fixture_reported = false;
+static bool g_mapper19_post_ack_fixture_active = false;
+static bool g_mapper19_post_ack_fixture_reported = false;
+static bool g_mapper19_audio_fixture_active = false;
+static bool g_mapper19_audio_fixture_reported = false;
 
 static bool mapper19_irq_fixture_matches(const char *path,
                                          BYTE mapper,
@@ -86,6 +92,80 @@ static bool mapper19_irq_fixture_matches(const char *path,
   }
 
   return std::strcmp(basename, "n163_irq_cpu_cycle.nes") == 0;
+}
+
+static bool mapper19_core_fixture_matches(const char *path,
+                                          BYTE mapper,
+                                          BYTE prg16,
+                                          BYTE chr8)
+{
+  if (mapper != 19 || prg16 != 2 || !path)
+  {
+    return false;
+  }
+
+  const char *basename = path;
+  for (const char *p = path; *p != '\0'; ++p)
+  {
+    if (*p == '/' || *p == '\\')
+    {
+      basename = p + 1;
+    }
+  }
+
+  if (chr8 == 1)
+  {
+    return std::strcmp(basename, "core_chrrom.nes") == 0;
+  }
+  if (chr8 == 0)
+  {
+    return std::strcmp(basename, "core_chrram.nes") == 0;
+  }
+  return false;
+}
+
+static bool mapper19_post_ack_fixture_matches(const char *path,
+                                              BYTE mapper,
+                                              BYTE prg16,
+                                              BYTE chr8)
+{
+  if (mapper != 19 || prg16 != 2 || chr8 != 1 || !path)
+  {
+    return false;
+  }
+
+  const char *basename = path;
+  for (const char *p = path; *p != '\0'; ++p)
+  {
+    if (*p == '/' || *p == '\\')
+    {
+      basename = p + 1;
+    }
+  }
+
+  return std::strcmp(basename, "n163_irq_post_ack_test.nes") == 0;
+}
+
+static bool mapper19_audio_fixture_matches(const char *path,
+                                           BYTE mapper,
+                                           BYTE prg16,
+                                           BYTE chr8)
+{
+  if (mapper != 19 || prg16 != 2 || chr8 != 1 || !path)
+  {
+    return false;
+  }
+
+  const char *basename = path;
+  for (const char *p = path; *p != '\0'; ++p)
+  {
+    if (*p == '/' || *p == '\\')
+    {
+      basename = p + 1;
+    }
+  }
+
+  return std::strcmp(basename, "mapper19_n163_audio.nes") == 0;
 }
 #endif
 
@@ -280,6 +360,7 @@ static uint32_t g_mapper4_ppu_frames = 0;
 static uint8_t g_mapper4_ppu_dot_remainder = 0;
 static bool g_mapper4_odd_frame = true;
 #endif
+
 uint32_t g_perf_scanlines = 0;
 uint64_t g_perf_cpu_us = 0;
 uint64_t g_perf_apu_us = 0;
@@ -850,6 +931,12 @@ void InfoNES_Fin()
 #if defined(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
   g_mapper19_irq_fixture_active = false;
   g_mapper19_irq_fixture_reported = false;
+  g_mapper19_core_fixture_active = false;
+  g_mapper19_core_fixture_reported = false;
+  g_mapper19_post_ack_fixture_active = false;
+  g_mapper19_post_ack_fixture_reported = false;
+  g_mapper19_audio_fixture_active = false;
+  g_mapper19_audio_fixture_reported = false;
 #endif
 }
 
@@ -879,6 +966,12 @@ int InfoNES_Load(const char *pszFileName)
 #if defined(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
   g_mapper19_irq_fixture_active = false;
   g_mapper19_irq_fixture_reported = false;
+  g_mapper19_core_fixture_active = false;
+  g_mapper19_core_fixture_reported = false;
+  g_mapper19_post_ack_fixture_active = false;
+  g_mapper19_post_ack_fixture_reported = false;
+  g_mapper19_audio_fixture_active = false;
+  g_mapper19_audio_fixture_reported = false;
 #endif
 
   // Release a memory for ROM
@@ -906,6 +999,21 @@ int InfoNES_Load(const char *pszFileName)
 
 #if defined(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
   g_mapper19_irq_fixture_active = mapper19_irq_fixture_matches(
+      pszFileName,
+      MapperNo,
+      NesHeader.byRomSize,
+      NesHeader.byVRomSize);
+  g_mapper19_core_fixture_active = mapper19_core_fixture_matches(
+      pszFileName,
+      MapperNo,
+      NesHeader.byRomSize,
+      NesHeader.byVRomSize);
+  g_mapper19_post_ack_fixture_active = mapper19_post_ack_fixture_matches(
+      pszFileName,
+      MapperNo,
+      NesHeader.byRomSize,
+      NesHeader.byVRomSize);
+  g_mapper19_audio_fixture_active = mapper19_audio_fixture_matches(
       pszFileName,
       MapperNo,
       NesHeader.byRomSize,
@@ -1514,7 +1622,7 @@ int __not_in_flash_func(InfoNES_HSync)()
   if (FrameCnt == 0 &&
       PPU_ScanTable[PPU_Scanline] == SCAN_ON_SCREEN)
   {
-      InfoNES_PreDrawLine(PPU_Scanline);
+    InfoNES_PreDrawLine(PPU_Scanline);
     if (PPU_Scanline >= 4 && PPU_Scanline < 240 - 4)
     {
     
@@ -1523,7 +1631,7 @@ int __not_in_flash_func(InfoNES_HSync)()
     } else {
       InfoNES_MemorySet(WorkLine, 0x20, NES_DISP_WIDTH);
     }
-     InfoNES_PostDrawLine(PPU_Scanline, false);
+    InfoNES_PostDrawLine(PPU_Scanline, false);
     //  if (PPU_Scanline >=240) {
     //   printf("hello");
     //  }
@@ -1652,6 +1760,64 @@ int __not_in_flash_func(InfoNES_HSync)()
                   "f4=%02X f5=%02X f6=%02X f7=%02X irq_count=%02X "
                   "irq_mode=%02X marker_after=%02X irq_marker_seen=%02X\n",
                   static_cast<unsigned>(RAM[0x00f9]),
+                  static_cast<unsigned>(RAM[0x00f9]),
+                  static_cast<unsigned>(RAM[0x00f0]),
+                  static_cast<unsigned>(RAM[0x00f1]),
+                  static_cast<unsigned>(RAM[0x00f2]),
+                  static_cast<unsigned>(RAM[0x00f3]),
+                  static_cast<unsigned>(RAM[0x00f4]),
+                  static_cast<unsigned>(RAM[0x00f5]),
+                  static_cast<unsigned>(RAM[0x00f6]),
+                  static_cast<unsigned>(RAM[0x00f7]),
+                  static_cast<unsigned>(RAM[0x00fa]),
+                  static_cast<unsigned>(RAM[0x00fb]),
+                  static_cast<unsigned>(RAM[0x00fc]),
+                  static_cast<unsigned>(RAM[0x00fd]));
+      std::fflush(stdout);
+    }
+#endif
+#if defined(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
+    if (g_mapper19_audio_fixture_active &&
+        !g_mapper19_audio_fixture_reported &&
+        RAM[0x00f9] != 0)
+    {
+      g_mapper19_audio_fixture_reported = true;
+      std::printf("[M19_AUDIO_DIAG] done=%02X f0=%02X f1=%02X f2=%02X f3=%02X f4=%02X\n",
+                  static_cast<unsigned>(RAM[0x00f9]),
+                  static_cast<unsigned>(RAM[0x00f0]),
+                  static_cast<unsigned>(RAM[0x00f1]),
+                  static_cast<unsigned>(RAM[0x00f2]),
+                  static_cast<unsigned>(RAM[0x00f3]),
+                  static_cast<unsigned>(RAM[0x00f4]));
+      std::fflush(stdout);
+    }
+#endif
+#if defined(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
+    if (g_mapper19_post_ack_fixture_active &&
+        !g_mapper19_post_ack_fixture_reported &&
+        RAM[0x00f9] != 0)
+    {
+      g_mapper19_post_ack_fixture_reported = true;
+      std::printf("[M19_POST_ACK_DIAG] done=%02X read_reassert=%02X low_ack=%02X "
+                  "high_ack=%02X irq_count=%02X irq_mode=%02X\n",
+                  static_cast<unsigned>(RAM[0x00f9]),
+                  static_cast<unsigned>(RAM[0x00f0]),
+                  static_cast<unsigned>(RAM[0x00f1]),
+                  static_cast<unsigned>(RAM[0x00f2]),
+                  static_cast<unsigned>(RAM[0x00fa]),
+                  static_cast<unsigned>(RAM[0x00fb]));
+      std::fflush(stdout);
+    }
+#endif
+#if defined(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
+    if (g_mapper19_core_fixture_active &&
+        !g_mapper19_core_fixture_reported &&
+        RAM[0x00f9] != 0)
+    {
+      g_mapper19_core_fixture_reported = true;
+      std::printf("[M19_CORE_DIAG] done=%02X f0=%02X f1=%02X f2=%02X f3=%02X "
+                  "f4=%02X f5=%02X f6=%02X f7=%02X fa=%02X fb=%02X "
+                  "fc=%02X fd=%02X\n",
                   static_cast<unsigned>(RAM[0x00f9]),
                   static_cast<unsigned>(RAM[0x00f0]),
                   static_cast<unsigned>(RAM[0x00f1]),

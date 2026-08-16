@@ -57,6 +57,7 @@ void K6502_Set_Int_Wiring(BYTE byNMI_Wiring, BYTE byIRQ_Wiring);
 void K6502_Step(int wClocks);
 /* Run CPU clocks without polling the interrupt pins at the entry point. */
 void K6502_Step_NoInterrupt(int wClocks);
+void K6502_ApplyOamDmaStall();
 
 // I/O Operation (User definition)
 static inline BYTE K6502_Read(WORD wAddr);

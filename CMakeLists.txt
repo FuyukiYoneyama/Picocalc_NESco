@@ -35,6 +35,18 @@ option(NESCO_MAPPER4_A12_SINGLE_SOURCE
        "Use the Mapper 4 A12 edge model instead of tile-callback double clocking" ON)
 option(NESCO_MAPPER19_IRQ_DIAGNOSTICS
        "Enable one-shot RAM diagnostics for the local Mapper 19 IRQ fixture" OFF)
+option(NESCO_MAPPER19_N163_MUTE_DIAGNOSTIC
+       "Mute N163 expansion audio at the final mixer for Mapper 19 diagnosis" OFF)
+option(NESCO_AUDIO_HSYNC_BATCH
+       "Batch Mapper 19 HSync audio into 16-sample output calls" OFF)
+option(NESCO_AUDIO_RAMFUNC
+       "Place audio producer and DMA refill hot paths in RAM" OFF)
+option(NESCO_AUDIO_DMA64
+       "Use 64 samples per PWM DMA half-buffer" OFF)
+option(NESCO_AUDIO_HIGH_PRIORITY
+       "Give the PWM audio DMA channels RP2040 high-priority arbitration" OFF)
+option(NESCO_DIAGNOSTIC_AUTOSTART_BUILTIN
+       "Diagnostic-only direct launch of the staged builtin ROM; default OFF" OFF)
 
 # Probe slightly larger linker-reserved heap without modifying the Pico SDK.
 # Disable malloc panic so heap diagnostics can measure allocation ceilings safely.
@@ -145,6 +157,42 @@ if(PICO_BUILD)
     if(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
         target_compile_definitions(Picocalc_NESco PRIVATE
             NESCO_MAPPER19_IRQ_DIAGNOSTICS=1
+        )
+    endif()
+
+    if(NESCO_MAPPER19_N163_MUTE_DIAGNOSTIC)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_MAPPER19_N163_MUTE_DIAGNOSTIC=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_HSYNC_BATCH)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_HSYNC_BATCH=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_RAMFUNC)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_RAMFUNC=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_DMA64)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_DMA64=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_HIGH_PRIORITY)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_HIGH_PRIORITY=1
+        )
+    endif()
+
+    if(NESCO_DIAGNOSTIC_AUTOSTART_BUILTIN)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_DIAGNOSTIC_AUTOSTART_BUILTIN=1
         )
     endif()
 

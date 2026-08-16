@@ -959,6 +959,7 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
         break;
       }
       InfoNES_InvalidateSpriteActiveList();
+      K6502_ApplyOamDmaStall();
       break;
 
     case 0x15: /* 0x4015 */
@@ -1046,7 +1047,8 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
     break;
 
   case 0x6000: /* SRAM */
-    if (MapperNo != 4 || Map4_Wram_Write_Enabled)
+    if ((MapperNo != 4 || Map4_Wram_Write_Enabled) &&
+        (MapperNo != 19 || Map19_WramWriteAllowed(wAddr)))
     {
       SRAM[wAddr & 0x1fff] = byData;
       SRAMwritten = true;

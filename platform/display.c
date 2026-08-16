@@ -745,13 +745,12 @@ void display_show_opening_screen(void) {
     static const WORD accent = 0x07E0;
     static const WORD fg = 0xFFFF;
     static const char *title = "PicoCalc NESco";
-    char version_line[32];
+    static const char *build_label = PICOCALC_NESCO_DISPLAY_LABEL;
     WORD line[320];
     int title_w = display_measure_text_width(title, 10, MENU_FONT_PIXELMPLUS_WIDTH, 2);
-    int version_w;
+    int label_w;
 
-    snprintf(version_line, sizeof(version_line), "Ver. %s", PICOCALC_NESCO_VERSION);
-    version_w = display_measure_text_width(version_line, 6, MENU_FONT_PIXELMPLUS_WIDTH, 1);
+    label_w = display_measure_text_width(build_label, 6, MENU_FONT_PIXELMPLUS_WIDTH, 1);
     for (int i = 0; i < 320; i++) {
         line[i] = accent;
     }
@@ -769,10 +768,10 @@ void display_show_opening_screen(void) {
     lcd_dma_wait();
 
     display_draw_text_span_scaled((320 - title_w) / 2, 120, title_w, title, accent, bg, 2, 10);
-    display_draw_text_span_scaled((320 - version_w) / 2,
+    display_draw_text_span_scaled((320 - label_w) / 2,
                                   172,
-                                  version_w,
-                                  version_line,
+                                  label_w,
+                                  build_label,
                                   fg,
                                   bg,
                                   1,
@@ -782,8 +781,11 @@ void display_show_opening_screen(void) {
 void display_show_loading_screen(void) {
     static const WORD bg = 0x0000;
     static const WORD fg = 0xFFFF;
+    static const WORD dim = 0x7BEF;
     static const char *loading = "Loading...";
+    static const char *build_label = PICOCALC_NESCO_DISPLAY_LABEL;
     int loading_w = display_measure_text_width(loading, 6, MENU_FONT_PIXELMPLUS_WIDTH, 1);
+    int label_w = display_measure_text_width(build_label, 6, MENU_FONT_PIXELMPLUS_WIDTH, 1);
 
     display_set_mode(DISPLAY_MODE_FULLSCREEN);
     display_clear_rgb565(bg);
@@ -792,6 +794,14 @@ void display_show_loading_screen(void) {
                                   loading_w,
                                   loading,
                                   fg,
+                                  bg,
+                                  1,
+                                  6);
+    display_draw_text_span_scaled((320 - label_w) / 2,
+                                  180,
+                                  label_w,
+                                  build_label,
+                                  dim,
                                   bg,
                                   1,
                                   6);

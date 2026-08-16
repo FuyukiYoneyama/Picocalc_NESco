@@ -54,6 +54,24 @@ if(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
     )
 endif()
 
+if(NESCO_AUDIO_HSYNC_BATCH)
+    target_compile_definitions(infones PUBLIC
+        NESCO_AUDIO_HSYNC_BATCH=1
+    )
+endif()
+
+if(NESCO_AUDIO_RAMFUNC)
+    target_compile_definitions(infones PUBLIC
+        NESCO_AUDIO_RAMFUNC=1
+    )
+endif()
+
+if(NESCO_AUDIO_DMA64)
+    target_compile_definitions(infones PUBLIC
+        NESCO_AUDIO_DMA64=1
+    )
+endif()
+
 if(NESCO_BG_TILE_SHARE_LOG)
     target_compile_definitions(infones PUBLIC
         NESCO_BG_TILE_SHARE_LOG=1
