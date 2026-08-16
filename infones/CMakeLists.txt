@@ -66,6 +66,13 @@ if(NESCO_AUDIO_HSYNC_BATCH)
     )
 endif()
 
+if(NESCO_AUDIO_HSYNC_BATCH32)
+    target_compile_definitions(infones PUBLIC
+        NESCO_AUDIO_HSYNC_BATCH=1
+        NESCO_AUDIO_HSYNC_BATCH32=1
+    )
+endif()
+
 if(NESCO_AUDIO_RAMFUNC)
     target_compile_definitions(infones PUBLIC
         NESCO_AUDIO_RAMFUNC=1

@@ -1157,7 +1157,11 @@ void InfoNES_pAPUVsync()
 uint32_t leftSamples16 = 0;
 
 #if defined(PICO_BUILD) && defined(NESCO_AUDIO_HSYNC_BATCH)
+#if defined(NESCO_AUDIO_HSYNC_BATCH32)
+static constexpr int AUDIO_HSYNC_BATCH_SAMPLES = 32;
+#else
 static constexpr int AUDIO_HSYNC_BATCH_SAMPLES = 16;
+#endif
 static BYTE audio_hsync_batch[5][AUDIO_HSYNC_BATCH_SAMPLES];
 static int16_t audio_hsync_n163_batch[AUDIO_HSYNC_BATCH_SAMPLES];
 static int audio_hsync_batch_count = 0;
