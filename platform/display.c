@@ -30,6 +30,7 @@
 #include "InfoNES.h"
 #include "InfoNES_System.h"
 #include "audio.h"
+#include "runtime_log.h"
 #include "../font/menu_font_pixelmplus.h"
 #include "version.h"
 
