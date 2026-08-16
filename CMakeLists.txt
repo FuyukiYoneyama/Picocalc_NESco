@@ -37,6 +37,8 @@ option(NESCO_MAPPER19_IRQ_DIAGNOSTICS
        "Enable one-shot RAM diagnostics for the local Mapper 19 IRQ fixture" OFF)
 option(NESCO_MAPPER19_N163_MUTE_DIAGNOSTIC
        "Mute N163 expansion audio at the final mixer for Mapper 19 diagnosis" OFF)
+option(NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC
+       "Route only the raw Mapper 19 N163 level to the audio ring for generator comparison" OFF)
 option(NESCO_AUDIO_HSYNC_BATCH
        "Batch Mapper 19 HSync audio into 16-sample output calls" OFF)
 option(NESCO_AUDIO_RAMFUNC
@@ -163,6 +165,12 @@ if(PICO_BUILD)
     if(NESCO_MAPPER19_N163_MUTE_DIAGNOSTIC)
         target_compile_definitions(Picocalc_NESco PRIVATE
             NESCO_MAPPER19_N163_MUTE_DIAGNOSTIC=1
+        )
+    endif()
+
+    if(NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC=1
         )
     endif()
 

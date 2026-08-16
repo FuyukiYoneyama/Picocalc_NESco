@@ -1253,6 +1253,9 @@ void __not_in_flash_func(InfoNES_pAPUHsync)(bool enabled)
   {
     const int n163Samples = (n > 735) ? 735 : n;
     Map19_RenderAudioSlice(map19_audio_buffer, n163Samples, enabled);
+#ifdef NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC
+    audio_n163_diag_observe(map19_audio_buffer, n163Samples);
+#endif
 #ifdef NESCO_AUDIO_HSYNC_BATCH
     audio_hsync_batch_append(n, n163Samples);
 #else

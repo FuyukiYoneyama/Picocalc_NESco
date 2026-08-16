@@ -16,6 +16,7 @@
 #include "audio.h"
 #include "InfoNES_pAPU.h"
 #include "runtime_log.h"
+#include <stdio.h>
 
 #ifdef PICO_BUILD
 #include "pico/time.h"
@@ -63,6 +64,88 @@ static uint64_t s_perf_audio_wait_us = 0;
 static uint32_t s_perf_audio_wait_count = 0;
 #ifdef PICO_BUILD
 static uint64_t s_audio_debug_last_us = 0;
+#endif
+
+#ifdef NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC
+#define AUDIO_N163_DIAG_CAPTURE_SAMPLES 4096u
+static uint32_t s_n163_diag_sample_count = 0;
+static uint32_t s_n163_diag_fnv1a_le = 2166136261u;
+static int16_t s_n163_diag_min_sample = 0;
+static int16_t s_n163_diag_max_sample = 0;
+static uint32_t s_n163_diag_nonzero_count = 0;
+static uint8_t s_n163_diag_capture[AUDIO_N163_DIAG_CAPTURE_SAMPLES];
+static uint32_t s_n163_diag_capture_count = 0;
+#endif
+
+#ifdef NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC
+void audio_n163_diag_reset(void)
+{
+    s_n163_diag_sample_count = 0;
+    s_n163_diag_fnv1a_le = 2166136261u;
+    s_n163_diag_min_sample = 0;
+    s_n163_diag_max_sample = 0;
+    s_n163_diag_nonzero_count = 0;
+    s_n163_diag_capture_count = 0;
+}
+
+void audio_n163_diag_observe(const int16_t *samples, int count)
+{
+    if (!samples || count <= 0) return;
+
+    for (int i = 0; i < count; ++i) {
+        const int16_t sample = samples[i];
+        const uint16_t encoded = (uint16_t)sample;
+        s_n163_diag_fnv1a_le ^= (uint32_t)(encoded & 0xffu);
+        s_n163_diag_fnv1a_le *= 16777619u;
+        s_n163_diag_fnv1a_le ^= (uint32_t)(encoded >> 8);
+        s_n163_diag_fnv1a_le *= 16777619u;
+
+        if (s_n163_diag_sample_count == 0 || sample < s_n163_diag_min_sample) {
+            s_n163_diag_min_sample = sample;
+        }
+        if (s_n163_diag_sample_count == 0 || sample > s_n163_diag_max_sample) {
+            s_n163_diag_max_sample = sample;
+        }
+        if (sample != 0) ++s_n163_diag_nonzero_count;
+        if (s_n163_diag_capture_count < AUDIO_N163_DIAG_CAPTURE_SAMPLES) {
+            int encoded_sample = (int)sample + 128;
+            if (encoded_sample < 0) encoded_sample = 0;
+            if (encoded_sample > 255) encoded_sample = 255;
+            s_n163_diag_capture[s_n163_diag_capture_count++] = (uint8_t)encoded_sample;
+        }
+        ++s_n163_diag_sample_count;
+    }
+}
+
+void audio_n163_diag_snapshot(uint32_t *sample_count,
+                              uint32_t *fnv1a_le,
+                              int16_t *min_sample,
+                              int16_t *max_sample,
+                              uint32_t *nonzero_count)
+{
+    if (sample_count) *sample_count = s_n163_diag_sample_count;
+    if (fnv1a_le) *fnv1a_le = s_n163_diag_fnv1a_le;
+    if (min_sample) *min_sample = s_n163_diag_min_sample;
+    if (max_sample) *max_sample = s_n163_diag_max_sample;
+    if (nonzero_count) *nonzero_count = s_n163_diag_nonzero_count;
+}
+
+void audio_n163_diag_dump(void)
+{
+    printf("[M19_N163_PRE_RING_DATA_BEGIN] samples=%lu captured=%lu\n",
+           (unsigned long)s_n163_diag_sample_count,
+           (unsigned long)s_n163_diag_capture_count);
+    for (uint32_t i = 0; i < s_n163_diag_capture_count; ++i) {
+        printf("%02X", (unsigned)s_n163_diag_capture[i]);
+        if ((i & 31u) == 31u) {
+            printf("\n");
+        } else {
+            printf(" ");
+        }
+    }
+    if ((s_n163_diag_capture_count & 31u) != 0u) printf("\n");
+    printf("[M19_N163_PRE_RING_DATA_END]\n");
+}
 #endif
 
 /* =====================================================================
@@ -334,6 +417,22 @@ static void AUDIO_RAMFUNC(audio_sound_output_impl)(int nch,
 #endif
 
     for (int i = 0; i < nch; i++) {
+#ifdef NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC
+        /*
+         * Generator-only comparison path. Map19_RenderAudioSlice() produces
+         * a signed level in the range [-120, 112] (4-bit wave value centered
+         * at zero, multiplied by channel volume). Put that level directly
+         * around the PWM midpoint so the existing audio sink can capture it
+         * without involving the APU mixer or the DC tracker.
+         */
+        int mix = 128;
+        if (n163 != NULL && i < n163_samples) {
+            int raw = (int)n163[i];
+            if (raw < -127) raw = -127;
+            if (raw > 127) raw = 127;
+            mix += raw;
+        }
+#else
         const int noise = (int)buf3[i] * (int)AUDIO_MIX_NOISE_WEIGHT;
         int n163Mix = 0;
         if (n163 != NULL && i < n163_samples) {
@@ -371,6 +470,7 @@ static void AUDIO_RAMFUNC(audio_sound_output_impl)(int nch,
 
         if (mix > 255) mix = 255;
         if (mix < 0)   mix = 0;
+#endif
 
         if ((BYTE)mix > s_mix_peak) s_mix_peak = (BYTE)mix;
         if (buf3[i] > s_noise_peak) s_noise_peak = buf3[i];

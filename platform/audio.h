@@ -43,6 +43,18 @@ void InfoNES_SoundOutputN163(int samples,
                              const int16_t *n163, int n163_samples);
 #endif
 
+#ifdef NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC
+/* Generator-only observation point: before the sample reaches the audio ring. */
+void audio_n163_diag_reset(void);
+void audio_n163_diag_observe(const int16_t *samples, int count);
+void audio_n163_diag_snapshot(uint32_t *sample_count,
+                              uint32_t *fnv1a_le,
+                              int16_t *min_sample,
+                              int16_t *max_sample,
+                              uint32_t *nonzero_count);
+void audio_n163_diag_dump(void);
+#endif
+
 #ifdef __cplusplus
 }
 #endif

@@ -54,6 +54,12 @@ if(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
     )
 endif()
 
+if(NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC)
+    target_compile_definitions(infones PUBLIC
+        NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC=1
+    )
+endif()
+
 if(NESCO_AUDIO_HSYNC_BATCH)
     target_compile_definitions(infones PUBLIC
         NESCO_AUDIO_HSYNC_BATCH=1

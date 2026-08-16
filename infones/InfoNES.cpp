@@ -1018,6 +1018,12 @@ int InfoNES_Load(const char *pszFileName)
       MapperNo,
       NesHeader.byRomSize,
       NesHeader.byVRomSize);
+#if defined(NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC)
+  if (g_mapper19_audio_fixture_active)
+  {
+    audio_n163_diag_reset();
+  }
+#endif
 #endif
 
   sram_store_restore_for_current_rom();
@@ -1789,6 +1795,26 @@ int __not_in_flash_func(InfoNES_HSync)()
                   static_cast<unsigned>(RAM[0x00f2]),
                   static_cast<unsigned>(RAM[0x00f3]),
                   static_cast<unsigned>(RAM[0x00f4]));
+#if defined(NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC)
+      uint32_t n163_samples = 0;
+      uint32_t n163_fnv1a = 0;
+      int16_t n163_min = 0;
+      int16_t n163_max = 0;
+      uint32_t n163_nonzero = 0;
+      audio_n163_diag_snapshot(&n163_samples,
+                               &n163_fnv1a,
+                               &n163_min,
+                               &n163_max,
+                               &n163_nonzero);
+      std::printf("[M19_N163_PRE_RING] samples=%lu fnv1a_le=%08lX min=%d max=%d nonzero=%lu\n",
+                  static_cast<unsigned long>(n163_samples),
+                  static_cast<unsigned long>(n163_fnv1a),
+                  static_cast<int>(n163_min),
+                  static_cast<int>(n163_max),
+                  static_cast<unsigned long>(n163_nonzero));
+      audio_n163_diag_dump();
+      std::printf("[M19_N163_PRE_RING_END]\n");
+#endif
       std::fflush(stdout);
     }
 #endif
