@@ -29,6 +29,7 @@
 
 #include "InfoNES.h"
 #include "InfoNES_System.h"
+#include "audio.h"
 #include "../font/menu_font_pixelmplus.h"
 #include "version.h"
 
@@ -97,6 +98,14 @@ static uint32_t s_perf_palette_forced = 0;
 static uint64_t s_last_frame_us = 0;
 static uint64_t s_next_frame_deadline_us = 0;
 static WORD s_active_frame_skip = 0;
+#endif
+
+#ifdef NESCO_AUDIO_DISPLAY_BACKOFF
+enum {
+    AUDIO_DISPLAY_BACKOFF_LOW_WATERMARK = 192,
+    AUDIO_DISPLAY_BACKOFF_RESUME_WATERMARK = 768,
+};
+static bool s_audio_display_backoff = false;
 #endif
 
 static display_mode_t s_display_mode = DISPLAY_MODE_NES_VIEW;
@@ -522,6 +531,9 @@ void display_init(void) {
     s_next_frame_deadline_us = 0;
     s_active_frame_skip = 0;
 #endif
+#ifdef NESCO_AUDIO_DISPLAY_BACKOFF
+    s_audio_display_backoff = false;
+#endif
 }
 
 void display_set_viewport(int x, int y, int w, int h) {
@@ -587,6 +599,9 @@ void display_set_mode(display_mode_t mode) {
     s_last_frame_us = 0;
     s_next_frame_deadline_us = 0;
     s_active_frame_skip = 0;
+#endif
+#ifdef NESCO_AUDIO_DISPLAY_BACKOFF
+    s_audio_display_backoff = false;
 #endif
 }
 
@@ -1262,6 +1277,19 @@ int InfoNES_LoadFrame(void) {
     } else {
         FrameSkip = 0;
     }
+#ifdef NESCO_AUDIO_DISPLAY_BACKOFF
+    const int audio_ring_level = audio_ring_available();
+    if (!s_audio_display_backoff &&
+        audio_ring_level <= AUDIO_DISPLAY_BACKOFF_LOW_WATERMARK) {
+        s_audio_display_backoff = true;
+    } else if (s_audio_display_backoff &&
+               audio_ring_level >= AUDIO_DISPLAY_BACKOFF_RESUME_WATERMARK) {
+        s_audio_display_backoff = false;
+    }
+    if (s_audio_display_backoff && FrameSkip < 1) {
+        FrameSkip = 1;
+    }
+#endif
     s_active_frame_skip = FrameSkip;
     s_last_frame_us = time_us_64();
 #else
