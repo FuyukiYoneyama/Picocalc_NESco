@@ -182,8 +182,15 @@ static void __not_in_flash_func(Map19_N163_AudioUpdateChannel)(int nChannel)
   const BYTE bySamplePosition = (BYTE)(((dwPhase >> 16) + byWaveAddress) & 0xff);
   const BYTE byWaveByte = Map19_N163_Ram[bySamplePosition >> 1];
   const int nSample = (bySamplePosition & 1) ? (byWaveByte >> 4) : (byWaveByte & 0x0f);
-  Map19_N163_ChannelOutput[nChannel] = (int16_t)((nSample - 8) * byVolume);
+  const int16_t newChannelOutput = (int16_t)((nSample - 8) * byVolume);
   Map19_N163_AudioSetPhase(nChannel, dwPhase);
+#if defined(NESCO_MAPPER19_N163_SKIP_SAME_OUTPUT)
+  if (newChannelOutput == Map19_N163_ChannelOutput[nChannel])
+  {
+    return;
+  }
+#endif
+  Map19_N163_ChannelOutput[nChannel] = newChannelOutput;
   Map19_N163_AudioUpdateOutput();
 }
 
