@@ -37,6 +37,9 @@ static BYTE Map19_N163_AudioEventCount;
 static BYTE Map19_N163_AudioEventOverflow;
 static BYTE Map19_N163_AudioUpdateCounter;
 static BYTE Map19_N163_AudioCurrentChannel;
+#if defined(NESCO_MAPPER19_N163_CACHE_CHANNEL_COUNT)
+static BYTE Map19_N163_CachedChannelCount;
+#endif
 static uint32_t Map19_N163_PendingAudioCycles;
 static uint16_t Map19_N163_AudioSliceCycles;
 static int16_t Map19_N163_AudioOutput;
@@ -44,9 +47,18 @@ static int16_t Map19_N163_AudioSum;
 static int16_t Map19_N163_AudioSliceStartOutput;
 static BYTE Map19_N163_SoundDisabled;
 
-static BYTE __not_in_flash_func(Map19_N163_AudioChannelCount)()
+static BYTE __not_in_flash_func(Map19_N163_AudioChannelCountFromRam)()
 {
   return (BYTE)(((Map19_N163_Ram[0x7f] >> 4) & 0x07) + 1);
+}
+
+static BYTE __not_in_flash_func(Map19_N163_AudioChannelCount)()
+{
+#if defined(NESCO_MAPPER19_N163_CACHE_CHANNEL_COUNT)
+  return Map19_N163_CachedChannelCount;
+#else
+  return Map19_N163_AudioChannelCountFromRam();
+#endif
 }
 
 static uint32_t __not_in_flash_func(Map19_N163_AudioFrequency)(int nChannel)
@@ -227,6 +239,9 @@ static void Map19_N163_ResetAudioState()
   Map19_N163_AudioSliceCycles = 0;
   Map19_N163_AudioOutput = 0;
   Map19_N163_AudioSum = 0;
+#if defined(NESCO_MAPPER19_N163_CACHE_CHANNEL_COUNT)
+  Map19_N163_CachedChannelCount = Map19_N163_AudioChannelCountFromRam();
+#endif
   Map19_N163_AudioSliceStartOutput = 0;
   Map19_N163_SoundDisabled = 0;
 }
@@ -616,6 +631,9 @@ void Map19_Apu(WORD wAddr, BYTE byData)
     Map19_N163_AdvanceAddress();
     if (byAddress == 0x7f)
     {
+#if defined(NESCO_MAPPER19_N163_CACHE_CHANNEL_COUNT)
+      Map19_N163_CachedChannelCount = Map19_N163_AudioChannelCountFromRam();
+#endif
       /* Channel-count writes must immediately recompute the active mix. */
       Map19_N163_AudioUpdateOutput();
     }
