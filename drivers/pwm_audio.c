@@ -29,11 +29,36 @@
 #define AUDIO_STEP_LOGF(fmt, ...) ((void)0)
 #endif
 
+#if defined(NESCO_AUDIO_RAMFUNC)
+#define AUDIO_RAMFUNC(function_name) RAMFUNC(function_name)
+#else
+#define AUDIO_RAMFUNC(function_name) function_name
+#endif
+
+#if defined(NESCO_AUDIO_RAMFUNC) || defined(NESCO_AUDIO_DMA_REFILL_RAMFUNC)
+#define AUDIO_REFILL_RAMFUNC(function_name) RAMFUNC(function_name)
+#else
+#define AUDIO_REFILL_RAMFUNC(function_name) function_name
+#endif
+
+#if defined(NESCO_AUDIO_HIGH_PRIORITY)
+#define PICO_AUDIO_HIGH_PRIORITY_VALUE 1u
+#else
+#define PICO_AUDIO_HIGH_PRIORITY_VALUE 0u
+#endif
+
 enum {
     PICO_AUDIO_PIN_LEFT  = 26,
     PICO_AUDIO_PIN_RIGHT = 27,
     PICO_AUDIO_WRAP      = 255,
-    PICO_AUDIO_DMA_HALF_SAMPLES = 128,
+#if defined(NESCO_AUDIO_DMA64)
+    PICO_AUDIO_DMA_HALF_SAMPLES = 64,
+    PICO_AUDIO_DMA_RING_BITS = 8,
+#else
+    PICO_AUDIO_DMA_HALF_SAMPLES = 32,
+    PICO_AUDIO_DMA_RING_BITS = 7,
+#endif
+    PICO_AUDIO_DMA_HALF_BYTES = PICO_AUDIO_DMA_HALF_SAMPLES * sizeof(uint32_t),
     PICO_AUDIO_STARTUP_SILENCE_SAMPLES = 1024,
     PICO_AUDIO_UI_BUSY_TONE_HZ = 880,
     PICO_AUDIO_UI_BUSY_TONE_MS = 70,
@@ -41,12 +66,15 @@ enum {
     PICO_AUDIO_UI_BUSY_AMPLITUDE = 34,
 };
 
+_Static_assert(PICO_AUDIO_DMA_HALF_BYTES == (1u << PICO_AUDIO_DMA_RING_BITS),
+               "DMA half-buffer must match the read ring size");
+
 static int  s_slice_left   = -1;
 static uint s_chan_left    = 0;
 static uint s_chan_right   = 0;
 static bool s_audio_live   = false;
 static volatile bool s_audio_paused = false;
-static int s_dma_chan_left = -1;
+static int s_dma_chan[2] = {-1, -1};
 static int s_dma_timer = -1;
 static uint s_dma_active_half = 0u;
 static volatile int  s_min_available = AUDIO_RING_SIZE;
@@ -62,11 +90,53 @@ static volatile uint32_t s_output_sum_sq = 0;
 static volatile uint32_t s_output_sample_count = 0;
 static volatile BYTE s_output_peak = 0;
 static uint32_t s_startup_silence_samples = 0;
-static uint32_t s_dma_buffer[2][PICO_AUDIO_DMA_HALF_SAMPLES];
+/* Each half starts on its own ring boundary.  The DMA read ring is applied
+ * per channel, so both half 0 and half 1 must be aligned to the half size. */
+static uint32_t s_dma_buffer[2][PICO_AUDIO_DMA_HALF_SAMPLES]
+    __attribute__((aligned(PICO_AUDIO_DMA_HALF_BYTES)));
 static uint64_t s_last_debug_us = 0;
 static uint32_t s_sample_rate = 22050u;
 static volatile bool s_ui_busy_active = false;
 static volatile uint32_t s_ui_busy_pos = 0;
+
+#if defined(NESCO_AUDIO_DYNAMIC_PRIORITY)
+enum {
+    PICO_AUDIO_DYNAMIC_PRIORITY_LOW_WATERMARK = 192,
+    PICO_AUDIO_DYNAMIC_PRIORITY_RESUME_WATERMARK = 768,
+};
+static bool s_audio_dynamic_priority_high = false;
+static uint32_t s_audio_dynamic_priority_boosts = 0;
+
+static void pwm_audio_update_dynamic_priority(int available) {
+    bool high = s_audio_dynamic_priority_high;
+    if (!high && available <= PICO_AUDIO_DYNAMIC_PRIORITY_LOW_WATERMARK) {
+        high = true;
+    } else if (high && available >= PICO_AUDIO_DYNAMIC_PRIORITY_RESUME_WATERMARK) {
+        high = false;
+    }
+
+    if (high == s_audio_dynamic_priority_high) {
+        return;
+    }
+
+    for (uint half = 0u; half < 2u; ++half) {
+        if (s_dma_chan[half] < 0) {
+            continue;
+        }
+        if (high) {
+            hw_set_bits(&dma_channel_hw_addr((uint)s_dma_chan[half])->al1_ctrl,
+                        DMA_CH0_CTRL_TRIG_HIGH_PRIORITY_BITS);
+        } else {
+            hw_clear_bits(&dma_channel_hw_addr((uint)s_dma_chan[half])->al1_ctrl,
+                          DMA_CH0_CTRL_TRIG_HIGH_PRIORITY_BITS);
+        }
+    }
+    s_audio_dynamic_priority_high = high;
+    if (high) {
+        s_audio_dynamic_priority_boosts++;
+    }
+}
+#endif
 
 void pwm_audio_close(void);
 void pwm_audio_reset_stats(void);
@@ -131,7 +201,7 @@ static inline uint32_t pwm_audio_pack_sample(BYTE sample) {
     return (uint32_t)sample | ((uint32_t)sample << 16);
 }
 
-static BYTE pwm_audio_ui_busy_sample(void) {
+static BYTE AUDIO_RAMFUNC(pwm_audio_ui_busy_sample)(void) {
     uint32_t sample_rate = s_sample_rate;
     uint32_t period_samples = (sample_rate * PICO_AUDIO_UI_BUSY_PERIOD_MS) / 1000u;
     uint32_t tone_samples = (sample_rate * PICO_AUDIO_UI_BUSY_TONE_MS) / 1000u;
@@ -156,7 +226,7 @@ static BYTE pwm_audio_ui_busy_sample(void) {
                : (BYTE)(128u + PICO_AUDIO_UI_BUSY_AMPLITUDE);
 }
 
-static void pwm_audio_refill_half(uint half_index) {
+static void AUDIO_REFILL_RAMFUNC(pwm_audio_refill_half)(uint half_index) {
     if (s_ui_busy_active) {
         for (int i = 0; i < PICO_AUDIO_DMA_HALF_SAMPLES; i++) {
             s_dma_buffer[half_index][i] = pwm_audio_pack_sample(pwm_audio_ui_busy_sample());
@@ -191,6 +261,9 @@ static void pwm_audio_refill_half(uint half_index) {
     }
 
     int available = audio_ring_available();
+#if defined(NESCO_AUDIO_DYNAMIC_PRIORITY)
+    pwm_audio_update_dynamic_priority(available);
+#endif
     if (available < s_min_available) s_min_available = available;
     if (available > s_max_available) s_max_available = available;
     s_available_sum += (uint32_t)available;
@@ -229,26 +302,27 @@ static void pwm_audio_refill_half(uint half_index) {
     }
 }
 
-static void pwm_audio_start_half(uint half_index) {
-    dma_channel_set_read_addr((uint)s_dma_chan_left, s_dma_buffer[half_index], false);
-    dma_channel_set_transfer_count((uint)s_dma_chan_left, PICO_AUDIO_DMA_HALF_SAMPLES, false);
-    dma_start_channel_mask(1u << s_dma_chan_left);
-    s_dma_active_half = half_index;
+static void AUDIO_RAMFUNC(pwm_audio_start_chain)(void) {
+    s_dma_active_half = 0u;
+    dma_start_channel_mask(1u << (uint)s_dma_chan[0]);
 }
 
 static void RAMFUNC(pwm_audio_dma_irq0_handler)(void) {
-    if (dma_channel_get_irq0_status((uint)s_dma_chan_left)) {
-        dma_channel_acknowledge_irq0((uint)s_dma_chan_left);
-    }
-
     if (!s_audio_live) {
         return;
     }
 
-    uint completed_half = s_dma_active_half;
-    uint next_half = completed_half ^ 1u;
-    pwm_audio_refill_half(completed_half);
-    pwm_audio_start_half(next_half);
+    /* The DMA channels are chained in hardware. The IRQ only acknowledges
+     * the completed channel and refills its now-free buffer; it must not
+     * start the next channel, otherwise CPU/IRQ latency becomes a gap. */
+    for (uint completed_half = 0u; completed_half < 2u; ++completed_half) {
+        const uint channel = (uint)s_dma_chan[completed_half];
+        if (dma_channel_get_irq0_status(channel)) {
+            dma_channel_acknowledge_irq0(channel);
+            pwm_audio_refill_half(completed_half);
+            s_dma_active_half = completed_half ^ 1u;
+        }
+    }
 }
 
 void pwm_audio_init(int gpio_pin, int sample_rate) {
@@ -310,9 +384,11 @@ void pwm_audio_init(int gpio_pin, int sample_rate) {
     s_audio_paused = false;
     s_last_debug_us = time_us_64();
 
-    AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] before_dma_claim_channel\r\n");
-    s_dma_chan_left = dma_claim_unused_channel(true);
-    AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] after_dma_claim_channel chan=%d\r\n", s_dma_chan_left);
+    AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] before_dma_claim_channels\r\n");
+    s_dma_chan[0] = dma_claim_unused_channel(true);
+    s_dma_chan[1] = dma_claim_unused_channel(true);
+    AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] after_dma_claim_channels chan0=%d chan1=%d\r\n",
+                     s_dma_chan[0], s_dma_chan[1]);
     AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] before_dma_claim_timer\r\n");
     s_dma_timer = dma_claim_unused_timer(true);
     AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] after_dma_claim_timer timer=%d\r\n", s_dma_timer);
@@ -328,19 +404,29 @@ void pwm_audio_init(int gpio_pin, int sample_rate) {
     AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] after_dma_timer_fraction\r\n");
 
     AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] before_dma_config\r\n");
-    dma_channel_config cfg_left = dma_channel_get_default_config((uint)s_dma_chan_left);
-    channel_config_set_transfer_data_size(&cfg_left, DMA_SIZE_32);
-    channel_config_set_read_increment(&cfg_left, true);
-    channel_config_set_write_increment(&cfg_left, false);
-    channel_config_set_dreq(&cfg_left, dma_get_timer_dreq((uint)s_dma_timer));
+    for (uint half = 0u; half < 2u; ++half) {
+        dma_channel_config cfg = dma_channel_get_default_config((uint)s_dma_chan[half]);
+        channel_config_set_transfer_data_size(&cfg, DMA_SIZE_32);
+        channel_config_set_read_increment(&cfg, true);
+        channel_config_set_write_increment(&cfg, false);
+        channel_config_set_ring(&cfg, false, PICO_AUDIO_DMA_RING_BITS);
+        channel_config_set_dreq(&cfg, dma_get_timer_dreq((uint)s_dma_timer));
+        channel_config_set_chain_to(&cfg, (uint)s_dma_chan[half ^ 1u]);
+#if defined(NESCO_AUDIO_HIGH_PRIORITY)
+        channel_config_set_high_priority(&cfg, true);
+#endif
 
-    dma_channel_configure((uint)s_dma_chan_left,
-                          &cfg_left,
-                          &pwm_hw->slice[s_slice_left].cc,
-                          s_dma_buffer[0],
-                          PICO_AUDIO_DMA_HALF_SAMPLES,
-                          false);
-    AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] after_dma_config\r\n");
+        dma_channel_configure((uint)s_dma_chan[half],
+                              &cfg,
+                              &pwm_hw->slice[s_slice_left].cc,
+                              s_dma_buffer[half],
+                              PICO_AUDIO_DMA_HALF_SAMPLES,
+                              false);
+    }
+    AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] after_dma_config chain=mutual read_ring_bits=%u half_bytes=%u high_priority=%u\r\n",
+                     (unsigned int)PICO_AUDIO_DMA_RING_BITS,
+                     (unsigned int)PICO_AUDIO_DMA_HALF_BYTES,
+                     PICO_AUDIO_HIGH_PRIORITY_VALUE);
 
     AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] before_refill\r\n");
     pwm_audio_refill_half(0u);
@@ -348,12 +434,14 @@ void pwm_audio_init(int gpio_pin, int sample_rate) {
     AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] after_refill\r\n");
 
     AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] before_irq_clear\r\n");
-    dma_channel_acknowledge_irq0((uint)s_dma_chan_left);
+    dma_channel_acknowledge_irq0((uint)s_dma_chan[0]);
+    dma_channel_acknowledge_irq0((uint)s_dma_chan[1]);
     irq_clear(DMA_IRQ_0);
     AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] after_irq_clear\r\n");
 
     AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] before_dma_irq0_enable\r\n");
-    dma_channel_set_irq0_enabled((uint)s_dma_chan_left, true);
+    dma_channel_set_irq0_enabled((uint)s_dma_chan[0], true);
+    dma_channel_set_irq0_enabled((uint)s_dma_chan[1], true);
     AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] after_dma_irq0_enable\r\n");
     AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] before_irq_set_exclusive_handler\r\n");
     irq_set_exclusive_handler(DMA_IRQ_0, pwm_audio_dma_irq0_handler);
@@ -366,11 +454,11 @@ void pwm_audio_init(int gpio_pin, int sample_rate) {
     AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] before_pwm_enable\r\n");
     pwm_set_enabled((uint)s_slice_left, true);
 
-    AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] before_start_half\r\n");
-    pwm_audio_start_half(0u);
-    AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] after_start_half\r\n");
+    AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] before_start_chain\r\n");
+    pwm_audio_start_chain();
+    AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] after_start_chain\r\n");
 
-    NESCO_LOGF("[AUDIO] pwm init L=%d R=%d rate=%d wrap=%d clkdiv=%.3f carrier=%lu dma_half=%d dma_timer=%d dma_frac=%u/%u\r\n",
+    NESCO_LOGF("[AUDIO] pwm init L=%d R=%d rate=%d wrap=%d clkdiv=%.3f carrier=%lu dma_half=%d dma_timer=%d dma_frac=%u/%u dma_ring_bits=%u\r\n",
                PICO_AUDIO_PIN_LEFT,
                PICO_AUDIO_PIN_RIGHT,
                sample_rate,
@@ -380,7 +468,8 @@ void pwm_audio_init(int gpio_pin, int sample_rate) {
                PICO_AUDIO_DMA_HALF_SAMPLES,
                s_dma_timer,
                (unsigned int)dma_num,
-               (unsigned int)dma_den);
+               (unsigned int)dma_den,
+               (unsigned int)PICO_AUDIO_DMA_RING_BITS);
     AUDIO_STEP_LOGF("[AUDIO_PWM_STEP] end\r\n");
 }
 
@@ -399,10 +488,13 @@ void pwm_audio_close(void) {
     }
 
     irq_set_enabled(DMA_IRQ_0, false);
-    dma_channel_set_irq0_enabled((uint)s_dma_chan_left, false);
-    dma_channel_abort((uint)s_dma_chan_left);
-    dma_channel_acknowledge_irq0((uint)s_dma_chan_left);
-    dma_channel_unclaim((uint)s_dma_chan_left);
+    s_audio_live = false;
+    for (uint half = 0u; half < 2u; ++half) {
+        dma_channel_set_irq0_enabled((uint)s_dma_chan[half], false);
+        dma_channel_abort((uint)s_dma_chan[half]);
+        dma_channel_acknowledge_irq0((uint)s_dma_chan[half]);
+        dma_channel_unclaim((uint)s_dma_chan[half]);
+    }
     dma_timer_unclaim((uint)s_dma_timer);
 
     pwm_set_enabled((uint)s_slice_left, false);
@@ -411,11 +503,15 @@ void pwm_audio_close(void) {
     pwm_set_chan_level((uint)s_slice_left, s_chan_right, 128u);
 
     s_slice_left = -1;
-    s_dma_chan_left = -1;
+    s_dma_chan[0] = -1;
+    s_dma_chan[1] = -1;
     s_dma_timer = -1;
-    s_audio_live = false;
     s_audio_paused = false;
     s_dma_active_half = 0u;
+#if defined(NESCO_AUDIO_DYNAMIC_PRIORITY)
+    s_audio_dynamic_priority_high = false;
+    s_audio_dynamic_priority_boosts = 0;
+#endif
 }
 
 void pwm_audio_reset_stats(void) {
@@ -432,6 +528,10 @@ void pwm_audio_reset_stats(void) {
     s_output_sample_count = 0;
     s_output_peak = 0;
     s_last_debug_us = time_us_64();
+#if defined(NESCO_AUDIO_DYNAMIC_PRIORITY)
+    pwm_audio_update_dynamic_priority(AUDIO_RING_SIZE);
+    s_audio_dynamic_priority_boosts = 0;
+#endif
 }
 
 void pwm_audio_debug_poll(void) {
@@ -469,6 +569,11 @@ void pwm_audio_debug_poll(void) {
                (unsigned long)s_dma_refill_shortage_samples,
                (unsigned long)s_dma_silence_fill_samples,
                (unsigned int)s_dma_active_half);
+#if defined(NESCO_AUDIO_DYNAMIC_PRIORITY)
+    NESCO_LOGF("[AUDIO_DMA_PRIORITY] boosts=%lu high=%u\r\n",
+               (unsigned long)s_audio_dynamic_priority_boosts,
+               s_audio_dynamic_priority_high ? 1u : 0u);
+#endif
 #else
     (void)available;
 #endif

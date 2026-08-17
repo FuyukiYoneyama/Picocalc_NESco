@@ -22,6 +22,8 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
 option(NESCO_RUNTIME_LOGS "Enable verbose runtime logging on device" OFF)
+option(NESCO_AUDIO_MEASURE
+       "Enable the bounded Mapper 19 audio producer measurement contract" OFF)
 option(NESCO_INPUT_IO_LOGS "Enable focused $4016/$4017 input I/O logging" OFF)
 option(NESCO_BOKOSUKA_STATE_LOGS "Enable focused Bokosuka state logging" OFF)
 option(NESCO_CORE1_BASELINE_LOG "Enable one-second baseline performance logs for core1 planning" OFF)
@@ -35,6 +37,58 @@ option(NESCO_MAPPER4_A12_SINGLE_SOURCE
        "Use the Mapper 4 A12 edge model instead of tile-callback double clocking" ON)
 option(NESCO_MAPPER19_IRQ_DIAGNOSTICS
        "Enable one-shot RAM diagnostics for the local Mapper 19 IRQ fixture" OFF)
+option(NESCO_MAPPER19_N163_MUTE_DIAGNOSTIC
+       "Mute N163 expansion audio at the final mixer for Mapper 19 diagnosis" OFF)
+option(NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC
+       "Route only the raw Mapper 19 N163 level to the audio ring for generator comparison" OFF)
+option(NESCO_MAPPER19_N163_AVERAGE_FAST
+       "Use exact constant-divisor fast paths for the Mapper 19 N163 channel average" ON)
+option(NESCO_MAPPER19_N163_SKIP_SAME_OUTPUT
+       "Skip Mapper 19 N163 average recomputation when a channel output is unchanged" OFF)
+option(NESCO_MAPPER19_N163_INCREMENTAL_SUM
+       "Maintain the Mapper 19 N163 active-channel sum by channel delta" ON)
+option(NESCO_MAPPER19_N163_CACHE_CHANNEL_COUNT
+       "Cache the Mapper 19 N163 active-channel count outside the audio hot path" ON)
+option(NESCO_MAPPER19_N163_RENDER_FAST_DIVISION
+       "Use exact reciprocal paths for the normal Mapper 19 N163 render widths" ON)
+option(NESCO_AUDIO_MIX_FAST_DIVISION
+       "Use an exact fixed-point path for the audio mix scale division" ON)
+option(NESCO_AUDIO_HSYNC_BATCH
+       "Batch Mapper 19 HSync audio into 16-sample output calls" OFF)
+option(NESCO_AUDIO_HSYNC_BATCH32
+       "Batch Mapper 19 HSync audio into 32-sample output calls" OFF)
+option(NESCO_AUDIO_BLOCK_PRODUCER
+       "Accumulate one bounded 64-sample audio block before mixer/ring handoff" ON)
+option(NESCO_AUDIO_CLOCK_LOCK
+       "Use a bounded audio-clock interpolator to meet the fixed PWM sample deadline" ON)
+option(NESCO_MAPPER19_AUDIO_COMFORT
+       "Limit abrupt Mapper 19 final-mix steps for a click-resistant listening build" ON)
+option(NESCO_AUDIO_PREFILL
+       "Prefill the audio ring before enabling the ROM audio stream" ON)
+option(NESCO_AUDIO_RING_8192
+       "Use an 8192-sample audio ring for producer jitter absorption" ON)
+option(NESCO_AUDIO_RAMFUNC
+       "Place audio producer and DMA refill hot paths in RAM" ON)
+option(NESCO_AUDIO_MIX_RAMFUNC
+       "Place only the audio mixer producer function in RAM" OFF)
+option(NESCO_AUDIO_DMA_REFILL_RAMFUNC
+       "Place only the PWM DMA refill function in RAM" OFF)
+option(NESCO_AUDIO_DMA64
+       "Use 64 samples per PWM DMA half-buffer" OFF)
+option(NESCO_AUDIO_HIGH_PRIORITY
+       "Give the PWM audio DMA channels RP2040 high-priority arbitration" ON)
+option(NESCO_AUDIO_DYNAMIC_PRIORITY
+       "Raise PWM audio DMA priority only while the audio ring is below its low watermark" OFF)
+option(NESCO_LCD_DMA_STRIP4
+       "Use four source lines per LCD DMA burst for audio/display arbitration" OFF)
+option(NESCO_AUDIO_DISPLAY_BACKOFF
+       "Skip a display frame while the audio ring is below its low watermark" OFF)
+option(NESCO_AUDIO_FRAME_ADMISSION
+       "Use whole-frame display admission to protect Mapper 19 audio deadlines" ON)
+option(NESCO_AUDIO_LCD_RING_GUARD
+       "Defer LCD strip DMA briefly while the audio ring is below its low watermark" OFF)
+option(NESCO_DIAGNOSTIC_AUTOSTART_BUILTIN
+       "Diagnostic-only direct launch of the staged builtin ROM; default OFF" OFF)
 
 # Probe slightly larger linker-reserved heap without modifying the Pico SDK.
 # Disable malloc panic so heap diagnostics can measure allocation ceilings safely.
@@ -124,6 +178,12 @@ if(PICO_BUILD)
         )
     endif()
 
+    if(NESCO_AUDIO_MEASURE)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_MEASURE=1
+        )
+    endif()
+
     if(NESCO_CORE1_BASELINE_LOG OR NESCO_BG_TILE_SHARE_LOG OR NESCO_PALETTE_SNAPSHOT_LOG)
         target_compile_definitions(Picocalc_NESco PRIVATE
             NESCO_CORE1_BASELINE_LOG=1
@@ -145,6 +205,164 @@ if(PICO_BUILD)
     if(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
         target_compile_definitions(Picocalc_NESco PRIVATE
             NESCO_MAPPER19_IRQ_DIAGNOSTICS=1
+        )
+    endif()
+
+    if(NESCO_MAPPER19_N163_MUTE_DIAGNOSTIC)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_MAPPER19_N163_MUTE_DIAGNOSTIC=1
+        )
+    endif()
+
+    if(NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC=1
+        )
+    endif()
+
+    if(NESCO_MAPPER19_N163_AVERAGE_FAST)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_MAPPER19_N163_AVERAGE_FAST=1
+        )
+    endif()
+
+    if(NESCO_MAPPER19_N163_SKIP_SAME_OUTPUT)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_MAPPER19_N163_SKIP_SAME_OUTPUT=1
+        )
+    endif()
+
+    if(NESCO_MAPPER19_N163_INCREMENTAL_SUM)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_MAPPER19_N163_INCREMENTAL_SUM=1
+        )
+    endif()
+
+    if(NESCO_MAPPER19_N163_CACHE_CHANNEL_COUNT)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_MAPPER19_N163_CACHE_CHANNEL_COUNT=1
+        )
+    endif()
+
+    if(NESCO_MAPPER19_N163_RENDER_FAST_DIVISION)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_MAPPER19_N163_RENDER_FAST_DIVISION=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_MIX_FAST_DIVISION)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_MIX_FAST_DIVISION=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_HSYNC_BATCH)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_HSYNC_BATCH=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_HSYNC_BATCH32)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_HSYNC_BATCH=1
+            NESCO_AUDIO_HSYNC_BATCH32=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_BLOCK_PRODUCER)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_HSYNC_BATCH=1
+            NESCO_AUDIO_BLOCK_PRODUCER=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_CLOCK_LOCK)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_CLOCK_LOCK=1
+        )
+    endif()
+
+    if(NESCO_MAPPER19_AUDIO_COMFORT)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_MAPPER19_AUDIO_COMFORT=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_PREFILL)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_PREFILL=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_RING_8192)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_RING_8192=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_RAMFUNC)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_RAMFUNC=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_MIX_RAMFUNC)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_MIX_RAMFUNC=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_DMA_REFILL_RAMFUNC)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_DMA_REFILL_RAMFUNC=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_DMA64)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_DMA64=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_HIGH_PRIORITY)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_HIGH_PRIORITY=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_DYNAMIC_PRIORITY)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_DYNAMIC_PRIORITY=1
+        )
+    endif()
+
+    if(NESCO_LCD_DMA_STRIP4)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_LCD_DMA_STRIP4=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_DISPLAY_BACKOFF)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_DISPLAY_BACKOFF=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_FRAME_ADMISSION)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_FRAME_ADMISSION=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_LCD_RING_GUARD)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_LCD_RING_GUARD=1
+        )
+    endif()
+
+    if(NESCO_DIAGNOSTIC_AUTOSTART_BUILTIN)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_DIAGNOSTIC_AUTOSTART_BUILTIN=1
         )
     endif()
 

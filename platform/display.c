@@ -29,6 +29,8 @@
 
 #include "InfoNES.h"
 #include "InfoNES_System.h"
+#include "audio.h"
+#include "runtime_log.h"
 #include "../font/menu_font_pixelmplus.h"
 #include "version.h"
 
@@ -97,6 +99,36 @@ static uint32_t s_perf_palette_forced = 0;
 static uint64_t s_last_frame_us = 0;
 static uint64_t s_next_frame_deadline_us = 0;
 static WORD s_active_frame_skip = 0;
+#endif
+
+#ifdef NESCO_AUDIO_DISPLAY_BACKOFF
+enum {
+    AUDIO_DISPLAY_BACKOFF_LOW_WATERMARK = 192,
+    AUDIO_DISPLAY_BACKOFF_RESUME_WATERMARK = 768,
+};
+static bool s_audio_display_backoff = false;
+#endif
+
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_FRAME_ADMISSION)
+enum {
+    /* Skipped units are complete frames: the emulator still advances its
+     * PPU/APU/N163 timeline, but no partial line is submitted to the LCD. */
+    AUDIO_FRAME_ADMISSION_LOW_WATERMARK = 1024,
+    AUDIO_FRAME_ADMISSION_RESUME_WATERMARK = 1536,
+};
+static bool s_audio_frame_admission_skip = false;
+#endif
+
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_LCD_RING_GUARD)
+enum {
+    AUDIO_LCD_RING_GUARD_LOW_WATERMARK = 192,
+    AUDIO_LCD_RING_GUARD_RESUME_WATERMARK = 768,
+    AUDIO_LCD_RING_GUARD_MAX_WAIT_US = 750,
+    AUDIO_LCD_RING_GUARD_POLL_US = 25,
+};
+static uint32_t s_audio_lcd_guard_wait_count = 0;
+static uint64_t s_audio_lcd_guard_wait_us = 0;
+static uint64_t s_audio_lcd_guard_last_log_us = 0;
 #endif
 
 static display_mode_t s_display_mode = DISPLAY_MODE_NES_VIEW;
@@ -522,6 +554,12 @@ void display_init(void) {
     s_next_frame_deadline_us = 0;
     s_active_frame_skip = 0;
 #endif
+#ifdef NESCO_AUDIO_DISPLAY_BACKOFF
+    s_audio_display_backoff = false;
+#endif
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_FRAME_ADMISSION)
+    s_audio_frame_admission_skip = false;
+#endif
 }
 
 void display_set_viewport(int x, int y, int w, int h) {
@@ -588,6 +626,12 @@ void display_set_mode(display_mode_t mode) {
     s_next_frame_deadline_us = 0;
     s_active_frame_skip = 0;
 #endif
+#ifdef NESCO_AUDIO_DISPLAY_BACKOFF
+    s_audio_display_backoff = false;
+#endif
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_FRAME_ADMISSION)
+    s_audio_frame_admission_skip = false;
+#endif
 }
 
 void display_toggle_nes_view_scale(void) {
@@ -614,6 +658,9 @@ void display_toggle_nes_view_scale(void) {
     s_next_frame_deadline_us = 0;
     s_active_frame_skip = 0;
 #endif
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_FRAME_ADMISSION)
+    s_audio_frame_admission_skip = false;
+#endif
 }
 
 nes_view_scale_mode_t display_get_nes_view_scale(void) {
@@ -639,6 +686,11 @@ void display_perf_reset(void) {
     s_perf_lcd_queue_wait_episodes = 0;
     s_perf_frame_pacing_sleep_us = 0;
     s_perf_frame_pacing_sleep_count = 0;
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_LCD_RING_GUARD)
+    s_audio_lcd_guard_wait_count = 0;
+    s_audio_lcd_guard_wait_us = 0;
+    s_audio_lcd_guard_last_log_us = 0;
+#endif
 #if defined(NESCO_PALETTE_SNAPSHOT_LOG)
     s_perf_palette_line_items = 0;
     s_perf_palette_snapshots = 0;
@@ -651,11 +703,47 @@ void display_perf_reset(void) {
 #endif
 }
 
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_LCD_RING_GUARD)
+static void display_lcd_worker_audio_guard(void) {
+    const int initial_level = audio_ring_available();
+    if (initial_level > AUDIO_LCD_RING_GUARD_LOW_WATERMARK) {
+        return;
+    }
+
+    const uint64_t start_us = time_us_64();
+    const uint64_t deadline_us = start_us + AUDIO_LCD_RING_GUARD_MAX_WAIT_US;
+    int final_level = initial_level;
+    while (final_level < AUDIO_LCD_RING_GUARD_RESUME_WATERMARK &&
+           time_us_64() < deadline_us) {
+        sleep_us(AUDIO_LCD_RING_GUARD_POLL_US);
+        final_level = audio_ring_available();
+    }
+
+    const uint64_t waited_us = time_us_64() - start_us;
+    s_audio_lcd_guard_wait_count++;
+    s_audio_lcd_guard_wait_us += waited_us;
+
+    const uint64_t now_us = time_us_64();
+    if (s_audio_lcd_guard_last_log_us == 0 ||
+        now_us - s_audio_lcd_guard_last_log_us >= 1000000ull) {
+        NESCO_LOGF("[AUDIO_LCD_GUARD] waits=%lu wait_us=%llu initial=%d final=%d\r\n",
+                   (unsigned long)s_audio_lcd_guard_wait_count,
+                   (unsigned long long)s_audio_lcd_guard_wait_us,
+                   initial_level,
+                   final_level);
+        s_audio_lcd_guard_last_log_us = now_us;
+    }
+}
+#endif
+
 void display_reset_frame_pacing(void) {
 #ifdef PICO_BUILD
     s_last_frame_us = 0;
     s_next_frame_deadline_us = 0;
     s_active_frame_skip = 0;
+#endif
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_FRAME_ADMISSION)
+    s_audio_frame_admission_skip = false;
 #endif
     FrameSkip = 0;
 }
@@ -745,13 +833,12 @@ void display_show_opening_screen(void) {
     static const WORD accent = 0x07E0;
     static const WORD fg = 0xFFFF;
     static const char *title = "PicoCalc NESco";
-    char version_line[32];
+    static const char *build_label = PICOCALC_NESCO_DISPLAY_LABEL;
     WORD line[320];
     int title_w = display_measure_text_width(title, 10, MENU_FONT_PIXELMPLUS_WIDTH, 2);
-    int version_w;
+    int label_w;
 
-    snprintf(version_line, sizeof(version_line), "Ver. %s", PICOCALC_NESCO_VERSION);
-    version_w = display_measure_text_width(version_line, 6, MENU_FONT_PIXELMPLUS_WIDTH, 1);
+    label_w = display_measure_text_width(build_label, 6, MENU_FONT_PIXELMPLUS_WIDTH, 1);
     for (int i = 0; i < 320; i++) {
         line[i] = accent;
     }
@@ -769,10 +856,10 @@ void display_show_opening_screen(void) {
     lcd_dma_wait();
 
     display_draw_text_span_scaled((320 - title_w) / 2, 120, title_w, title, accent, bg, 2, 10);
-    display_draw_text_span_scaled((320 - version_w) / 2,
+    display_draw_text_span_scaled((320 - label_w) / 2,
                                   172,
-                                  version_w,
-                                  version_line,
+                                  label_w,
+                                  build_label,
                                   fg,
                                   bg,
                                   1,
@@ -782,8 +869,11 @@ void display_show_opening_screen(void) {
 void display_show_loading_screen(void) {
     static const WORD bg = 0x0000;
     static const WORD fg = 0xFFFF;
+    static const WORD dim = 0x7BEF;
     static const char *loading = "Loading...";
+    static const char *build_label = PICOCALC_NESCO_DISPLAY_LABEL;
     int loading_w = display_measure_text_width(loading, 6, MENU_FONT_PIXELMPLUS_WIDTH, 1);
+    int label_w = display_measure_text_width(build_label, 6, MENU_FONT_PIXELMPLUS_WIDTH, 1);
 
     display_set_mode(DISPLAY_MODE_FULLSCREEN);
     display_clear_rgb565(bg);
@@ -792,6 +882,14 @@ void display_show_loading_screen(void) {
                                   loading_w,
                                   loading,
                                   fg,
+                                  bg,
+                                  1,
+                                  6);
+    display_draw_text_span_scaled((320 - label_w) / 2,
+                                  180,
+                                  label_w,
+                                  build_label,
+                                  dim,
                                   bg,
                                   1,
                                   6);
@@ -971,6 +1069,9 @@ static void display_lcd_worker_flush_normal_strip(const display_lcd_worker_item_
     const uint64_t dma_wait_start_us = time_us_64();
 #endif
     lcd_dma_wait();
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_LCD_RING_GUARD)
+    display_lcd_worker_audio_guard();
+#endif
 #if defined(NESCO_CORE1_BASELINE_LOG) && defined(PICO_BUILD)
     s_lcd_worker_core1_local_window.dma_wait_us += time_us_64() - dma_wait_start_us;
     s_lcd_worker_core1_local_window.dma_wait_count++;
@@ -1020,6 +1121,9 @@ static void display_lcd_worker_flush_stretch_strip(const display_lcd_worker_item
     const uint64_t dma_wait_start_us = time_us_64();
 #endif
     lcd_dma_wait();
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_LCD_RING_GUARD)
+    display_lcd_worker_audio_guard();
+#endif
 #if defined(NESCO_CORE1_BASELINE_LOG) && defined(PICO_BUILD)
     s_lcd_worker_core1_local_window.dma_wait_us += time_us_64() - dma_wait_start_us;
     s_lcd_worker_core1_local_window.dma_wait_count++;
@@ -1252,6 +1356,34 @@ int InfoNES_LoadFrame(void) {
     } else {
         FrameSkip = 0;
     }
+#ifdef NESCO_AUDIO_DISPLAY_BACKOFF
+    const int audio_ring_level = audio_ring_available();
+    if (!s_audio_display_backoff &&
+        audio_ring_level <= AUDIO_DISPLAY_BACKOFF_LOW_WATERMARK) {
+        s_audio_display_backoff = true;
+    } else if (s_audio_display_backoff &&
+               audio_ring_level >= AUDIO_DISPLAY_BACKOFF_RESUME_WATERMARK) {
+        s_audio_display_backoff = false;
+    }
+    if (s_audio_display_backoff && FrameSkip < 1) {
+        FrameSkip = 1;
+    }
+#endif
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_FRAME_ADMISSION)
+    if (MapperNo == 19) {
+        const int audio_ring_level = audio_ring_available();
+        if (!s_audio_frame_admission_skip &&
+            audio_ring_level <= AUDIO_FRAME_ADMISSION_LOW_WATERMARK) {
+            s_audio_frame_admission_skip = true;
+        } else if (s_audio_frame_admission_skip &&
+                   audio_ring_level >= AUDIO_FRAME_ADMISSION_RESUME_WATERMARK) {
+            s_audio_frame_admission_skip = false;
+        }
+        if (s_audio_frame_admission_skip && FrameSkip < 1) {
+            FrameSkip = 1;
+        }
+    }
+#endif
     s_active_frame_skip = FrameSkip;
     s_last_frame_us = time_us_64();
 #else

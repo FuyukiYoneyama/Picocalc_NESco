@@ -40,8 +40,8 @@ static void boot_log_stage(const char *stage) {
     NESCO_LOGF("[BOOT] %s\r\n", stage);
 }
 
+#if !defined(NESCO_DIAGNOSTIC_AUTOSTART_BUILTIN)
 extern BYTE i2c_kbd_read_key(void);
-
 static void boot_wait_opening_or_key(uint32_t timeout_ms) {
     absolute_time_t deadline = make_timeout_time_ms(timeout_ms);
 
@@ -52,6 +52,7 @@ static void boot_wait_opening_or_key(uint32_t timeout_ms) {
         sleep_ms(10);
     }
 }
+#endif
 #endif
 
 int main(void) {
@@ -98,9 +99,13 @@ int main(void) {
     boot_log_stage("audio_init end");
     boot_log_stage("opening begin");
 #endif
+#if !defined(NESCO_DIAGNOSTIC_AUTOSTART_BUILTIN)
     display_show_opening_screen();
+#endif
 #ifdef PICO_BUILD
+#if !defined(NESCO_DIAGNOSTIC_AUTOSTART_BUILTIN)
     boot_wait_opening_or_key(3000);
+#endif
     boot_log_stage("opening end");
     boot_log_stage("rom_image_init begin");
 #endif
@@ -112,6 +117,21 @@ int main(void) {
     boot_log_stage("rom_menu begin");
 #endif
 
+#if defined(NESCO_DIAGNOSTIC_AUTOSTART_BUILTIN)
+    /* Diagnostic-only path: skip the menu/SD scan so backend profilers can
+     * start at the same staged builtin ROM without spending their budget on
+     * the startup UI. This option is intentionally default-OFF and is never
+     * part of a product or hardware handoff build. */
+    NESCO_LOGF("[DIAG] autostart flash:/BUILTIN.NES\r\n");
+    rom_image_set_selected_path("flash:/BUILTIN.NES");
+    NESCO_LOGF("[BOOT] run_infones_session begin\r\n");
+    run_infones_session();
+    for (;;) {
+#ifdef PICO_BUILD
+        sleep_ms(1000);
+#endif
+    }
+#else
     for (;;) {
         NESCO_LOGF("[BOOT] enter rom_menu loop\r\n");
         const char *rom_path = picocalc_rom_menu();
@@ -121,6 +141,7 @@ int main(void) {
         run_infones_session();
         NESCO_LOGF("[BOOT] run_infones_session end\r\n");
     }
+#endif
 
     /* Should not reach here */
     for (;;) { }

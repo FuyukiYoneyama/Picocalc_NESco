@@ -254,7 +254,7 @@ static void menu_draw_battery_header(WORD fg, WORD bg) {
 
 static void menu_draw_title_bar(void) {
     menu_fill_rect(0, 0, 320, 20, MENU_ACCENT);
-    menu_draw_text_span(6, 6, 220, PICOCALC_NESCO_BANNER, MENU_BG, MENU_ACCENT);
+    menu_draw_text_span(6, 6, 188, PICOCALC_NESCO_MENU_LABEL, MENU_BG, MENU_ACCENT);
     menu_draw_battery_header(MENU_BG, MENU_ACCENT);
 }
 
@@ -488,7 +488,6 @@ static void menu_render_help(int help_page, BYTE last_key, BYTE last_state, cons
     char debug_code[4];
     static const char hex[] = "0123456789ABCDEF";
     char page_title[20];
-    char version_line[32];
 
     debug_code[0] = hex[(last_key >> 4) & 0x0F];
     debug_code[1] = hex[last_key & 0x0F];
@@ -535,12 +534,19 @@ static void menu_render_help(int help_page, BYTE last_key, BYTE last_state, cons
         menu_draw_text_span(12, 258, 296, "SHIFT+W : NORMAL / STRETCH", MENU_DIM, MENU_BG);
         menu_draw_text_span(12, 270, 296, "SHIFT+F : 30FPS / FAST (STRETCH)", MENU_DIM, MENU_BG);
     } else if (help_page == HELP_PAGE_VERSION) {
-        snprintf(version_line, sizeof(version_line), "Ver. %s", PICOCALC_NESCO_VERSION);
+        int label_w = menu_measure_text_width(PICOCALC_NESCO_DISPLAY_LABEL,
+                                              CHAR_ADVANCE,
+                                              FONT_W,
+                                              FONT_SCALE);
         menu_draw_text_span_scaled(32, 90, 256, "PicoCalc NESco", MENU_ACCENT, MENU_BG, 2, 10);
-        menu_draw_text_span(84, 154, 160, version_line, MENU_FG, MENU_BG);
-        menu_draw_text_span(20, 194, 280, "This page mirrors the opening screen.", MENU_DIM, MENU_BG);
-        menu_draw_text_span(20, 208, 280, "Opening now shows title + version only.", MENU_DIM, MENU_BG);
-        menu_draw_text_span(20, 222, 280, "ROM launch shows Loading... separately.", MENU_DIM, MENU_BG);
+        menu_draw_text_span((320 - label_w) / 2,
+                            154,
+                            label_w,
+                            PICOCALC_NESCO_DISPLAY_LABEL,
+                            MENU_FG,
+                            MENU_BG);
+        menu_draw_text_span(20, 194, 280, "Opening shows version + build variant.", MENU_DIM, MENU_BG);
+        menu_draw_text_span(20, 208, 280, "ROM launch repeats the same build label.", MENU_DIM, MENU_BG);
     } else if (help_page == HELP_PAGE_LICENSE_1) {
         menu_draw_text_span(12, 72, 296, "COMPONENT LICENSES", MENU_FG, MENU_BG);
         menu_draw_text_span(12, 92, 296, "infones : GNU GPL v2", MENU_DIM, MENU_BG);

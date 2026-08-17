@@ -54,6 +54,74 @@ if(NESCO_MAPPER19_IRQ_DIAGNOSTICS)
     )
 endif()
 
+if(NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC)
+    target_compile_definitions(infones PUBLIC
+        NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC=1
+    )
+endif()
+
+if(NESCO_MAPPER19_N163_AVERAGE_FAST)
+    target_compile_definitions(infones PUBLIC
+        NESCO_MAPPER19_N163_AVERAGE_FAST=1
+    )
+endif()
+
+if(NESCO_MAPPER19_N163_SKIP_SAME_OUTPUT)
+    target_compile_definitions(infones PUBLIC
+        NESCO_MAPPER19_N163_SKIP_SAME_OUTPUT=1
+    )
+endif()
+
+if(NESCO_MAPPER19_N163_INCREMENTAL_SUM)
+    target_compile_definitions(infones PUBLIC
+        NESCO_MAPPER19_N163_INCREMENTAL_SUM=1
+    )
+endif()
+
+if(NESCO_MAPPER19_N163_CACHE_CHANNEL_COUNT)
+    target_compile_definitions(infones PUBLIC
+        NESCO_MAPPER19_N163_CACHE_CHANNEL_COUNT=1
+    )
+endif()
+
+if(NESCO_MAPPER19_N163_RENDER_FAST_DIVISION)
+    target_compile_definitions(infones PUBLIC
+        NESCO_MAPPER19_N163_RENDER_FAST_DIVISION=1
+    )
+endif()
+
+if(NESCO_AUDIO_HSYNC_BATCH)
+    target_compile_definitions(infones PUBLIC
+        NESCO_AUDIO_HSYNC_BATCH=1
+    )
+endif()
+
+if(NESCO_AUDIO_HSYNC_BATCH32)
+    target_compile_definitions(infones PUBLIC
+        NESCO_AUDIO_HSYNC_BATCH=1
+        NESCO_AUDIO_HSYNC_BATCH32=1
+    )
+endif()
+
+if(NESCO_AUDIO_BLOCK_PRODUCER)
+    target_compile_definitions(infones PUBLIC
+        NESCO_AUDIO_HSYNC_BATCH=1
+        NESCO_AUDIO_BLOCK_PRODUCER=1
+    )
+endif()
+
+if(NESCO_AUDIO_RAMFUNC)
+    target_compile_definitions(infones PUBLIC
+        NESCO_AUDIO_RAMFUNC=1
+    )
+endif()
+
+if(NESCO_AUDIO_DMA64)
+    target_compile_definitions(infones PUBLIC
+        NESCO_AUDIO_DMA64=1
+    )
+endif()
+
 if(NESCO_BG_TILE_SHARE_LOG)
     target_compile_definitions(infones PUBLIC
         NESCO_BG_TILE_SHARE_LOG=1

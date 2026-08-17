@@ -12,6 +12,7 @@
 
 #include "K6502.h"
 #include "InfoNES.h"
+#include "InfoNES_Mapper.h"
 #include "InfoNES_System.h"
 #include "display.h"
 #include "InfoNES_StructuredLog.h"
@@ -20,29 +21,12 @@
 #include <stdio.h>
 #include <pico.h>
 
-extern int g_wPassedClocks;
-K6502_CpuCycleCallback g_k6502_cpu_cycle_callback = nullptr;
-int g_k6502_bus_cycles_since_clock = 0;
-static bool g_k6502_poll_irq_each_instruction = false;
-
-static inline void k6502_clock(int clocks)
-{
-  g_wPassedClocks += clocks;
-  if (g_k6502_cpu_cycle_callback != nullptr)
-  {
-    const int internal_clocks = clocks - g_k6502_bus_cycles_since_clock;
-    if (internal_clocks > 0)
-      g_k6502_cpu_cycle_callback(internal_clocks);
-  }
-  g_k6502_bus_cycles_since_clock = 0;
-}
-
 /*-------------------------------------------------------------------*/
 /*  Operation Macros                                                 */
 /*-------------------------------------------------------------------*/
 
 // Clock Op.
-#define CLK(a) k6502_clock((a));
+#define CLK(a) g_wPassedClocks += (a);
 
 // Addressing Op.
 // Address
@@ -350,6 +334,31 @@ int getCurrentClocks32()
          (g_wStepActive ? (g_wPassedClocks - g_wStepBasePassedClocks) : 0);
 }
 
+void __not_in_flash_func(K6502_ApplyOamDmaStall)()
+{
+  const int dmaCpuClock = getCurrentClocks32();
+  /*
+   * NES OAM DMA halts the CPU for 513 cycles and needs one additional
+   * alignment cycle when it begins on an odd CPU cycle.
+   */
+  const int dmaStall = 513 + (dmaCpuClock & 1);
+  g_wPassedClocks += dmaStall;
+
+#if defined(NESCO_MAPPER19_OAM_DMA_DIAGNOSTICS)
+  static unsigned mapper19OamDmaDiagnosticCount;
+  if (MapperNo == 19 && mapper19OamDmaDiagnosticCount < 8u)
+  {
+    printf("[M19_OAM_DMA] n=%u sl=%u cpu=%d stall=%d\n",
+           mapper19OamDmaDiagnosticCount,
+           (unsigned)PPU_Scanline,
+           dmaCpuClock,
+           dmaStall);
+    fflush(stdout);
+    ++mapper19OamDmaDiagnosticCount;
+  }
+#endif
+}
+
 #if defined(NESCO_MAPPER4_TIMING_TRACE)
 static unsigned g_mapper4_irq_service_trace_count;
 
@@ -572,9 +581,6 @@ void K6502_Init()
   // The establishment of the IRQ pin
   NMI_Wiring = NMI_State = 1;
   IRQ_Wiring = IRQ_State = 1;
-  g_k6502_cpu_cycle_callback = nullptr;
-  g_k6502_bus_cycles_since_clock = 0;
-  g_k6502_poll_irq_each_instruction = false;
 
   for (int code = 0; code < 256; ++code)
   {
@@ -716,7 +722,6 @@ void K6502_Reset()
   // Reset Passed Clocks
   g_wPassedClocks = 0;
   g_wCurrentClocks = 0;
-  g_k6502_bus_cycles_since_clock = 0;
 }
 
 /*===================================================================*/
@@ -733,13 +738,6 @@ void K6502_Set_Int_Wiring(BYTE byNMI_Wiring, BYTE byIRQ_Wiring)
 
   NMI_Wiring = byNMI_Wiring;
   IRQ_Wiring = byIRQ_Wiring;
-}
-
-void K6502_Set_CpuCycleCallback(K6502_CpuCycleCallback callback)
-{
-  g_k6502_cpu_cycle_callback = callback;
-  g_k6502_bus_cycles_since_clock = 0;
-  g_k6502_poll_irq_each_instruction = callback != nullptr;
 }
 
 static void __not_in_flash_func(procNMI)()
@@ -782,6 +780,61 @@ static void __not_in_flash_func(procNMI)()
   }
 }
 
+template <bool Mapper19>
+static inline void __not_in_flash_func(mapper19_clock_cpu_cycles_fast)(int clocks)
+{
+  if constexpr (Mapper19)
+  {
+    if (clocks <= 0)
+    {
+      return;
+    }
+
+    /* Keep the IRQ and N163 accounting bit-exact with Map19_ClockCpuCycles,
+     * but inline it into the already RAM-resident CPU boundary loop.  The
+     * old external call crossed a flash veneer for every instruction. */
+    if (Map19_IRQ_Enable && !Map19_IRQ_Terminal)
+    {
+      const DWORD next = Map19_IRQ_Cnt + (DWORD)clocks;
+      if (next >= 0x7fff)
+      {
+        Map19_IRQ_Cnt = 0x7fff;
+        Map19_IRQ_Terminal = 1;
+        Map19_IRQ_Pending = 1;
+      }
+      else
+      {
+        Map19_IRQ_Cnt = next;
+      }
+    }
+
+    Map19_N163_PendingAudioCycles += (uint32_t)clocks;
+  }
+}
+
+template <bool Mapper19>
+static inline void __not_in_flash_func(mapper19_instruction_boundary)(int instructionStartClocks)
+{
+  if constexpr (Mapper19)
+  {
+    mapper19_clock_cpu_cycles_fast<Mapper19>(g_wPassedClocks - instructionStartClocks);
+    /* IRQ writes are rare.  Avoid a flash-resident call/return on every
+     * instruction when there is no deferred mapper write to commit. */
+    if (Map19_DeferredIrqWritePending)
+    {
+      Map19_CommitCpuBoundary();
+    }
+    if (Map19_IRQ_Pending)
+    {
+      const int interruptStartClocks = g_wPassedClocks;
+      IRQ_REQ;
+      procNMI();
+      mapper19_clock_cpu_cycles_fast<Mapper19>(g_wPassedClocks - interruptStartClocks);
+    }
+  }
+}
+
+template <bool Mapper19>
 static void __not_in_flash_func(step)(int wClocks)
 {
   /*
@@ -806,6 +859,7 @@ static void __not_in_flash_func(step)(int wClocks)
   // It has a loop until a constant clock passes
   while (g_wPassedClocks < wClocks)
   {
+    const int instructionStartClocks = g_wPassedClocks;
     // if (PC == 0xc449 || PC == 0xc955)
     // {
     //   printf("%04x:%02x\n", PC, A);
@@ -955,6 +1009,7 @@ static void __not_in_flash_func(step)(int wClocks)
 
     if (g_unofficialOpcodeTable[byCode] && K6502_RunUnofficial(byCode))
     {
+      mapper19_instruction_boundary<Mapper19>(instructionStartClocks);
       continue;
     }
 
@@ -1774,10 +1829,7 @@ static void __not_in_flash_func(step)(int wClocks)
 
     } /* end of switch ( byCode ) */
 
-    /* Mapper 19 needs an instruction-boundary IRQ poll after a cycle hook
-       can assert the line in the middle of an instruction. */
-    if (g_k6502_poll_irq_each_instruction)
-      procNMI();
+    mapper19_instruction_boundary<Mapper19>(instructionStartClocks);
 
   } /* end of while ... */
 
@@ -1793,21 +1845,39 @@ static void __not_in_flash_func(step)(int wClocks)
 /*          Only the specified number of the clocks execute Op.      */
 /*                                                                   */
 /*===================================================================*/
-void __not_in_flash_func(K6502_Step)(int wClocks)
+template <bool Mapper19>
+static void __not_in_flash_func(step_with_interrupts)(int wClocks)
 {
   if (NMI_State != NMI_Wiring)
   {
     // NMI前に少し実行したい
-    step(7);
+    step<Mapper19>(7);
     wClocks -= 7;
   }
+  const int serviceStartClocks = g_wPassedClocks;
   procNMI();
-  step(wClocks);
+  if constexpr (Mapper19)
+  {
+    mapper19_clock_cpu_cycles_fast<true>(g_wPassedClocks - serviceStartClocks);
+  }
+  step<Mapper19>(wClocks);
+}
+
+void __not_in_flash_func(K6502_Step)(int wClocks)
+{
+  if (MapperNo == 19)
+  {
+    step_with_interrupts<true>(wClocks);
+  }
+  else
+  {
+    step_with_interrupts<false>(wClocks);
+  }
 }
 
 void __not_in_flash_func(K6502_Step_NoInterrupt)(int wClocks)
 {
-  step(wClocks);
+  step<false>(wClocks);
 }
 
 // Addressing Op.

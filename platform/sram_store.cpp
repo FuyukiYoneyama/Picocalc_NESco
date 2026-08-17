@@ -15,6 +15,7 @@ namespace {
 char s_current_rom_path[160] = "";
 char s_current_save_path[192] = "";
 char s_current_map30_path[192] = "";
+char s_current_map19_path[192] = "";
 bool s_session_active = false;
 
 struct Map30PersistHeader {
@@ -109,8 +110,16 @@ void sram_build_map30_path(char *dst, size_t dst_size, const char *rom_path)
     sram_build_path_with_ext(dst, dst_size, rom_path, ".m30");
 }
 
+void sram_build_map19_path(char *dst, size_t dst_size, const char *rom_path)
+{
+    sram_build_path_with_ext(dst, dst_size, rom_path, ".n19");
+}
+
 bool sram_current_rom_uses_save(void)
 {
+    if (MapperNo == 19) {
+        return Map19_ExternalWramBatteryEnabled();
+    }
     return ROM_SRAM;
 }
 
@@ -135,7 +144,8 @@ void sram_ensure_save_dir(void)
 {
     const bool save_path_uses_fallback = std::strncmp(s_current_save_path, "0:/saves/", 9) == 0;
     const bool map30_path_uses_fallback = std::strncmp(s_current_map30_path, "0:/saves/", 9) == 0;
-    if (!save_path_uses_fallback && !map30_path_uses_fallback) {
+    const bool map19_path_uses_fallback = std::strncmp(s_current_map19_path, "0:/saves/", 9) == 0;
+    if (!save_path_uses_fallback && !map30_path_uses_fallback && !map19_path_uses_fallback) {
         return;
     }
 
@@ -268,6 +278,102 @@ void sram_store_flush_map30(void)
                    (unsigned)(header.used[0] + header.used[1]));
 }
 
+void sram_store_restore_map19(void)
+{
+    FIL file;
+    UINT bytes_read = 0;
+    FRESULT fr;
+    BYTE data[0x80];
+
+    if (MapperNo != 19 || !Map19_N163BatteryEnabled()) {
+        return;
+    }
+
+    fr = f_open(&file, s_current_map19_path, FA_READ);
+    if (fr != FR_OK) {
+        NESCO_LOG_RUNTIME("[M19] restore no save path=%s fr=%d\r\n",
+                       s_current_map19_path,
+                       (int)fr);
+        return;
+    }
+
+    if (f_size(&file) != sizeof(data)) {
+        const FSIZE_t file_size = f_size(&file);
+        f_close(&file);
+        (void)file_size;
+        NESCO_LOG_RUNTIME("[M19] restore failed path=%s size=%lu\r\n",
+                       s_current_map19_path,
+                       (unsigned long)file_size);
+        return;
+    }
+
+    fr = f_read(&file, data, sizeof(data), &bytes_read);
+    f_close(&file);
+    if (fr != FR_OK || bytes_read != sizeof(data)) {
+        NESCO_LOG_RUNTIME("[M19] restore failed path=%s fr=%d bytes=%u\r\n",
+                       s_current_map19_path,
+                       (int)fr,
+                       (unsigned)bytes_read);
+        return;
+    }
+
+    Map19_N163_RestoreBatteryRam(data, bytes_read);
+    NESCO_LOG_RUNTIME("[M19] restore path=%s bytes=%u\r\n",
+                   s_current_map19_path,
+                   (unsigned)bytes_read);
+}
+
+void sram_store_flush_map19(void)
+{
+    FIL file;
+    UINT bytes_written = 0;
+    FRESULT fr;
+    const BYTE *data = nullptr;
+    unsigned size = 0;
+
+    if (MapperNo != 19 || !Map19_N163BatteryEnabled()) {
+        return;
+    }
+
+    if (!Map19_N163_IsBatteryRamDirty()) {
+        NESCO_LOG_RUNTIME("[M19] flush skip clean path=%s\r\n", s_current_map19_path);
+        return;
+    }
+
+    Map19_N163_GetBatteryRam(&data, &size);
+    if (!data || size != 0x80u) {
+        NESCO_LOG_RUNTIME("[M19] flush failed path=%s invalid-size=%u\r\n",
+                       s_current_map19_path,
+                       size);
+        return;
+    }
+
+    sram_ensure_save_dir();
+
+    fr = f_open(&file, s_current_map19_path, FA_CREATE_ALWAYS | FA_WRITE);
+    if (fr != FR_OK) {
+        NESCO_LOG_RUNTIME("[M19] flush open failed path=%s fr=%d\r\n",
+                       s_current_map19_path,
+                       (int)fr);
+        return;
+    }
+
+    fr = f_write(&file, data, size, &bytes_written);
+    f_close(&file);
+    if (fr != FR_OK || bytes_written != size) {
+        NESCO_LOG_RUNTIME("[M19] flush failed path=%s fr=%d bytes=%u\r\n",
+                       s_current_map19_path,
+                       (int)fr,
+                       (unsigned)bytes_written);
+        return;
+    }
+
+    Map19_N163_ClearBatteryRamDirty();
+    NESCO_LOG_RUNTIME("[M19] flush path=%s bytes=%u\r\n",
+                   s_current_map19_path,
+                   (unsigned)bytes_written);
+}
+
 } // namespace
 
 extern "C" void sram_store_begin_rom(const char *rom_path)
@@ -277,20 +383,28 @@ extern "C" void sram_store_begin_rom(const char *rom_path)
     sram_copy_string(s_current_rom_path, sizeof(s_current_rom_path), rom_path);
     sram_build_save_path(s_current_save_path, sizeof(s_current_save_path), save_basis_path);
     sram_build_map30_path(s_current_map30_path, sizeof(s_current_map30_path), save_basis_path);
+    sram_build_map19_path(s_current_map19_path, sizeof(s_current_map19_path), save_basis_path);
     s_session_active = s_current_save_path[0] != '\0';
 }
 
 extern "C" bool sram_store_has_save_for_rom(const char *rom_path)
 {
     char save_path[192];
+    char map19_path[192];
     FILINFO fno;
     const char *save_basis_path = sram_resolve_save_basis_path(rom_path);
 
     sram_build_save_path(save_path, sizeof(save_path), save_basis_path);
-    if (save_path[0] == '\0') {
+    sram_build_map19_path(map19_path, sizeof(map19_path), save_basis_path);
+    if (save_path[0] == '\0' && map19_path[0] == '\0') {
         return false;
     }
-    return f_stat(save_path, &fno) == FR_OK;
+
+    const bool has_sram_save = save_path[0] != '\0' &&
+                               f_stat(save_path, &fno) == FR_OK;
+    const bool has_map19_save = map19_path[0] != '\0' &&
+                                f_stat(map19_path, &fno) == FR_OK;
+    return has_sram_save || has_map19_save;
 }
 
 extern "C" void sram_store_restore_for_current_rom(void)
@@ -303,6 +417,7 @@ extern "C" void sram_store_restore_for_current_rom(void)
         return;
     }
 
+    sram_store_restore_map19();
     sram_zero_buffer();
 
     if (!sram_current_rom_uses_save()) {
@@ -347,6 +462,8 @@ extern "C" void sram_store_flush_current_rom(void)
     if (!s_session_active) {
         return;
     }
+
+    sram_store_flush_map19();
 
     if (!sram_current_rom_uses_save()) {
         NESCO_LOG_RUNTIME("[SRAM] flush skip no-sram path=%s\r\n", s_current_rom_path);
@@ -393,5 +510,6 @@ extern "C" void sram_store_clear_session(void)
     s_current_rom_path[0] = '\0';
     s_current_save_path[0] = '\0';
     s_current_map30_path[0] = '\0';
+    s_current_map19_path[0] = '\0';
     s_session_active = false;
 }
