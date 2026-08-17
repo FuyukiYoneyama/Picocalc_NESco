@@ -4,12 +4,52 @@
 /*                                                                   */
 /*===================================================================*/
 
+namespace
+{
+/*
+ * GxROM exposes one 32 KiB PRG window and one 8 KiB CHR window.  The
+ * original boards connect PRG A16:A15 to CPU D5:D4 and CHR A16:A15 to
+ * CPU D1:D0.  The remaining data bits are not connected to the latch.
+ *
+ * Keep the capacity reduction explicit instead of deriving the page from
+ * the complete nibble.  This makes the unused-bit behavior unambiguous for
+ * both the 64 KiB MHROM fixture and the 128 KiB GNROM titles.
+ */
+void Map66_SetBanks(BYTE byData)
+{
+  const unsigned prg32Banks = (unsigned)NesHeader.byRomSize / 2u;
+  const unsigned chr8Banks = (unsigned)NesHeader.byVRomSize;
+
+  if (prg32Banks > 0u)
+  {
+    const unsigned prgBank = ((unsigned)(byData >> 4) & 0x03u) % prg32Banks;
+    const unsigned prgPage = prgBank * 4u;
+
+    ROMBANK0 = ROMPAGE(prgPage + 0u);
+    ROMBANK1 = ROMPAGE(prgPage + 1u);
+    ROMBANK2 = ROMPAGE(prgPage + 2u);
+    ROMBANK3 = ROMPAGE(prgPage + 3u);
+  }
+
+  /* Mapper 66 is a CHR-ROM board.  CHR-RAM cartridges keep their fixed
+   * CHR-RAM mapping and must not reach a zero-modulus bank calculation. */
+  if (chr8Banks > 0u)
+  {
+    const unsigned chrBank = ((unsigned)byData & 0x03u) % chr8Banks;
+    const unsigned chrPage = chrBank * 8u;
+
+    for (int nPage = 0; nPage < 8; ++nPage)
+      PPUBANK[nPage] = VROMPAGE(chrPage + (unsigned)nPage);
+    InfoNES_SetupChr();
+  }
+}
+}
+
 /*-------------------------------------------------------------------*/
 /*  Initialize Mapper 66                                             */
 /*-------------------------------------------------------------------*/
 void Map66_Init()
 {
-  int nPage;
 
   /* Initialize Mapper */
   MapperInit = Map66_Init;
@@ -17,8 +57,8 @@ void Map66_Init()
   /* Write to Mapper */
   MapperWrite = Map66_Write;
 
-  /* Write to SRAM */
-  MapperSram = Map66_Write;
+  /* Mapper 66 has no PRG-RAM register at $6000-$7FFF. */
+  MapperSram = Map0_Sram;
 
   /* Write to APU */
   MapperApu = Map0_Apu;
@@ -42,18 +82,7 @@ void Map66_Init()
   SRAMBANK = SRAM;
 
   /* Set ROM Banks */
-  ROMBANK0 = ROMPAGE( 0 );
-  ROMBANK1 = ROMPAGE( 1 );
-  ROMBANK2 = ROMPAGE( 2 );
-  ROMBANK3 = ROMPAGE( 3 );
-
-  /* Set PPU Banks */
-  if ( NesHeader.byVRomSize > 0 )
-  {
-    for ( nPage = 0; nPage < 8; ++nPage )
-      PPUBANK[ nPage ] = VROMPAGE( nPage );
-    InfoNES_SetupChr();
-  }
+  Map66_SetBanks( 0 );
 
   /* Set up wiring of the interrupt pin */
   K6502_Set_Int_Wiring( 1, 0 ); 
@@ -64,33 +93,6 @@ void Map66_Init()
 /*-------------------------------------------------------------------*/
 void Map66_Write( WORD wAddr, BYTE byData )
 {
-  BYTE byRom;
-  BYTE byVRom;
-
-  byRom  = ( byData >> 4 ) & 0x0F;
-  byVRom = byData & 0x0F;
-
-  /* Set ROM Banks */
-  byRom <<= 1;
-  byRom %= NesHeader.byRomSize;
-  byRom <<= 1;
-
-  ROMBANK0 = ROMPAGE( byRom );
-  ROMBANK1 = ROMPAGE( byRom + 1 );
-  ROMBANK2 = ROMPAGE( byRom + 2 );
-  ROMBANK3 = ROMPAGE( byRom + 3 );
-
-  /* Set PPU Banks */
-  byVRom <<= 3;
-  byVRom %= ( NesHeader.byVRomSize << 3 );
-
-  PPUBANK[ 0 ] = VROMPAGE( byVRom );
-  PPUBANK[ 1 ] = VROMPAGE( byVRom + 1 );
-  PPUBANK[ 2 ] = VROMPAGE( byVRom + 2 );
-  PPUBANK[ 3 ] = VROMPAGE( byVRom + 3 );
-  PPUBANK[ 4 ] = VROMPAGE( byVRom + 4 );
-  PPUBANK[ 5 ] = VROMPAGE( byVRom + 5 );
-  PPUBANK[ 6 ] = VROMPAGE( byVRom + 6 );
-  PPUBANK[ 7 ] = VROMPAGE( byVRom + 7 );
-  InfoNES_SetupChr();
+  (void)wAddr;
+  Map66_SetBanks( byData );
 }
