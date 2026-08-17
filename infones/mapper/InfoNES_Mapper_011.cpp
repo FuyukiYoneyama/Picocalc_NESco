@@ -4,6 +4,25 @@
 /*                                                                   */
 /*===================================================================*/
 
+#include "runtime_log.h"
+
+namespace
+{
+#if defined(NESCO_RUNTIME_LOGS)
+unsigned Map11_WriteLogCount = 0;
+#endif
+/*
+ * Standard Color Dreams boards have an AND-type bus conflict: the value
+ * reaching the 74LS377 is the CPU write value AND the PRG byte visible at
+ * the write address.  MapperWrite receives the real CPU address, so use
+ * the currently mapped ROM bank rather than a fixed ROM offset.
+ */
+inline BYTE Map11_ApplyBusConflict( WORD wAddr, BYTE byData )
+{
+  return (BYTE)(byData & ROMBANK[(wAddr - 0x8000) >> 13][wAddr & 0x1fff]);
+}
+}
+
 /*-------------------------------------------------------------------*/
 /*  Initialize Mapper 11                                             */
 /*-------------------------------------------------------------------*/
@@ -55,11 +74,19 @@ void Map11_Init()
     InfoNES_SetupChr();
   }
 
-  /* Name Table Mirroring */
-  InfoNES_Mirroring( 1 );
+  /* Name Table Mirroring: fixed by the board/header, not by the latch. */
+  InfoNES_Mirroring( ROM_Mirroring );
 
   /* Set up wiring of the interrupt pin */
   K6502_Set_Int_Wiring( 1, 1 ); 
+
+#if defined(NESCO_RUNTIME_LOGS)
+  Map11_WriteLogCount = 0;
+  NESCO_LOG_RUNTIME("[M11] init prg16=%u chr8=%u mirroring=%u bus=AND\n",
+                    (unsigned)NesHeader.byRomSize,
+                    (unsigned)NesHeader.byVRomSize,
+                    (unsigned)ROM_Mirroring);
+#endif
 }
 
 /*-------------------------------------------------------------------*/
@@ -67,23 +94,56 @@ void Map11_Init()
 /*-------------------------------------------------------------------*/
 void Map11_Write( WORD wAddr, BYTE byData )
 {
-  BYTE byPrgBank = ( byData & 0x01 ) << 2;
-  BYTE byChrBank = ( ( byData & 0x70 ) >> 4 ) << 3;
+  const DWORD dwPrgPages = (DWORD)NesHeader.byRomSize << 1;
+  const DWORD dwChrPages = (DWORD)NesHeader.byVRomSize << 3;
+  DWORD dwPrgBank;
+  DWORD dwChrBank;
+#if defined(NESCO_RUNTIME_LOGS)
+  const BYTE rawData = byData;
+  const BYTE visibleData = ROMBANK[(wAddr - 0x8000) >> 13][wAddr & 0x1fff];
+#endif
+
+  /* Color Dreams is a standard bus-conflict board. */
+  byData = Map11_ApplyBusConflict( wAddr, byData );
+
+#if defined(NESCO_RUNTIME_LOGS)
+  if (Map11_WriteLogCount < 64u)
+  {
+    NESCO_LOG_RUNTIME("[M11] write n=%u addr=%04X raw=%02X rom=%02X effective=%02X\n",
+                      Map11_WriteLogCount,
+                      (unsigned)wAddr,
+                      (unsigned)rawData,
+                      (unsigned)visibleData,
+                      (unsigned)byData);
+    ++Map11_WriteLogCount;
+  }
+#endif
+
+  /* D0-D1 select 32 KiB PRG; D2-D3 are CIC lockout bits. */
+  dwPrgBank = (DWORD)(byData & 0x03) << 2;
+  /* D4-D7 select 8 KiB CHR. */
+  dwChrBank = (DWORD)((byData >> 4) & 0x0f) << 3;
 
   /* Set ROM Banks */
-  ROMBANK0 = ROMPAGE( ( byPrgBank + 0 ) % ( NesHeader.byRomSize << 1 ) );
-  ROMBANK1 = ROMPAGE( ( byPrgBank + 1 ) % ( NesHeader.byRomSize << 1 ) );
-  ROMBANK2 = ROMPAGE( ( byPrgBank + 2 ) % ( NesHeader.byRomSize << 1 ) );
-  ROMBANK3 = ROMPAGE( ( byPrgBank + 3 ) % ( NesHeader.byRomSize << 1 ) );
+  if ( dwPrgPages > 0 )
+  {
+    ROMBANK0 = ROMPAGE( ( dwPrgBank + 0 ) % dwPrgPages );
+    ROMBANK1 = ROMPAGE( ( dwPrgBank + 1 ) % dwPrgPages );
+    ROMBANK2 = ROMPAGE( ( dwPrgBank + 2 ) % dwPrgPages );
+    ROMBANK3 = ROMPAGE( ( dwPrgBank + 3 ) % dwPrgPages );
+  }
 
   /* Set PPU Banks */
-  PPUBANK[ 0 ] = VROMPAGE( ( byChrBank + 0 ) % ( NesHeader.byVRomSize << 3 ) );
-  PPUBANK[ 1 ] = VROMPAGE( ( byChrBank + 1 ) % ( NesHeader.byVRomSize << 3 ) );
-  PPUBANK[ 2 ] = VROMPAGE( ( byChrBank + 2 ) % ( NesHeader.byVRomSize << 3 ) );
-  PPUBANK[ 3 ] = VROMPAGE( ( byChrBank + 3 ) % ( NesHeader.byVRomSize << 3 ) );
-  PPUBANK[ 4 ] = VROMPAGE( ( byChrBank + 4 ) % ( NesHeader.byVRomSize << 3 ) );
-  PPUBANK[ 5 ] = VROMPAGE( ( byChrBank + 5 ) % ( NesHeader.byVRomSize << 3 ) );
-  PPUBANK[ 6 ] = VROMPAGE( ( byChrBank + 6 ) % ( NesHeader.byVRomSize << 3 ) );
-  PPUBANK[ 7 ] = VROMPAGE( ( byChrBank + 7 ) % ( NesHeader.byVRomSize << 3 ) );
-  InfoNES_SetupChr();
+  if ( dwChrPages > 0 )
+  {
+    PPUBANK[ 0 ] = VROMPAGE( ( dwChrBank + 0 ) % dwChrPages );
+    PPUBANK[ 1 ] = VROMPAGE( ( dwChrBank + 1 ) % dwChrPages );
+    PPUBANK[ 2 ] = VROMPAGE( ( dwChrBank + 2 ) % dwChrPages );
+    PPUBANK[ 3 ] = VROMPAGE( ( dwChrBank + 3 ) % dwChrPages );
+    PPUBANK[ 4 ] = VROMPAGE( ( dwChrBank + 4 ) % dwChrPages );
+    PPUBANK[ 5 ] = VROMPAGE( ( dwChrBank + 5 ) % dwChrPages );
+    PPUBANK[ 6 ] = VROMPAGE( ( dwChrBank + 6 ) % dwChrPages );
+    PPUBANK[ 7 ] = VROMPAGE( ( dwChrBank + 7 ) % dwChrPages );
+    InfoNES_SetupChr();
+  }
 }
