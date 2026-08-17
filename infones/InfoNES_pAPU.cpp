@@ -1157,7 +1157,17 @@ void InfoNES_pAPUVsync()
 uint32_t leftSamples16 = 0;
 
 #if defined(PICO_BUILD) && defined(NESCO_AUDIO_HSYNC_BATCH)
-#if defined(NESCO_AUDIO_HSYNC_BATCH32)
+#if defined(NESCO_AUDIO_BLOCK_PRODUCER)
+/*
+ * The normal HSync callback still advances the APU and N163 at the exact
+ * emulation cadence, but it no longer hands tiny fragments to the platform
+ * mixer.  One block is exactly two 32-sample PWM DMA halves.  This is the
+ * bounded producer architecture used after the 16/32-sample candidates
+ * failed: samples are copied in order and handed to the mixer only when a
+ * complete deadline-sized block is ready.
+ */
+static constexpr int AUDIO_HSYNC_BATCH_SAMPLES = 64;
+#elif defined(NESCO_AUDIO_HSYNC_BATCH32)
 static constexpr int AUDIO_HSYNC_BATCH_SAMPLES = 32;
 #else
 static constexpr int AUDIO_HSYNC_BATCH_SAMPLES = 16;
@@ -1190,8 +1200,10 @@ static void __not_in_flash_func(audio_hsync_batch_append)(int n, int n163Samples
       audio_hsync_batch[2][audio_hsync_batch_count] = wave_buffers[2][srcOffset];
       audio_hsync_batch[3][audio_hsync_batch_count] = wave_buffers[3][srcOffset];
       audio_hsync_batch[4][audio_hsync_batch_count] = wave_buffers[4][srcOffset];
+#if !defined(NESCO_AUDIO_BLOCK_PRODUCER)
       audio_hsync_n163_batch[audio_hsync_batch_count] =
           (srcOffset < n163Samples) ? map19_audio_buffer[srcOffset] : 0;
+#endif
     }
     else
     {
@@ -1204,8 +1216,10 @@ static void __not_in_flash_func(audio_hsync_batch_append)(int n, int n163Samples
         audio_hsync_batch[2][batchIndex] = wave_buffers[2][sourceIndex];
         audio_hsync_batch[3][batchIndex] = wave_buffers[3][sourceIndex];
         audio_hsync_batch[4][batchIndex] = wave_buffers[4][sourceIndex];
+#if !defined(NESCO_AUDIO_BLOCK_PRODUCER)
         audio_hsync_n163_batch[batchIndex] =
             (sourceIndex < n163Samples) ? map19_audio_buffer[sourceIndex] : 0;
+#endif
       }
     }
 
@@ -1214,6 +1228,10 @@ static void __not_in_flash_func(audio_hsync_batch_append)(int n, int n163Samples
 
     if (audio_hsync_batch_count == AUDIO_HSYNC_BATCH_SAMPLES)
     {
+#if defined(NESCO_AUDIO_BLOCK_PRODUCER)
+      Map19_RenderAudioBlock(audio_hsync_n163_batch,
+                             AUDIO_HSYNC_BATCH_SAMPLES);
+#endif
       InfoNES_SoundOutputN163(AUDIO_HSYNC_BATCH_SAMPLES,
                               audio_hsync_batch[0], audio_hsync_batch[1],
                               audio_hsync_batch[2], audio_hsync_batch[3],
@@ -1231,7 +1249,28 @@ void __not_in_flash_func(InfoNES_pAPUHsync)(bool enabled)
   auto n = n16 >> 16;
   leftSamples16 = n16 - (n << 16);
 
+#ifdef PICO_BUILD
+  /*
+   * The deadline producer owns complete 64-sample blocks.  Do not make the
+   * HSync callback perform a ring-admission query for every one-sample slice:
+   * the block mixer already has the bounded backpressure wait and is the only
+   * point that can commit a block to the ring.  This keeps the emulation-side
+   * APU/N163 timeline continuous while a consumer-side DMA half is draining.
+   * Other mappers retain the legacy capacity clamp because they do not use the
+   * bounded block handoff.
+   */
+#if defined(NESCO_AUDIO_BLOCK_PRODUCER)
+  int bufferLeft = (MapperNo == 19) ? 735 :
+                   (AUDIO_RING_SIZE - 1) - audio_ring_available();
+#else
+  /* InfoNES_pAPUHsync() is RAM-resident.  Do not bounce through the
+   * flash-resident compatibility wrapper on every scanline: the ring query
+   * itself is already a RAM hot-path function on Pico builds. */
+  int bufferLeft = (AUDIO_RING_SIZE - 1) - audio_ring_available();
+#endif
+#else
   int bufferLeft = InfoNES_GetSoundBufferSize();
+#endif
   n = std::min<int>(bufferLeft, n);
 
   if (enabled)
@@ -1255,18 +1294,41 @@ void __not_in_flash_func(InfoNES_pAPUHsync)(bool enabled)
 #ifdef PICO_BUILD
   if (MapperNo == 19)
   {
+    const bool n163Enabled = enabled && Map19_N163AudioEnabled();
+#if defined(NESCO_AUDIO_BLOCK_PRODUCER)
+    Map19_QueueAudioSlice(n, n163Enabled);
+#ifdef NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC
+    Map19_RenderQueuedAudioSlice(map19_audio_buffer, n);
+    audio_n163_diag_observe(map19_audio_buffer, n);
+#endif
+#else
     const int n163Samples = (n > 735) ? 735 : n;
-    Map19_RenderAudioSlice(map19_audio_buffer, n163Samples, enabled);
+    Map19_RenderAudioSlice(map19_audio_buffer, n163Samples, n163Enabled);
 #ifdef NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC
     audio_n163_diag_observe(map19_audio_buffer, n163Samples);
 #endif
+#endif
 #ifdef NESCO_AUDIO_HSYNC_BATCH
-    audio_hsync_batch_append(n, n163Samples);
+#if defined(NESCO_AUDIO_BLOCK_PRODUCER)
+    audio_hsync_batch_append(n, n);
 #else
+    const int n163Samples = (n > 735) ? 735 : n;
+    audio_hsync_batch_append(n, n163Samples);
+#endif
+#else
+#if defined(NESCO_AUDIO_BLOCK_PRODUCER)
+    Map19_RenderAudioBlock(map19_audio_buffer, n);
+    InfoNES_SoundOutputN163(n,
+                            wave_buffers[0], wave_buffers[1], wave_buffers[2],
+                            wave_buffers[3], wave_buffers[4],
+                            map19_audio_buffer, n);
+#else
+    const int n163Samples = (n > 735) ? 735 : n;
     InfoNES_SoundOutputN163(n,
                             wave_buffers[0], wave_buffers[1], wave_buffers[2],
                             wave_buffers[3], wave_buffers[4],
                             map19_audio_buffer, n163Samples);
+#endif
 #endif
   }
   else

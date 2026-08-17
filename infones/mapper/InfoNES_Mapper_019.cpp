@@ -4,7 +4,66 @@
 /*                                                                   */
 /*===================================================================*/
 
+#include "../InfoNES.h"
+#include "../InfoNES_Mapper.h"
+#include "../K6502.h"
+#include "runtime_log.h"
+
 #include <cstring>
+
+namespace
+{
+
+struct Map19_BoardProfile
+{
+  const char *name;
+  uint32_t payloadCrc32;
+  bool externalWram;
+  bool externalWramBattery;
+  bool n163Battery;
+  bool n163Audio;
+};
+
+/*
+ * Mapper 19 is not one electrically identical board in the database.  Keep
+ * the two known iNES inputs explicit, while retaining the old 8 KiB WRAM
+ * default for unidentified legacy images.  This prevents a target game's
+ * battery/gain assumptions from silently becoming a Mapper 19-wide rule.
+ */
+static Map19_BoardProfile Map19_Profile = {
+    "iNES-default", 0, true, false, false, true};
+
+static uint32_t Map19_Crc32(const BYTE *data, size_t size, uint32_t crc)
+{
+  for (size_t i = 0; i < size; ++i)
+  {
+    crc ^= data[i];
+    for (unsigned bit = 0; bit < 8; ++bit)
+    {
+      crc = (crc >> 1) ^ (0xedb88320u & (uint32_t)-(int)(crc & 1u));
+    }
+  }
+  return crc;
+}
+
+static uint32_t Map19_CalculatePayloadCrc32()
+{
+  const size_t prgBytes = (size_t)NesHeader.byRomSize * 0x4000u;
+  const size_t chrBytes = (size_t)NesHeader.byVRomSize * 0x2000u;
+  uint32_t crc = 0xffffffffu;
+
+  if (ROM && prgBytes != 0)
+  {
+    crc = Map19_Crc32(ROM, prgBytes, crc);
+  }
+  if (VROM && chrBytes != 0)
+  {
+    crc = Map19_Crc32(VROM, chrBytes, crc);
+  }
+  return crc ^ 0xffffffffu;
+}
+
+} // namespace
 
 BYTE Map19_Regs[2];
 
@@ -21,9 +80,21 @@ static bool Map19_N163_AutoIncrement;
 static BYTE Map19_Wram_Protect;
 static BYTE Map19_DeferredIrqWriteGroup;
 static BYTE Map19_DeferredIrqWriteData;
-static BYTE Map19_DeferredIrqWritePending;
+BYTE Map19_DeferredIrqWritePending;
 
+#if defined(NESCO_AUDIO_BLOCK_PRODUCER)
+/*
+ * The block producer keeps the same per-HSync timing, but postpones the
+ * sample conversion until a complete 64-sample mixer block is ready.  A
+ * block spans roughly 46 HSyncs; retain the bounded output transitions and
+ * the HSync segment boundaries needed to reproduce the old per-slice
+ * rounding exactly.
+ */
+#define MAP19_N163_AUDIO_EVENT_MAX 128
+#define MAP19_N163_AUDIO_SEGMENT_MAX 64
+#else
 #define MAP19_N163_AUDIO_EVENT_MAX 16
+#endif
 
 struct Map19_N163_AudioEvent
 {
@@ -33,19 +104,40 @@ struct Map19_N163_AudioEvent
 
 static int16_t Map19_N163_ChannelOutput[8];
 static Map19_N163_AudioEvent Map19_N163_AudioEvents[MAP19_N163_AUDIO_EVENT_MAX];
-static BYTE Map19_N163_AudioEventCount;
+static uint16_t Map19_N163_AudioEventCount;
 static BYTE Map19_N163_AudioEventOverflow;
 static BYTE Map19_N163_AudioUpdateCounter;
 static BYTE Map19_N163_AudioCurrentChannel;
 #if defined(NESCO_MAPPER19_N163_CACHE_CHANNEL_COUNT)
 static BYTE Map19_N163_CachedChannelCount;
 #endif
-static uint32_t Map19_N163_PendingAudioCycles;
+uint32_t Map19_N163_PendingAudioCycles;
 static uint16_t Map19_N163_AudioSliceCycles;
 static int16_t Map19_N163_AudioOutput;
 static int16_t Map19_N163_AudioSum;
 static int16_t Map19_N163_AudioSliceStartOutput;
 static BYTE Map19_N163_SoundDisabled;
+
+#if defined(NESCO_AUDIO_BLOCK_PRODUCER)
+struct Map19_N163_AudioSegment
+{
+  uint16_t cycleStart;
+  uint16_t cycleEnd;
+  uint16_t eventBegin;
+  uint16_t eventEnd;
+  int16_t startOutput;
+  int16_t endOutput;
+  uint16_t sampleCount;
+  uint8_t enabled;
+};
+
+static Map19_N163_AudioSegment
+    Map19_N163_AudioSegments[MAP19_N163_AUDIO_SEGMENT_MAX];
+static Map19_N163_AudioEvent
+    Map19_N163_AudioBlockEvents[MAP19_N163_AUDIO_EVENT_MAX];
+static uint16_t Map19_N163_AudioSegmentCount;
+static uint16_t Map19_N163_AudioBlockEventCount;
+#endif
 
 static BYTE __not_in_flash_func(Map19_N163_AudioChannelCountFromRam)()
 {
@@ -293,6 +385,10 @@ static void Map19_N163_ResetAudioState()
 #endif
   Map19_N163_AudioSliceStartOutput = 0;
   Map19_N163_SoundDisabled = 0;
+#if defined(NESCO_AUDIO_BLOCK_PRODUCER)
+  Map19_N163_AudioSegmentCount = 0;
+  Map19_N163_AudioBlockEventCount = 0;
+#endif
 }
 
 static void __not_in_flash_func(Map19_N163_ClockAudioCycles)(int clocks)
@@ -442,6 +538,11 @@ static void Map19_N163_AdvanceAddress()
 
 bool Map19_WramWriteAllowed(WORD wAddr)
 {
+  if (!Map19_WramReadAllowed(wAddr))
+  {
+    return false;
+  }
+
   if ((Map19_Wram_Protect & 0xf0) != 0x40)
   {
     return false;
@@ -456,6 +557,67 @@ void Map19_Release()
   delete[] Map19_Chr_Ram_Alloc;
   Map19_Chr_Ram_Alloc = nullptr;
   Map19_Chr_Ram = nullptr;
+}
+
+void Map19_SelectBoardProfile(BYTE nes2_header, BYTE submapper)
+{
+  const uint32_t payloadCrc32 = Map19_CalculatePayloadCrc32();
+
+  Map19_Profile = {
+      nes2_header ? "NES2-default" : "iNES-default",
+      payloadCrc32,
+      true,
+      ROM_SRAM != 0,
+      ROM_SRAM != 0,
+      true};
+
+  if (nes2_header)
+  {
+    /* NES 2.0 byte 10 carries PRG-RAM (low nibble) and PRG-NVRAM
+     * (high nibble) size exponents.  A zero byte means that Mapper 19 has
+     * no external $6000 RAM in this image; the 128-byte N163 battery RAM is
+     * still selected independently by the battery flag. */
+    const BYTE prgRamConfig = NesHeader.byReserve[2];
+    Map19_Profile.externalWram = prgRamConfig != 0;
+    Map19_Profile.externalWramBattery =
+        ROM_SRAM != 0 && (prgRamConfig & 0xf0u) != 0;
+  }
+
+  /* Mesen's database identifies these iNES payloads as the NAMCOT-163
+   * boards 60-21 and 60-12 respectively.  The CRC is over PRG+CHR, matching
+   * the database key, and is intentionally narrower than a filename match. */
+  if (payloadCrc32 == 0x684b292fu)
+  {
+    Map19_Profile.name = "NAMCOT-163/60-21";
+    Map19_Profile.externalWram = false;
+    Map19_Profile.externalWramBattery = false;
+    Map19_Profile.n163Battery = false;
+  }
+  else if (payloadCrc32 == 0x10c8f2fau)
+  {
+    Map19_Profile.name = "NAMCOT-163/60-12";
+    Map19_Profile.externalWram = false;
+    Map19_Profile.externalWramBattery = false;
+    Map19_Profile.n163Battery = true;
+    Map19_Profile.n163Audio = false;
+  }
+
+  NESCO_LOG_RUNTIME(
+      "[M19_BOARD] crc=%08lX nes2=%u submapper=%u profile=%s audio=%u "
+      "external_wram=%u external_battery=%u n163_battery=%u\r\n",
+      (unsigned long)Map19_Profile.payloadCrc32,
+      (unsigned)nes2_header,
+      (unsigned)submapper,
+      Map19_Profile.name,
+      Map19_Profile.n163Audio ? 1u : 0u,
+      Map19_Profile.externalWram ? 1u : 0u,
+      Map19_Profile.externalWramBattery ? 1u : 0u,
+      Map19_Profile.n163Battery ? 1u : 0u);
+}
+
+bool Map19_WramReadAllowed(WORD wAddr)
+{
+  return wAddr >= 0x6000 && wAddr <= 0x7fff && Map19_Profile.externalWram;
 }
 
 void Map19_N163_GetBatteryRam(const BYTE **data, unsigned *size)
@@ -491,6 +653,31 @@ bool Map19_N163_IsBatteryRamDirty()
 void Map19_N163_ClearBatteryRamDirty()
 {
   Map19_N163_BatteryRamDirty = 0;
+}
+
+bool Map19_ExternalWramBatteryEnabled()
+{
+  return Map19_Profile.externalWramBattery;
+}
+
+bool Map19_N163BatteryEnabled()
+{
+  return Map19_Profile.n163Battery;
+}
+
+bool Map19_N163AudioEnabled()
+{
+  return Map19_Profile.n163Audio;
+}
+
+const char *Map19_BoardProfileName()
+{
+  return Map19_Profile.name;
+}
+
+uint32_t Map19_BoardPayloadCrc32()
+{
+  return Map19_Profile.payloadCrc32;
 }
 
 /*-------------------------------------------------------------------*/
@@ -770,7 +957,15 @@ void __not_in_flash_func(Map19_ClockCpuCycles)(int clocks)
   Map19_N163_PendingAudioCycles += (uint32_t)clocks;
 }
 
-void __attribute__((optimize("Os"), noinline)) __not_in_flash_func(Map19_RenderAudioSlice)(
+/*
+ * The audio block producer calls this on the deadline-critical path.  Keep
+ * the function out of flash, but optimize the bounded renderer for speed;
+ * the previous size-optimized body left the event walk and signed division
+ * bookkeeping on the hot path.  `noinline` keeps the RAM placement and the
+ * call boundary stable while allowing the renderer's loop to be optimized as
+ * one unit.
+ */
+void __attribute__((optimize("O2"), noinline)) __not_in_flash_func(Map19_RenderAudioSlice)(
     int16_t *dst, int n, bool enabled)
 {
   Map19_N163_FlushAudioCycles();
@@ -886,3 +1081,228 @@ finish_slice:
   Map19_N163_AudioEventOverflow = 0;
   Map19_N163_AudioSliceCycles = 0;
 }
+
+#if defined(NESCO_AUDIO_BLOCK_PRODUCER)
+/*
+ * Record one HSync's already-clocked interval without doing sample-rate
+ * conversion on the HSync deadline.  Audio cycles are deliberately kept
+ * cumulative until the complete mixer block is rendered; this makes the
+ * event positions absolute within the block while preserving every mapper
+ * write boundary.
+ */
+void __not_in_flash_func(Map19_QueueAudioSlice)(int n, bool enabled)
+{
+  Map19_N163_FlushAudioCycles();
+
+  if (n < 0)
+  {
+    n = 0;
+  }
+
+  if (Map19_N163_AudioSegmentCount >= MAP19_N163_AUDIO_SEGMENT_MAX)
+  {
+    /* A block normally spans fewer than 64 HSyncs.  Keep the failure
+     * observable and do not write past the bounded ledger. */
+    Map19_N163_AudioEventOverflow = 1;
+    return;
+  }
+
+  Map19_N163_AudioSegment &segment =
+      Map19_N163_AudioSegments[Map19_N163_AudioSegmentCount];
+  const uint16_t cycleEnd = Map19_N163_AudioSliceCycles;
+  const uint16_t eventBegin = Map19_N163_AudioBlockEventCount;
+
+  /* Keep events relative to this HSync.  This is intentionally a copy: the
+   * block may not render for another 64 samples, but the mapper clock state
+   * and raw event list must be reset at the same per-HSync boundary as the
+   * old renderer. */
+  for (uint16_t i = 0; i < Map19_N163_AudioEventCount; ++i)
+  {
+    if (Map19_N163_AudioBlockEventCount >= MAP19_N163_AUDIO_EVENT_MAX)
+    {
+      Map19_N163_AudioEventOverflow = 1;
+      break;
+    }
+    Map19_N163_AudioBlockEvents[Map19_N163_AudioBlockEventCount++] =
+        Map19_N163_AudioEvents[i];
+  }
+  const uint16_t eventEnd = Map19_N163_AudioBlockEventCount;
+
+  segment.cycleStart = 0;
+  segment.cycleEnd = cycleEnd;
+  segment.eventBegin = eventBegin;
+  segment.eventEnd = eventEnd;
+  segment.startOutput =
+      Map19_N163_AudioSegmentCount == 0
+          ? Map19_N163_AudioSliceStartOutput
+          : Map19_N163_AudioSegments[Map19_N163_AudioSegmentCount - 1].endOutput;
+  segment.endOutput = Map19_N163_AudioOutput;
+  segment.sampleCount = (uint16_t)n;
+  segment.enabled = enabled ? 1 : 0;
+  ++Map19_N163_AudioSegmentCount;
+
+  Map19_N163_AudioEventCount = 0;
+  Map19_N163_AudioSliceCycles = 0;
+}
+
+static void __attribute__((optimize("O2"), noinline))
+    __not_in_flash_func(Map19_RenderAudioSegment)(
+        int16_t *dst, int n, bool enabled, uint16_t cycleStart,
+        uint16_t cycleEnd, uint16_t eventBegin, uint16_t eventEnd,
+        int16_t startOutput)
+{
+  if (!dst || n <= 0)
+  {
+    return;
+  }
+
+  for (int i = 0; i < n; ++i)
+  {
+    dst[i] = 0;
+  }
+
+  if (!enabled || cycleEnd <= cycleStart)
+  {
+    return;
+  }
+
+  const uint32_t segmentCycles = (uint32_t)cycleEnd - cycleStart;
+  int16_t currentOutput = startOutput;
+  uint16_t nEvent = eventBegin;
+  uint32_t sampleStart = cycleStart;
+
+  for (int i = 0; i < n; ++i)
+  {
+    uint32_t sampleEnd;
+#if defined(NESCO_MAPPER19_N163_RENDER_FAST_DIVISION)
+    if (n == 1)
+    {
+      sampleEnd = cycleEnd;
+    }
+    else if (n == 2)
+    {
+      sampleEnd = (i == 0) ? (cycleStart + (segmentCycles >> 1)) : cycleEnd;
+    }
+    else
+    {
+      sampleEnd = cycleStart +
+                  ((uint32_t)(i + 1) * segmentCycles) / (uint32_t)n;
+    }
+#else
+    sampleEnd = cycleStart +
+                ((uint32_t)(i + 1) * segmentCycles) / (uint32_t)n;
+#endif
+
+    const int32_t sampleWidth = (int32_t)(sampleEnd - sampleStart);
+    if (sampleWidth <= 0)
+    {
+      dst[i] = currentOutput;
+      continue;
+    }
+
+    int32_t weightedSum = 0;
+    uint32_t cursor = sampleStart;
+    while (nEvent < eventEnd &&
+           (uint32_t)Map19_N163_AudioBlockEvents[nEvent].cycle <= sampleStart)
+    {
+      currentOutput = Map19_N163_AudioBlockEvents[nEvent].output;
+      ++nEvent;
+    }
+
+    while (nEvent < eventEnd &&
+           (uint32_t)Map19_N163_AudioBlockEvents[nEvent].cycle < sampleEnd)
+    {
+      const uint32_t eventCycle =
+          (uint32_t)Map19_N163_AudioBlockEvents[nEvent].cycle;
+      weightedSum +=
+          (int32_t)(eventCycle - cursor) * (int32_t)currentOutput;
+      cursor = eventCycle;
+      currentOutput = Map19_N163_AudioBlockEvents[nEvent].output;
+      ++nEvent;
+    }
+
+    weightedSum +=
+        (int32_t)(sampleEnd - cursor) * (int32_t)currentOutput;
+
+#if defined(NESCO_MAPPER19_N163_RENDER_FAST_DIVISION)
+    dst[i] = (int16_t)Map19_N163_RenderRoundDivide(
+        weightedSum, (uint32_t)sampleWidth);
+#else
+    if (weightedSum >= 0)
+    {
+      weightedSum += sampleWidth / 2;
+      dst[i] = (int16_t)(weightedSum / sampleWidth);
+    }
+    else
+    {
+      weightedSum -= sampleWidth / 2;
+      dst[i] = (int16_t)(weightedSum / sampleWidth);
+    }
+#endif
+    sampleStart = sampleEnd;
+  }
+}
+
+/* Diagnostic-only shadow handoff.  It observes the just-recorded HSync
+ * without changing the block ledger; the normal mixer still renders the
+ * complete block at its deadline.  This keeps the generator fixture's exact
+ * sample count while exercising the same segment renderer used by blocks. */
+void __not_in_flash_func(Map19_RenderQueuedAudioSlice)(int16_t *dst, int n)
+{
+  if (Map19_N163_AudioSegmentCount == 0)
+  {
+    if (dst && n > 0)
+    {
+      for (int i = 0; i < n; ++i)
+      {
+        dst[i] = 0;
+      }
+    }
+    return;
+  }
+
+  const Map19_N163_AudioSegment &segment =
+      Map19_N163_AudioSegments[Map19_N163_AudioSegmentCount - 1];
+  Map19_RenderAudioSegment(dst, n, segment.enabled != 0,
+                           segment.cycleStart, segment.cycleEnd,
+                           segment.eventBegin, segment.eventEnd,
+                           segment.startOutput);
+}
+
+void __not_in_flash_func(Map19_RenderAudioBlock)(int16_t *dst, int n)
+{
+  if (dst && n > 0)
+  {
+    for (int i = 0; i < n; ++i)
+    {
+      dst[i] = 0;
+    }
+  }
+
+  int dstOffset = 0;
+  for (uint16_t i = 0; i < Map19_N163_AudioSegmentCount; ++i)
+  {
+    const Map19_N163_AudioSegment &segment = Map19_N163_AudioSegments[i];
+    const int segmentSamples = (int)segment.sampleCount;
+    if (dst && dstOffset < n && segmentSamples > 0)
+    {
+      const int renderSamples =
+          (segmentSamples < n - dstOffset) ? segmentSamples : n - dstOffset;
+      Map19_RenderAudioSegment(
+          dst + dstOffset, renderSamples, segment.enabled != 0,
+          segment.cycleStart, segment.cycleEnd, segment.eventBegin,
+          segment.eventEnd, segment.startOutput);
+    }
+    dstOffset += segmentSamples;
+  }
+
+  /* Match the old slice handoff: any endpoint event becomes the starting
+   * state of the next block, and all block-local ledger storage is drained. */
+  Map19_N163_AudioSliceStartOutput = Map19_N163_AudioOutput;
+  Map19_N163_AudioEventCount = 0;
+  Map19_N163_AudioEventOverflow = 0;
+  Map19_N163_AudioSliceCycles = 0;
+  Map19_N163_AudioSegmentCount = 0;
+  Map19_N163_AudioBlockEventCount = 0;
+}
+#endif

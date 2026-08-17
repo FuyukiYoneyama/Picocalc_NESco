@@ -66,6 +66,19 @@ static volatile bool s_audio_paused = false;
 static BYTE s_mix_peak = 0;
 static BYTE s_noise_peak = 0;
 static BYTE s_dpcm_peak = 0;
+#if defined(PICO_BUILD) && defined(NESCO_MAPPER19_AUDIO_COMFORT)
+/*
+ * Listening-candidate safety stage.  A normal transition smaller than the
+ * limit is bit-identical.  Larger final-mix jumps are spread over a fraction
+ * of a millisecond, which trades a little transient sharpness for a calmer
+ * listening result without inserting silence, repeating a sample, or changing
+ * the producer/DMA clock.
+ */
+#define AUDIO_COMFORT_MAX_STEP 15
+static BYTE s_audio_comfort_previous_raw = 128u;
+static BYTE s_audio_comfort_pending_raw = 128u;
+static BYTE s_audio_comfort_last_sample = 128u;
+#endif
 static uint64_t s_perf_audio_wait_us = 0;
 static uint32_t s_perf_audio_wait_count = 0;
 #ifdef PICO_BUILD
@@ -79,9 +92,35 @@ static uint64_t s_audio_debug_last_us = 0;
 static bool s_audio_measure_pending = false;
 static bool s_audio_measure_active = false;
 static uint64_t s_audio_measure_begin_us = 0;
+static uint64_t s_audio_measure_last_producer_us = 0;
 static int s_audio_measure_ring_start = 0;
 static uint32_t s_audio_measure_push_samples = 0;
 static uint32_t s_audio_measure_drop_samples = 0;
+#endif
+
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_CLOCK_LOCK)
+/*
+ * Mapper 19's emulation clock and the PWM DMA clock are independent clocks.
+ * The source normally stays within a fraction of a percent of the fixed
+ * 22050 Hz sink, but a long run can otherwise drain the reserve.  The clock
+ * lock emits at most a small bounded number of interpolated samples per
+ * source block when the sink deadline is ahead.  It is a timebase converter,
+ * not a silence/last-sample underrun fill: the source N163 PCM and its event
+ * timing remain unchanged before this final handoff.
+ */
+#define AUDIO_CLOCK_MAX_EXTRA_PER_BLOCK 8
+#define AUDIO_CLOCK_MIX_SCRATCH_SAMPLES 735
+#define AUDIO_CLOCK_SOURCE_FIFO_SAMPLES 2048
+static bool s_audio_clock_started = false;
+static uint64_t s_audio_clock_start_us = 0;
+static uint64_t s_audio_clock_emitted_samples = 0;
+static uint64_t s_audio_clock_last_elapsed_us = 0;
+static uint64_t s_audio_clock_last_target_total = 0;
+static BYTE s_audio_clock_last_mix = 128u;
+static BYTE s_audio_clock_mix_scratch[AUDIO_CLOCK_MIX_SCRATCH_SAMPLES];
+static BYTE s_audio_clock_source_fifo[AUDIO_CLOCK_SOURCE_FIFO_SAMPLES];
+static unsigned s_audio_clock_source_fifo_head = 0;
+static unsigned s_audio_clock_source_fifo_count = 0;
 #endif
 
 #ifdef NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC
@@ -181,6 +220,72 @@ static int audio_ring_writable(void) {
     return (AUDIO_RING_SIZE - 1) - audio_ring_available();
 }
 
+#if defined(PICO_BUILD) && defined(NESCO_MAPPER19_AUDIO_COMFORT)
+static BYTE AUDIO_MIX_RAMFUNC(audio_comfort_filter_sample)(BYTE incoming)
+{
+    const BYTE a = s_audio_comfort_previous_raw;
+    const BYTE b = s_audio_comfort_pending_raw;
+    const BYTE c = incoming;
+    BYTE median;
+
+    if (a < b) {
+        median = b < c ? b : (a < c ? c : a);
+    } else {
+        median = a < c ? a : (b < c ? c : b);
+    }
+
+    s_audio_comfort_previous_raw = b;
+    s_audio_comfort_pending_raw = c;
+
+    int next = (int)median;
+    const int previous = (int)s_audio_comfort_last_sample;
+    const int delta = next - previous;
+
+    if (delta > AUDIO_COMFORT_MAX_STEP) {
+        next = previous + AUDIO_COMFORT_MAX_STEP;
+    } else if (delta < -AUDIO_COMFORT_MAX_STEP) {
+        next = previous - AUDIO_COMFORT_MAX_STEP;
+    }
+
+    s_audio_comfort_last_sample = (BYTE)next;
+    return s_audio_comfort_last_sample;
+}
+#endif
+
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_CLOCK_LOCK)
+static int AUDIO_MIX_RAMFUNC(audio_ring_push_clock_sample)(BYTE sample)
+{
+    int next_write = (s_ring_write + 1) & (AUDIO_RING_SIZE - 1);
+    if (next_write == s_ring_read) {
+        s_ring_overrun_count++;
+        s_prod_drop_samples++;
+#if defined(NESCO_AUDIO_MEASURE)
+        if (s_audio_measure_active) {
+            s_audio_measure_drop_samples++;
+        }
+#endif
+        return 0;
+    }
+
+    g_audio_ring[s_ring_write] = sample;
+    s_ring_write = next_write;
+    s_prod_push_samples++;
+#if defined(NESCO_AUDIO_MEASURE)
+    if (s_audio_measure_active) {
+        s_audio_measure_push_samples++;
+    }
+#endif
+    return 1;
+}
+
+static BYTE AUDIO_MIX_RAMFUNC(audio_clock_fifo_peek)(unsigned index)
+{
+    return s_audio_clock_source_fifo[
+        (s_audio_clock_source_fifo_head + index) &
+        (AUDIO_CLOCK_SOURCE_FIFO_SAMPLES - 1u)];
+}
+#endif
+
 static void audio_ring_push_ui_sample(BYTE sample)
 {
     int next_write = (s_ring_write + 1) & (AUDIO_RING_SIZE - 1);
@@ -260,6 +365,11 @@ void audio_reset_runtime_state(void) {
     s_ring_write = 0;
     s_ring_read  = 0;
     s_mix_dc_estimate = 0;
+#if defined(PICO_BUILD) && defined(NESCO_MAPPER19_AUDIO_COMFORT)
+    s_audio_comfort_previous_raw = 128u;
+    s_audio_comfort_pending_raw = 128u;
+    s_audio_comfort_last_sample = 128u;
+#endif
     s_ring_overrun_count = 0;
     s_prod_push_samples = 0;
     s_prod_drop_samples = 0;
@@ -276,9 +386,20 @@ void audio_reset_runtime_state(void) {
     s_audio_measure_pending = false;
     s_audio_measure_active = false;
     s_audio_measure_begin_us = 0;
+    s_audio_measure_last_producer_us = 0;
     s_audio_measure_ring_start = 0;
     s_audio_measure_push_samples = 0;
     s_audio_measure_drop_samples = 0;
+#endif
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_CLOCK_LOCK)
+    s_audio_clock_started = false;
+    s_audio_clock_start_us = 0;
+    s_audio_clock_emitted_samples = 0;
+    s_audio_clock_last_elapsed_us = 0;
+    s_audio_clock_last_target_total = 0;
+    s_audio_clock_last_mix = 128u;
+    s_audio_clock_source_fifo_head = 0;
+    s_audio_clock_source_fifo_count = 0;
 #endif
 }
 
@@ -316,7 +437,11 @@ void audio_debug_poll(void) {
     uint32_t measure_drop_samples = 0;
     int measure_ring_end = audio_ring_available();
     if (s_audio_measure_active) {
-        measure_window_us = now - s_audio_measure_begin_us;
+        const uint64_t producer_end_us =
+            s_audio_measure_last_producer_us != 0
+                ? s_audio_measure_last_producer_us
+                : now;
+        measure_window_us = producer_end_us - s_audio_measure_begin_us;
         measure_push_samples = s_audio_measure_push_samples;
         measure_drop_samples = s_audio_measure_drop_samples;
     }
@@ -344,6 +469,12 @@ void audio_debug_poll(void) {
                measure_ring_end
 #endif
                );
+#endif
+#if defined(NESCO_AUDIO_CLOCK_LOCK)
+    NESCO_LOGF("[AUDIO_CLOCK] elapsed_us=%llu target=%llu emitted=%llu\r\n",
+               (unsigned long long)s_audio_clock_last_elapsed_us,
+               (unsigned long long)s_audio_clock_last_target_total,
+               (unsigned long long)s_audio_clock_emitted_samples);
 #endif
 
     s_ring_overrun_count = 0;
@@ -469,16 +600,37 @@ static void AUDIO_MIX_RAMFUNC(audio_sound_output_impl)(int nch,
         return;
     }
 
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_MEASURE)
+    const bool measure_block_active = s_audio_measure_active;
+#endif
+
     s_prod_call_count++;
     s_prod_nch_sum += (uint32_t)nch;
     if ((uint32_t)nch > s_prod_max_nch) {
         s_prod_max_nch = (uint32_t)nch;
     }
 
+    int output_nch = nch;
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_CLOCK_LOCK)
+    const bool clock_lock_active =
+        n163 != NULL && nch > 0 && nch <= AUDIO_CLOCK_MIX_SCRATCH_SAMPLES;
+    bool clock_lock_prime = false;
+    int clock_extra = 0;
+    if (clock_lock_active) {
+        if (!s_audio_clock_started) {
+            clock_lock_prime = true;
+        }
+    }
+#endif
+
 #ifdef PICO_BUILD
+#if defined(NESCO_AUDIO_CLOCK_LOCK)
+    if (!clock_lock_active)
+#endif
+    {
     int wait_loops = 0;
     uint64_t wait_start_us = 0;
-    while (audio_ring_writable() < nch) {
+    while (audio_ring_writable() < output_nch) {
         if (wait_loops == 0) {
             wait_start_us = time_us_64();
         }
@@ -488,12 +640,13 @@ static void AUDIO_MIX_RAMFUNC(audio_sound_output_impl)(int nch,
         if (wait_loops >= AUDIO_WAIT_LOOPS_MAX) {
             s_perf_audio_wait_us += time_us_64() - wait_start_us;
             s_ring_overrun_count++;
-            s_prod_drop_samples += (uint32_t)nch;
+            s_prod_drop_samples += (uint32_t)output_nch;
             return;
         }
     }
     if (wait_loops > 0) {
         s_perf_audio_wait_us += time_us_64() - wait_start_us;
+    }
     }
 #endif
 
@@ -567,33 +720,190 @@ static void AUDIO_MIX_RAMFUNC(audio_sound_output_impl)(int nch,
         if (mix < 0)   mix = 0;
 #endif
 
+#if defined(PICO_BUILD) && defined(NESCO_MAPPER19_AUDIO_COMFORT)
+        if (n163 != NULL) {
+            mix = (int)audio_comfort_filter_sample((BYTE)mix);
+        }
+#endif
+
         if ((BYTE)mix > s_mix_peak) s_mix_peak = (BYTE)mix;
         if (buf3[i] > s_noise_peak) s_noise_peak = buf3[i];
         if (buf4[i] > s_dpcm_peak) s_dpcm_peak = buf4[i];
 
-        /* Single-producer/single-consumer ring. Keep one slot empty so the
-         * producer can detect full without a shared count variable. */
-        int next_write = (s_ring_write + 1) & (AUDIO_RING_SIZE - 1);
-        if (next_write != s_ring_read) {
-            g_audio_ring[s_ring_write] = (BYTE)mix;
-            s_ring_write = next_write;
-            s_prod_push_samples++;
-#if defined(PICO_BUILD) && defined(NESCO_AUDIO_MEASURE)
-            if (s_audio_measure_active) {
-                s_audio_measure_push_samples++;
-            }
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_CLOCK_LOCK)
+        if (clock_lock_active) {
+            s_audio_clock_mix_scratch[i] = (BYTE)mix;
+        } else
 #endif
-        } else {
-            s_ring_overrun_count++;
-            s_prod_drop_samples++;
+        {
+            /* Single-producer/single-consumer ring. Keep one slot empty so the
+             * producer can detect full without a shared count variable. */
+            int next_write = (s_ring_write + 1) & (AUDIO_RING_SIZE - 1);
+            if (next_write != s_ring_read) {
+                g_audio_ring[s_ring_write] = (BYTE)mix;
+                s_ring_write = next_write;
+                s_prod_push_samples++;
 #if defined(PICO_BUILD) && defined(NESCO_AUDIO_MEASURE)
-            if (s_audio_measure_active) {
-                s_audio_measure_drop_samples++;
-            }
+                if (s_audio_measure_active) {
+                    s_audio_measure_push_samples++;
+                }
 #endif
+            } else {
+                s_ring_overrun_count++;
+                s_prod_drop_samples++;
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_MEASURE)
+                if (s_audio_measure_active) {
+                    s_audio_measure_drop_samples++;
+                }
+#endif
+            }
+            /* If ring full: drop sample and count it for diagnostics. */
         }
-        /* If ring full: drop sample and count it for diagnostics. */
     }
+
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_CLOCK_LOCK)
+    if (clock_lock_active) {
+        int regular_count = nch;
+        int interval_count = 0;
+
+        if (!clock_lock_prime) {
+            if (s_audio_clock_source_fifo_count + (unsigned)nch >
+                AUDIO_CLOCK_SOURCE_FIFO_SAMPLES) {
+                s_ring_overrun_count++;
+                s_prod_drop_samples += (uint32_t)nch;
+#if defined(NESCO_AUDIO_MEASURE)
+                if (s_audio_measure_active) {
+                    s_audio_measure_drop_samples += (uint32_t)nch;
+                }
+#endif
+                return;
+            }
+            for (int i = 0; i < nch; ++i) {
+                const unsigned fifo_index =
+                    (s_audio_clock_source_fifo_head +
+                     s_audio_clock_source_fifo_count) &
+                    (AUDIO_CLOCK_SOURCE_FIFO_SAMPLES - 1u);
+                s_audio_clock_source_fifo[fifo_index] =
+                    s_audio_clock_mix_scratch[i];
+                s_audio_clock_source_fifo_count++;
+            }
+
+            uint64_t clock_origin_us = s_audio_clock_start_us;
+#if defined(NESCO_AUDIO_MEASURE)
+            if (s_audio_measure_active) {
+                clock_origin_us = s_audio_measure_begin_us;
+            }
+#endif
+            const uint64_t elapsed_us = time_us_64() - clock_origin_us;
+            const uint64_t target_total =
+                (elapsed_us * (uint64_t)s_audio_hw_sample_rate) / 1000000ull;
+            s_audio_clock_last_elapsed_us = elapsed_us;
+            s_audio_clock_last_target_total = target_total;
+
+            uint64_t output_budget = 0;
+            if (target_total > s_audio_clock_emitted_samples) {
+                output_budget = target_total - s_audio_clock_emitted_samples;
+            }
+            if (output_budget < s_audio_clock_source_fifo_count) {
+                regular_count = (int)output_budget;
+            } else {
+                regular_count = (int)s_audio_clock_source_fifo_count;
+            }
+            if (regular_count > 0) {
+                interval_count = regular_count <
+                    (int)s_audio_clock_source_fifo_count
+                    ? regular_count : regular_count - 1;
+            }
+            const uint64_t extra_budget =
+                output_budget > (uint64_t)regular_count
+                    ? output_budget - (uint64_t)regular_count : 0;
+            if (interval_count > 0 && extra_budget > 0) {
+                uint64_t bounded_extra = extra_budget;
+                if (bounded_extra > AUDIO_CLOCK_MAX_EXTRA_PER_BLOCK) {
+                    bounded_extra = AUDIO_CLOCK_MAX_EXTRA_PER_BLOCK;
+                }
+                clock_extra = (int)bounded_extra;
+            } else {
+                clock_extra = 0;
+            }
+            output_nch = regular_count + clock_extra;
+        } else {
+            output_nch = nch;
+        }
+
+#ifdef PICO_BUILD
+        int wait_loops = 0;
+        uint64_t wait_start_us = 0;
+        while (audio_ring_writable() < output_nch) {
+            if (wait_loops == 0) {
+                wait_start_us = time_us_64();
+            }
+            ++wait_loops;
+            s_perf_audio_wait_count++;
+            sleep_us(AUDIO_WAIT_SLEEP_US);
+            if (wait_loops >= AUDIO_WAIT_LOOPS_MAX) {
+                s_perf_audio_wait_us += time_us_64() - wait_start_us;
+                s_ring_overrun_count++;
+                s_prod_drop_samples += (uint32_t)output_nch;
+#if defined(NESCO_AUDIO_MEASURE)
+                if (s_audio_measure_active) {
+                    s_audio_measure_drop_samples += (uint32_t)output_nch;
+                }
+#endif
+                return;
+            }
+        }
+        if (wait_loops > 0) {
+            s_perf_audio_wait_us += time_us_64() - wait_start_us;
+        }
+#endif
+
+        if (clock_lock_prime) {
+            for (int i = 0; i < nch; ++i) {
+                audio_ring_push_clock_sample(s_audio_clock_mix_scratch[i]);
+            }
+            s_audio_clock_last_mix = s_audio_clock_mix_scratch[nch - 1];
+        } else {
+            int inserted_extra = 0;
+            for (int i = 0; i < regular_count; ++i) {
+                audio_ring_push_clock_sample(audio_clock_fifo_peek((unsigned)i));
+                if (i < interval_count) {
+                    const int interval_extra =
+                        ((i + 1) * clock_extra) / interval_count -
+                        inserted_extra;
+                    for (int k = 0; k < interval_extra; ++k) {
+                        const int numerator =
+                            (int)audio_clock_fifo_peek((unsigned)i) *
+                                (interval_extra - k) +
+                            (int)audio_clock_fifo_peek((unsigned)(i + 1)) *
+                                (k + 1);
+                        const BYTE interpolated =
+                            (BYTE)(numerator / (interval_extra + 1));
+                        audio_ring_push_clock_sample(interpolated);
+                    }
+                    inserted_extra += interval_extra;
+                }
+            }
+            if (regular_count > 0) {
+                s_audio_clock_last_mix =
+                    audio_clock_fifo_peek((unsigned)(regular_count - 1));
+                s_audio_clock_source_fifo_head =
+                    (s_audio_clock_source_fifo_head +
+                     (unsigned)regular_count) &
+                    (AUDIO_CLOCK_SOURCE_FIFO_SAMPLES - 1u);
+                s_audio_clock_source_fifo_count -= (unsigned)regular_count;
+            }
+        }
+
+        if (clock_lock_prime) {
+            s_audio_clock_started = true;
+            s_audio_clock_start_us = time_us_64();
+            s_audio_clock_emitted_samples = 0;
+        } else {
+            s_audio_clock_emitted_samples += (uint64_t)output_nch;
+        }
+    }
+#endif
 
 #if defined(PICO_BUILD) && defined(NESCO_AUDIO_MEASURE)
     if (s_audio_measure_pending && nch > 0) {
@@ -605,27 +915,48 @@ static void AUDIO_MIX_RAMFUNC(audio_sound_output_impl)(int nch,
         s_audio_measure_push_samples = 0;
         s_audio_measure_drop_samples = 0;
         s_audio_measure_begin_us = time_us_64();
+        s_audio_measure_last_producer_us = 0;
         s_audio_measure_active = true;
         s_audio_measure_pending = false;
+#if defined(NESCO_AUDIO_CLOCK_LOCK)
+        /* Restart the final handoff clock at the same marker used by the
+         * producer contract. Any pre-marker source block is excluded from
+         * both the measured push count and the clock accumulator. */
+        if (clock_lock_active) {
+            s_audio_clock_started = true;
+            s_audio_clock_start_us = s_audio_measure_begin_us;
+            s_audio_clock_emitted_samples = 0;
+            s_audio_clock_source_fifo_head = 0;
+            s_audio_clock_source_fifo_count = 0;
+        }
+#endif
         NESCO_LOGF("[AUDIO_MEASURE_BEGIN] rate=%d ring_start=%d first_block=%d\r\n",
                    s_open_clock_per_sync,
                    s_audio_measure_ring_start,
                    nch);
     }
 #endif
+
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_MEASURE)
+    if (measure_block_active) {
+        s_audio_measure_last_producer_us = time_us_64();
+    }
+#endif
 }
 
-void InfoNES_SoundOutput(int nch,
-                         BYTE *buf0, BYTE *buf1,
-                         BYTE *buf2, BYTE *buf3, BYTE *buf4) {
+void AUDIO_MIX_RAMFUNC(InfoNES_SoundOutput)(int nch,
+                                            BYTE *buf0, BYTE *buf1,
+                                            BYTE *buf2, BYTE *buf3, BYTE *buf4) {
     audio_sound_output_impl(nch, buf0, buf1, buf2, buf3, buf4, NULL, 0);
 }
 
 #ifdef PICO_BUILD
-void InfoNES_SoundOutputN163(int nch,
-                             BYTE *buf0, BYTE *buf1,
-                             BYTE *buf2, BYTE *buf3, BYTE *buf4,
-                             const int16_t *n163, int n163_samples) {
+void AUDIO_MIX_RAMFUNC(InfoNES_SoundOutputN163)(int nch,
+                                                BYTE *buf0, BYTE *buf1,
+                                                BYTE *buf2, BYTE *buf3,
+                                                BYTE *buf4,
+                                                const int16_t *n163,
+                                                int n163_samples) {
     audio_sound_output_impl(nch, buf0, buf1, buf2, buf3, buf4,
                             n163, n163_samples);
 }

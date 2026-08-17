@@ -42,27 +42,33 @@ option(NESCO_MAPPER19_N163_MUTE_DIAGNOSTIC
 option(NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC
        "Route only the raw Mapper 19 N163 level to the audio ring for generator comparison" OFF)
 option(NESCO_MAPPER19_N163_AVERAGE_FAST
-       "Use exact constant-divisor fast paths for the Mapper 19 N163 channel average" OFF)
+       "Use exact constant-divisor fast paths for the Mapper 19 N163 channel average" ON)
 option(NESCO_MAPPER19_N163_SKIP_SAME_OUTPUT
        "Skip Mapper 19 N163 average recomputation when a channel output is unchanged" OFF)
 option(NESCO_MAPPER19_N163_INCREMENTAL_SUM
-       "Maintain the Mapper 19 N163 active-channel sum by channel delta" OFF)
+       "Maintain the Mapper 19 N163 active-channel sum by channel delta" ON)
 option(NESCO_MAPPER19_N163_CACHE_CHANNEL_COUNT
-       "Cache the Mapper 19 N163 active-channel count outside the audio hot path" OFF)
+       "Cache the Mapper 19 N163 active-channel count outside the audio hot path" ON)
 option(NESCO_MAPPER19_N163_RENDER_FAST_DIVISION
-       "Use exact reciprocal paths for the normal Mapper 19 N163 render widths" OFF)
+       "Use exact reciprocal paths for the normal Mapper 19 N163 render widths" ON)
 option(NESCO_AUDIO_MIX_FAST_DIVISION
-       "Use an exact fixed-point path for the audio mix scale division" OFF)
+       "Use an exact fixed-point path for the audio mix scale division" ON)
 option(NESCO_AUDIO_HSYNC_BATCH
        "Batch Mapper 19 HSync audio into 16-sample output calls" OFF)
 option(NESCO_AUDIO_HSYNC_BATCH32
        "Batch Mapper 19 HSync audio into 32-sample output calls" OFF)
+option(NESCO_AUDIO_BLOCK_PRODUCER
+       "Accumulate one bounded 64-sample audio block before mixer/ring handoff" ON)
+option(NESCO_AUDIO_CLOCK_LOCK
+       "Use a bounded audio-clock interpolator to meet the fixed PWM sample deadline" ON)
+option(NESCO_MAPPER19_AUDIO_COMFORT
+       "Limit abrupt Mapper 19 final-mix steps for a click-resistant listening build" ON)
 option(NESCO_AUDIO_PREFILL
-       "Prefill the audio ring before enabling the ROM audio stream" OFF)
+       "Prefill the audio ring before enabling the ROM audio stream" ON)
 option(NESCO_AUDIO_RING_8192
-       "Use an 8192-sample audio ring for producer jitter absorption" OFF)
+       "Use an 8192-sample audio ring for producer jitter absorption" ON)
 option(NESCO_AUDIO_RAMFUNC
-       "Place audio producer and DMA refill hot paths in RAM" OFF)
+       "Place audio producer and DMA refill hot paths in RAM" ON)
 option(NESCO_AUDIO_MIX_RAMFUNC
        "Place only the audio mixer producer function in RAM" OFF)
 option(NESCO_AUDIO_DMA_REFILL_RAMFUNC
@@ -70,13 +76,15 @@ option(NESCO_AUDIO_DMA_REFILL_RAMFUNC
 option(NESCO_AUDIO_DMA64
        "Use 64 samples per PWM DMA half-buffer" OFF)
 option(NESCO_AUDIO_HIGH_PRIORITY
-       "Give the PWM audio DMA channels RP2040 high-priority arbitration" OFF)
+       "Give the PWM audio DMA channels RP2040 high-priority arbitration" ON)
 option(NESCO_AUDIO_DYNAMIC_PRIORITY
        "Raise PWM audio DMA priority only while the audio ring is below its low watermark" OFF)
 option(NESCO_LCD_DMA_STRIP4
        "Use four source lines per LCD DMA burst for audio/display arbitration" OFF)
 option(NESCO_AUDIO_DISPLAY_BACKOFF
        "Skip a display frame while the audio ring is below its low watermark" OFF)
+option(NESCO_AUDIO_FRAME_ADMISSION
+       "Use whole-frame display admission to protect Mapper 19 audio deadlines" ON)
 option(NESCO_AUDIO_LCD_RING_GUARD
        "Defer LCD strip DMA briefly while the audio ring is below its low watermark" OFF)
 option(NESCO_DIAGNOSTIC_AUTOSTART_BUILTIN
@@ -261,6 +269,25 @@ if(PICO_BUILD)
         )
     endif()
 
+    if(NESCO_AUDIO_BLOCK_PRODUCER)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_HSYNC_BATCH=1
+            NESCO_AUDIO_BLOCK_PRODUCER=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_CLOCK_LOCK)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_CLOCK_LOCK=1
+        )
+    endif()
+
+    if(NESCO_MAPPER19_AUDIO_COMFORT)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_MAPPER19_AUDIO_COMFORT=1
+        )
+    endif()
+
     if(NESCO_AUDIO_PREFILL)
         target_compile_definitions(Picocalc_NESco PRIVATE
             NESCO_AUDIO_PREFILL=1
@@ -318,6 +345,12 @@ if(PICO_BUILD)
     if(NESCO_AUDIO_DISPLAY_BACKOFF)
         target_compile_definitions(Picocalc_NESco PRIVATE
             NESCO_AUDIO_DISPLAY_BACKOFF=1
+        )
+    endif()
+
+    if(NESCO_AUDIO_FRAME_ADMISSION)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_AUDIO_FRAME_ADMISSION=1
         )
     endif()
 

@@ -583,6 +583,10 @@ static inline BYTE __not_in_flash_func(K6502_Read)(WORD wAddr)
     {
       return 0xff;
     }
+    if (MapperNo == 19 && !Map19_WramReadAllowed(wAddr))
+    {
+      return 0xff;
+    }
     if (ROM_SRAM)
     {
       return SRAM[wAddr & 0x1fff];

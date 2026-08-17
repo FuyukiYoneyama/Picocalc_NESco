@@ -117,6 +117,9 @@ void sram_build_map19_path(char *dst, size_t dst_size, const char *rom_path)
 
 bool sram_current_rom_uses_save(void)
 {
+    if (MapperNo == 19) {
+        return Map19_ExternalWramBatteryEnabled();
+    }
     return ROM_SRAM;
 }
 
@@ -282,7 +285,7 @@ void sram_store_restore_map19(void)
     FRESULT fr;
     BYTE data[0x80];
 
-    if (MapperNo != 19 || !ROM_SRAM) {
+    if (MapperNo != 19 || !Map19_N163BatteryEnabled()) {
         return;
     }
 
@@ -297,6 +300,7 @@ void sram_store_restore_map19(void)
     if (f_size(&file) != sizeof(data)) {
         const FSIZE_t file_size = f_size(&file);
         f_close(&file);
+        (void)file_size;
         NESCO_LOG_RUNTIME("[M19] restore failed path=%s size=%lu\r\n",
                        s_current_map19_path,
                        (unsigned long)file_size);
@@ -327,7 +331,7 @@ void sram_store_flush_map19(void)
     const BYTE *data = nullptr;
     unsigned size = 0;
 
-    if (MapperNo != 19 || !ROM_SRAM) {
+    if (MapperNo != 19 || !Map19_N163BatteryEnabled()) {
         return;
     }
 

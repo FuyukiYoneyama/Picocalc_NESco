@@ -109,6 +109,16 @@ enum {
 static bool s_audio_display_backoff = false;
 #endif
 
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_FRAME_ADMISSION)
+enum {
+    /* Skipped units are complete frames: the emulator still advances its
+     * PPU/APU/N163 timeline, but no partial line is submitted to the LCD. */
+    AUDIO_FRAME_ADMISSION_LOW_WATERMARK = 1024,
+    AUDIO_FRAME_ADMISSION_RESUME_WATERMARK = 1536,
+};
+static bool s_audio_frame_admission_skip = false;
+#endif
+
 #if defined(PICO_BUILD) && defined(NESCO_AUDIO_LCD_RING_GUARD)
 enum {
     AUDIO_LCD_RING_GUARD_LOW_WATERMARK = 192,
@@ -547,6 +557,9 @@ void display_init(void) {
 #ifdef NESCO_AUDIO_DISPLAY_BACKOFF
     s_audio_display_backoff = false;
 #endif
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_FRAME_ADMISSION)
+    s_audio_frame_admission_skip = false;
+#endif
 }
 
 void display_set_viewport(int x, int y, int w, int h) {
@@ -616,6 +629,9 @@ void display_set_mode(display_mode_t mode) {
 #ifdef NESCO_AUDIO_DISPLAY_BACKOFF
     s_audio_display_backoff = false;
 #endif
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_FRAME_ADMISSION)
+    s_audio_frame_admission_skip = false;
+#endif
 }
 
 void display_toggle_nes_view_scale(void) {
@@ -641,6 +657,9 @@ void display_toggle_nes_view_scale(void) {
     s_last_frame_us = 0;
     s_next_frame_deadline_us = 0;
     s_active_frame_skip = 0;
+#endif
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_FRAME_ADMISSION)
+    s_audio_frame_admission_skip = false;
 #endif
 }
 
@@ -722,6 +741,9 @@ void display_reset_frame_pacing(void) {
     s_last_frame_us = 0;
     s_next_frame_deadline_us = 0;
     s_active_frame_skip = 0;
+#endif
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_FRAME_ADMISSION)
+    s_audio_frame_admission_skip = false;
 #endif
     FrameSkip = 0;
 }
@@ -1345,6 +1367,21 @@ int InfoNES_LoadFrame(void) {
     }
     if (s_audio_display_backoff && FrameSkip < 1) {
         FrameSkip = 1;
+    }
+#endif
+#if defined(PICO_BUILD) && defined(NESCO_AUDIO_FRAME_ADMISSION)
+    if (MapperNo == 19) {
+        const int audio_ring_level = audio_ring_available();
+        if (!s_audio_frame_admission_skip &&
+            audio_ring_level <= AUDIO_FRAME_ADMISSION_LOW_WATERMARK) {
+            s_audio_frame_admission_skip = true;
+        } else if (s_audio_frame_admission_skip &&
+                   audio_ring_level >= AUDIO_FRAME_ADMISSION_RESUME_WATERMARK) {
+            s_audio_frame_admission_skip = false;
+        }
+        if (s_audio_frame_admission_skip && FrameSkip < 1) {
+            FrameSkip = 1;
+        }
     }
 #endif
     s_active_frame_skip = FrameSkip;

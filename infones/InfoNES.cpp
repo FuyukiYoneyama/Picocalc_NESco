@@ -862,6 +862,10 @@ struct NesHeader_tag NesHeader;
 /* Mapper Number */
 BYTE MapperNo;
 
+/* NES 2.0 identity bits retained separately from the legacy header fields. */
+BYTE ROM_NES2;
+BYTE ROM_Submapper;
+
 /* Mirroring 0:Horizontal 1:Vertical */
 BYTE ROM_Mirroring;
 /* It has SRAM */
@@ -1057,16 +1061,27 @@ int InfoNES_Reset()
   /*  Get information on the cassette                                  */
   /*-------------------------------------------------------------------*/
 
-  // boot_menu.cpp already normalizes legacy iNES garbage, so mapper detection
-  // can safely use the standard lower+upper nibble combination for both
-  // classic iNES and NES 2.0 headers.
-  MapperNo = (NesHeader.byInfo1 >> 4) | (NesHeader.byInfo2 & 0xf0);
+  /* The mapper number in the legacy fields is sufficient for Mapper 19, but
+   * retain NES 2.0's submapper identity so board-dependent mapper behavior
+   * does not have to infer it from a game title. */
+  ROM_NES2 = ((NesHeader.byInfo2 & 0x0c) == 0x08) ? 1 : 0;
+  ROM_Submapper = ROM_NES2 ? (BYTE)(NesHeader.byReserve[0] >> 4) : 0;
+  MapperNo = (BYTE)((NesHeader.byInfo1 >> 4) | (NesHeader.byInfo2 & 0xf0));
+  if (ROM_NES2)
+  {
+    MapperNo = (BYTE)(MapperNo | (NesHeader.byReserve[0] & 0x0f));
+  }
 
   // Get information on the ROM
   ROM_Mirroring = NesHeader.byInfo1 & 1;
   ROM_SRAM = NesHeader.byInfo1 & 2;
   ROM_Trainer = NesHeader.byInfo1 & 4;
   ROM_FourScr = NesHeader.byInfo1 & 8;
+
+  if (MapperNo == 19)
+  {
+    Map19_SelectBoardProfile(ROM_NES2, ROM_Submapper);
+  }
 
   /*-------------------------------------------------------------------*/
   /*  Initialize resources                                             */

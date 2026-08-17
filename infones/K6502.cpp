@@ -781,18 +781,55 @@ static void __not_in_flash_func(procNMI)()
 }
 
 template <bool Mapper19>
+static inline void __not_in_flash_func(mapper19_clock_cpu_cycles_fast)(int clocks)
+{
+  if constexpr (Mapper19)
+  {
+    if (clocks <= 0)
+    {
+      return;
+    }
+
+    /* Keep the IRQ and N163 accounting bit-exact with Map19_ClockCpuCycles,
+     * but inline it into the already RAM-resident CPU boundary loop.  The
+     * old external call crossed a flash veneer for every instruction. */
+    if (Map19_IRQ_Enable && !Map19_IRQ_Terminal)
+    {
+      const DWORD next = Map19_IRQ_Cnt + (DWORD)clocks;
+      if (next >= 0x7fff)
+      {
+        Map19_IRQ_Cnt = 0x7fff;
+        Map19_IRQ_Terminal = 1;
+        Map19_IRQ_Pending = 1;
+      }
+      else
+      {
+        Map19_IRQ_Cnt = next;
+      }
+    }
+
+    Map19_N163_PendingAudioCycles += (uint32_t)clocks;
+  }
+}
+
+template <bool Mapper19>
 static inline void __not_in_flash_func(mapper19_instruction_boundary)(int instructionStartClocks)
 {
   if constexpr (Mapper19)
   {
-    Map19_ClockCpuCycles(g_wPassedClocks - instructionStartClocks);
-    Map19_CommitCpuBoundary();
+    mapper19_clock_cpu_cycles_fast<Mapper19>(g_wPassedClocks - instructionStartClocks);
+    /* IRQ writes are rare.  Avoid a flash-resident call/return on every
+     * instruction when there is no deferred mapper write to commit. */
+    if (Map19_DeferredIrqWritePending)
+    {
+      Map19_CommitCpuBoundary();
+    }
     if (Map19_IRQ_Pending)
     {
       const int interruptStartClocks = g_wPassedClocks;
       IRQ_REQ;
       procNMI();
-      Map19_ClockCpuCycles(g_wPassedClocks - interruptStartClocks);
+      mapper19_clock_cpu_cycles_fast<Mapper19>(g_wPassedClocks - interruptStartClocks);
     }
   }
 }
@@ -1821,7 +1858,7 @@ static void __not_in_flash_func(step_with_interrupts)(int wClocks)
   procNMI();
   if constexpr (Mapper19)
   {
-    Map19_ClockCpuCycles(g_wPassedClocks - serviceStartClocks);
+    mapper19_clock_cpu_cycles_fast<true>(g_wPassedClocks - serviceStartClocks);
   }
   step<Mapper19>(wClocks);
 }

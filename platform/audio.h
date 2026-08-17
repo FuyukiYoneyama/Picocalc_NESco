@@ -10,6 +10,7 @@
  */
 #pragma once
 #include "InfoNES_Types.h"
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus

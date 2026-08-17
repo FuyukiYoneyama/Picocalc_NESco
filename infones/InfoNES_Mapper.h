@@ -39,6 +39,9 @@ extern BYTE *Map6_Chr_Ram;
 extern BYTE *Map19_Chr_Ram;
 extern BYTE *Map188_Dummy;
 
+/* Fast-path observation used by the CPU instruction-boundary template. */
+extern BYTE Map19_DeferredIrqWritePending;
+
 /*-------------------------------------------------------------------*/
 /*  Macros                                                           */
 /*-------------------------------------------------------------------*/
@@ -148,13 +151,25 @@ void Map18_Write(WORD wAddr, BYTE byData);
 void Map18_HSync();
 
 void Map19_Init();
+void Map19_SelectBoardProfile(BYTE nes2_header, BYTE submapper);
+bool Map19_WramReadAllowed(WORD wAddr);
 bool Map19_WramWriteAllowed(WORD wAddr);
+bool Map19_ExternalWramBatteryEnabled();
+bool Map19_N163BatteryEnabled();
+bool Map19_N163AudioEnabled();
+const char *Map19_BoardProfileName();
+uint32_t Map19_BoardPayloadCrc32();
 extern BYTE Map19_IRQ_Enable;
 extern BYTE Map19_IRQ_Terminal;
 extern BYTE Map19_IRQ_Pending;
+extern DWORD Map19_IRQ_Cnt;
+extern uint32_t Map19_N163_PendingAudioCycles;
 void Map19_ClockCpuCycles(int clocks);
 void Map19_CommitCpuBoundary();
 void Map19_RenderAudioSlice(int16_t *dst, int n, bool enabled);
+void Map19_QueueAudioSlice(int n, bool enabled);
+void Map19_RenderQueuedAudioSlice(int16_t *dst, int n);
+void Map19_RenderAudioBlock(int16_t *dst, int n);
 void Map19_Release();
 void Map19_Write(WORD wAddr, BYTE byData);
 void Map19_Apu(WORD wAddr, BYTE byData);

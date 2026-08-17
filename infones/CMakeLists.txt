@@ -103,6 +103,13 @@ if(NESCO_AUDIO_HSYNC_BATCH32)
     )
 endif()
 
+if(NESCO_AUDIO_BLOCK_PRODUCER)
+    target_compile_definitions(infones PUBLIC
+        NESCO_AUDIO_HSYNC_BATCH=1
+        NESCO_AUDIO_BLOCK_PRODUCER=1
+    )
+endif()
+
 if(NESCO_AUDIO_RAMFUNC)
     target_compile_definitions(infones PUBLIC
         NESCO_AUDIO_RAMFUNC=1
