@@ -62,6 +62,7 @@ void Map87_Init()
 /*-------------------------------------------------------------------*/
 void Map87_Sram( WORD wAddr, BYTE byData )
 {
+  unsigned int nChrPages;
   BYTE byChrBank;
 
   if ( wAddr < 0x6000 || wAddr > 0x7fff )
@@ -69,9 +70,15 @@ void Map87_Sram( WORD wAddr, BYTE byData )
     return;
   }
 
-  byChrBank = ( byData & 0x02 ) >> 1;
-  byChrBank <<= 3;
-  byChrBank %= ( NesHeader.byVRomSize << 3 );
+  /* Mapper 87 swaps D0/D1 before selecting the 8 KiB CHR bank. */
+  byChrBank = (BYTE)( ( ( byData & 0x01 ) << 1 ) |
+                      ( ( byData & 0x02 ) >> 1 ) );
+  nChrPages = ( (unsigned int)NesHeader.byVRomSize << 3 );
+  if ( nChrPages == 0 )
+  {
+    return;
+  }
+  byChrBank = (BYTE)( ( (unsigned int)byChrBank << 3 ) % nChrPages );
 
   PPUBANK[ 0 ] = VROMPAGE( byChrBank + 0 );
   PPUBANK[ 1 ] = VROMPAGE( byChrBank + 1 );
