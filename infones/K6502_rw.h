@@ -1057,8 +1057,13 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
       SRAM[wAddr & 0x1fff] = byData;
       SRAMwritten = true;
 
-      /* Write to SRAM, when no SRAM */
-      if (!ROM_SRAM)
+      /*
+       * Mapper 34 NINA boards overlay their bank registers on the SRAM
+       * address range.  The common path must notify the mapper even when
+       * the header advertises PRG-RAM; ordinary SRAM writes remain handled
+       * by the SRAM array above.
+       */
+      if (!ROM_SRAM || MapperNo == 34)
       {
         MapperSram(wAddr, byData);
       }
