@@ -183,51 +183,45 @@ void Map10_Write( WORD wAddr, BYTE byData )
 /*-------------------------------------------------------------------*/
 void Map10_PPU( WORD wAddr )
 {
-  /* Control Latch Selector */ 
-  switch ( wAddr & 0x3ff0 )
+  /*
+   * MMC4 recognizes only the eight PPU reads at each $xFD8/$xFE8
+   * trigger range.  Do not round the address down to a 16-byte block:
+   * $xFD0-$xFD7 and $xFE0-$xFE7 must leave the latch unchanged.
+   */
+  if ( wAddr >= 0x0fd8 && wAddr <= 0x0fdf )
   {
-    case 0x0fd0:
-      /* Latch Control */
-      latch3.state = 0xfd;
-      /* Set PPU Banks */
-      PPUBANK[ 0 ] = VROMPAGE( latch3.lo_bank );
-      PPUBANK[ 1 ] = VROMPAGE( latch3.lo_bank + 1 );
-      PPUBANK[ 2 ] = VROMPAGE( latch3.lo_bank + 2 );
-      PPUBANK[ 3 ] = VROMPAGE( latch3.lo_bank + 3 );     
-      InfoNES_SetupChr();
-      break;
-
-    case 0x0fe0:
-      /* Latch Control */
-      latch3.state = 0xfe;
-      /* Set PPU Banks */
-      PPUBANK[ 0 ] = VROMPAGE( latch3.hi_bank );
-      PPUBANK[ 1 ] = VROMPAGE( latch3.hi_bank + 1 );
-      PPUBANK[ 2 ] = VROMPAGE( latch3.hi_bank + 2 );
-      PPUBANK[ 3 ] = VROMPAGE( latch3.hi_bank + 3 );     
-      InfoNES_SetupChr();      
-      break;
-
-    case 0x1fd0:
-      /* Latch Control */
-      latch4.state = 0xfd;
-      /* Set PPU Banks */
-      PPUBANK[ 4 ] = VROMPAGE( latch4.lo_bank );
-      PPUBANK[ 5 ] = VROMPAGE( latch4.lo_bank + 1 );
-      PPUBANK[ 6 ] = VROMPAGE( latch4.lo_bank + 2 );
-      PPUBANK[ 7 ] = VROMPAGE( latch4.lo_bank + 3 );     
-      InfoNES_SetupChr();
-      break;      
-
-    case 0x1fe0:
-      /* Latch Control */
-      latch4.state = 0xfe;
-      /* Set PPU Banks */
-      PPUBANK[ 4 ] = VROMPAGE( latch4.hi_bank );
-      PPUBANK[ 5 ] = VROMPAGE( latch4.hi_bank + 1 );
-      PPUBANK[ 6 ] = VROMPAGE( latch4.hi_bank + 2 );
-      PPUBANK[ 7 ] = VROMPAGE( latch4.hi_bank + 3 );     
-      InfoNES_SetupChr();            
-      break;
+    latch3.state = 0xfd;
+    PPUBANK[ 0 ] = VROMPAGE( latch3.lo_bank );
+    PPUBANK[ 1 ] = VROMPAGE( latch3.lo_bank + 1 );
+    PPUBANK[ 2 ] = VROMPAGE( latch3.lo_bank + 2 );
+    PPUBANK[ 3 ] = VROMPAGE( latch3.lo_bank + 3 );
+    InfoNES_SetupChr();
+  }
+  else if ( wAddr >= 0x0fe8 && wAddr <= 0x0fef )
+  {
+    latch3.state = 0xfe;
+    PPUBANK[ 0 ] = VROMPAGE( latch3.hi_bank );
+    PPUBANK[ 1 ] = VROMPAGE( latch3.hi_bank + 1 );
+    PPUBANK[ 2 ] = VROMPAGE( latch3.hi_bank + 2 );
+    PPUBANK[ 3 ] = VROMPAGE( latch3.hi_bank + 3 );
+    InfoNES_SetupChr();
+  }
+  else if ( wAddr >= 0x1fd8 && wAddr <= 0x1fdf )
+  {
+    latch4.state = 0xfd;
+    PPUBANK[ 4 ] = VROMPAGE( latch4.lo_bank );
+    PPUBANK[ 5 ] = VROMPAGE( latch4.lo_bank + 1 );
+    PPUBANK[ 6 ] = VROMPAGE( latch4.lo_bank + 2 );
+    PPUBANK[ 7 ] = VROMPAGE( latch4.lo_bank + 3 );
+    InfoNES_SetupChr();
+  }
+  else if ( wAddr >= 0x1fe8 && wAddr <= 0x1fef )
+  {
+    latch4.state = 0xfe;
+    PPUBANK[ 4 ] = VROMPAGE( latch4.hi_bank );
+    PPUBANK[ 5 ] = VROMPAGE( latch4.hi_bank + 1 );
+    PPUBANK[ 6 ] = VROMPAGE( latch4.hi_bank + 2 );
+    PPUBANK[ 7 ] = VROMPAGE( latch4.hi_bank + 3 );
+    InfoNES_SetupChr();
   }
 }
