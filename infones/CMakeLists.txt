@@ -36,6 +36,18 @@ if(NESCO_RUNTIME_LOGS)
     )
 endif()
 
+if(NESCO_M71_COUNTER_DIAGNOSTICS)
+    target_compile_definitions(infones PUBLIC
+        NESCO_M71_COUNTER_DIAGNOSTICS=1
+    )
+endif()
+
+if(NESCO_M71_HEARTBEAT)
+    target_compile_definitions(infones PUBLIC
+        NESCO_M71_HEARTBEAT=1
+    )
+endif()
+
 if(NESCO_CORE1_BASELINE_LOG OR NESCO_BG_TILE_SHARE_LOG OR NESCO_PALETTE_SNAPSHOT_LOG)
     target_compile_definitions(infones PUBLIC
         NESCO_CORE1_BASELINE_LOG=1

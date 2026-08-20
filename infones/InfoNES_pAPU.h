@@ -145,6 +145,8 @@ struct ApuEvent_t
 typedef void (*ApuWritefunc)(WORD addr, BYTE value);
 extern ApuWritefunc pAPUSoundRegs[20];
 void ApuWriteControl(WORD addr, BYTE value);
+void InfoNES_pAPUWriteDmcControl(BYTE value);
+void InfoNES_pAPUClearDmcIrq(void);
 
 #define InfoNES_pAPUWriteControl(addr, value) \
   {                                           \
@@ -203,6 +205,7 @@ extern BYTE ApuC4Atl;
 /*-------------------------------------------------------------------*/
 
 extern int ApuC5DmaLength;
+extern BYTE ApuC5IrqPending;
 
 #endif /* InfoNES_PAPU_H_INCLUDED */
 

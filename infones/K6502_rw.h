@@ -477,6 +477,58 @@ static inline BYTE __not_in_flash_func(K6502_Read)(WORD wAddr)
     {
       // Set return value
       byRet = PPU_R2;
+#if defined(NESCO_RUNTIME_LOGS)
+      /*
+       * Bee 52 waits at $E6D2 until the sprite-0 bit is visible.  Keep a
+       * short, game-only trace separate from the generic status trace: the
+       * latter has normally exhausted its startup budget before this scene.
+       */
+      if (MapperNo == 71 && PC == 0xE6D2 && SPRRAM[SPR_Y] == 0xA7)
+      {
+        static unsigned m71_game_e6d2_trace_count;
+        if (m71_game_e6d2_trace_count < 16u)
+        {
+          printf("[M71_E6D2] n=%u sl=%u value=%02X r1=%02X r2=%02X "
+                 "spr0=%02X,%02X,%02X,%02X\n",
+                 m71_game_e6d2_trace_count++, (unsigned)PPU_Scanline,
+                 (unsigned)byRet, (unsigned)PPU_R1, (unsigned)PPU_R2,
+                 (unsigned)SPRRAM[SPR_Y], (unsigned)SPRRAM[SPR_CHR],
+                 (unsigned)SPRRAM[SPR_ATTR], (unsigned)SPRRAM[SPR_X]);
+        }
+      }
+      const uint16_t m71_status_pcs[] = {
+          0xC99F, 0xC9A4, 0xCA29, 0xCA36, 0xCA58,
+          0xCD6D, 0xE5B9, 0xE6C0, 0xE6D2, 0xFBD1, 0xFBD4};
+      unsigned m71_status_pc_index = 0xffffffffu;
+      for (unsigned i = 0; i < sizeof(m71_status_pcs) / sizeof(m71_status_pcs[0]); ++i)
+      {
+        if (PC == m71_status_pcs[i])
+        {
+          m71_status_pc_index = i;
+          break;
+        }
+      }
+      if (m71_status_pc_index != 0xffffffffu)
+      {
+        static unsigned m71_status_trace_counts[sizeof(m71_status_pcs) / sizeof(m71_status_pcs[0])] = {};
+        if (m71_status_trace_counts[m71_status_pc_index] < 8u ||
+            (m71_status_trace_counts[m71_status_pc_index] < 32u &&
+             (byRet & R2_HIT_SP) != 0 && PC == 0xE6D2))
+        {
+          printf("[M71_STATUS] n=%u sl=%u value=%02X r1=%02X r2=%02X maxsp=%u pc=%04X a=%02X f=%02X\n",
+                 m71_status_trace_counts[m71_status_pc_index],
+                 (unsigned)PPU_Scanline,
+                 (unsigned)byRet,
+                 (unsigned)PPU_R1,
+                 (unsigned)PPU_R2,
+                 (unsigned)((PPU_R2 & R2_MAX_SP) != 0),
+                 (unsigned)PC,
+                 (unsigned)A,
+                 (unsigned)F);
+          ++m71_status_trace_counts[m71_status_pc_index];
+        }
+      }
+#endif
       #if INFONES_ENABLE_PPU2006_EVT_LOG
       if (structured_log_event_enabled())
       {
@@ -529,6 +581,8 @@ static inline BYTE __not_in_flash_func(K6502_Read)(WORD wAddr)
         byRet |= (1 << 3);
       if (ApuC5DmaLength > 0)
         byRet |= (1 << 4);
+      if (ApuC5IrqPending)
+        byRet |= (1 << 7);
 
       // FrameIRQ
       APU_Reg[0x15] &= ~0x40;
@@ -540,6 +594,21 @@ static inline BYTE __not_in_flash_func(K6502_Read)(WORD wAddr)
       const DWORD bit = PAD1_Bit;
       const BYTE padBit = (bit < 8) ? (BYTE)((PAD1_Latch >> bit) & 1) : 1;
       byRet = (BYTE)(padBit | 0x40);
+#if defined(NESCO_RUNTIME_LOGS)
+      if (MapperNo == 71 && PC >= 0x8140 && PC <= 0x8165)
+      {
+        static unsigned m71_pad_trace_count;
+        if (m71_pad_trace_count < 128u)
+        {
+          printf("[M71_PAD] n=%u pc=%04X bit=%u value=%02X latch=%08lX "
+                 "ram00=%02X ram7fe=%02X ram7ff=%02X a=%02X f=%02X\n",
+                 m71_pad_trace_count++, (unsigned)PC, (unsigned)bit,
+                 (unsigned)byRet, (unsigned long)PAD1_Latch,
+                 (unsigned)RAM[0x0000], (unsigned)RAM[0x07FE & 0x07FF],
+                 (unsigned)RAM[0x07FF & 0x07FF], (unsigned)A, (unsigned)F);
+        }
+      }
+#endif
       if (PAD1_Bit < 8)
       {
         PAD1_Bit++;
@@ -684,8 +753,23 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
     switch (wAddr & 0x7)
     {
     case 0: /* 0x2000 */
+      InfoNES_RecordPpuRenderRegisterWrite();
       if ((PPU_R0 ^ byData) & R0_SP_SIZE)
         InfoNES_InvalidateSpriteActiveList();
+#if defined(NESCO_RUNTIME_LOGS)
+      if (MapperNo == 71 && SPRRAM[SPR_Y] == 0xA7)
+      {
+        static unsigned m71_game_ppu2000_trace_count;
+        if (m71_game_ppu2000_trace_count < 64u)
+        {
+          printf("[M71_PPUW] n=%u sl=%u pc=%04X reg=2000 value=%02X old=%02X temp=%04X addr=%04X latch=%u\n",
+                 m71_game_ppu2000_trace_count++, (unsigned)PPU_Scanline,
+                 (unsigned)PC, (unsigned)byData, (unsigned)PPU_R0,
+                 (unsigned)PPU_Temp, (unsigned)PPU_Addr,
+                 (unsigned)PPU_Latch_Flag);
+        }
+      }
+#endif
       PPU_R0 = byData;
       PPU_Increment = (PPU_R0 & R0_INC_ADDR) ? 32 : 1;
       PPU_NameTableBank = NAME_TABLE0 + (PPU_R0 & R0_NAME_ADDR);
@@ -712,6 +796,21 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
       break;
 
     case 1: /* 0x2001 */
+      InfoNES_RecordPpuRenderRegisterWrite();
+#if defined(NESCO_RUNTIME_LOGS)
+      if (MapperNo == 71 && SPRRAM[SPR_Y] == 0xA7)
+      {
+        static unsigned m71_game_ppu2001_trace_count;
+        if (m71_game_ppu2001_trace_count < 64u)
+        {
+          printf("[M71_PPUW] n=%u sl=%u pc=%04X reg=2001 value=%02X old=%02X temp=%04X addr=%04X latch=%u\n",
+                 m71_game_ppu2001_trace_count++, (unsigned)PPU_Scanline,
+                 (unsigned)PC, (unsigned)byData, (unsigned)PPU_R1,
+                 (unsigned)PPU_Temp, (unsigned)PPU_Addr,
+                 (unsigned)PPU_Latch_Flag);
+        }
+      }
+#endif
       PPU_R1 = byData;
       structured_log_note_initial_ppu_write(1, 0);
       structured_log_note_initial_a5_ppumask(byData);
@@ -751,6 +850,21 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
       break;
 
     case 5: /* 0x2005 */
+      InfoNES_RecordPpuRenderRegisterWrite();
+#if defined(NESCO_RUNTIME_LOGS)
+      if (MapperNo == 71 && SPRRAM[SPR_Y] == 0xA7)
+      {
+        static unsigned m71_game_ppu2005_trace_count;
+        if (m71_game_ppu2005_trace_count < 128u)
+        {
+          printf("[M71_PPUW] n=%u sl=%u pc=%04X reg=2005 value=%02X axis=%c temp=%04X addr=%04X latch=%u\n",
+                 m71_game_ppu2005_trace_count++, (unsigned)PPU_Scanline,
+                 (unsigned)PC, (unsigned)byData,
+                 PPU_Latch_Flag ? 'Y' : 'X', (unsigned)PPU_Temp,
+                 (unsigned)PPU_Addr, (unsigned)PPU_Latch_Flag);
+        }
+      }
+#endif
       // Set Scroll Register
       if (PPU_Latch_Flag)
       {
@@ -797,6 +911,21 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
       break;
 
     case 6: /* 0x2006 */
+      InfoNES_RecordPpuRenderRegisterWrite();
+#if defined(NESCO_RUNTIME_LOGS)
+      if (MapperNo == 71 && SPRRAM[SPR_Y] == 0xA7)
+      {
+        static unsigned m71_game_ppu2006_trace_count;
+        if (m71_game_ppu2006_trace_count < 128u)
+        {
+          printf("[M71_PPUW] n=%u sl=%u pc=%04X reg=2006 value=%02X phase=%c temp=%04X addr=%04X latch=%u\n",
+                 m71_game_ppu2006_trace_count++, (unsigned)PPU_Scanline,
+                 (unsigned)PC, (unsigned)byData,
+                 PPU_Latch_Flag ? 'L' : 'H', (unsigned)PPU_Temp,
+                 (unsigned)PPU_Addr, (unsigned)PPU_Latch_Flag);
+        }
+      }
+#endif
       // Set PPU Address
       if (PPU_Latch_Flag)
       {
@@ -930,6 +1059,10 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
     case 0x12:
     case 0x13:
       // Call Function corresponding to Sound Registers
+      if (wAddr == 0x4010)
+      {
+        InfoNES_pAPUWriteDmcControl(byData);
+      }
       if (!APU_Mute)
         pAPUSoundRegs[wAddr & 0x1f](wAddr, byData);
       break;
@@ -940,6 +1073,23 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
       {
       case 0x0: /* RAM */
         InfoNES_MemoryCopy(SPRRAM, &RAM[((WORD)byData << 8) & 0x7ff], SPRRAM_SIZE);
+#if defined(NESCO_M71_COUNTER_DIAGNOSTICS)
+        if (MapperNo == 71 && byData == 0x02)
+        {
+          static unsigned m71_oam_dma_trace_count;
+          if (m71_oam_dma_trace_count < 96u)
+          {
+            printf("[M71_OAM_DMA] n=%u pc=%04X src=%02X,%02X,%02X,%02X dst=%02X,%02X,%02X,%02X r3=%02X r4=%02X\n",
+                   m71_oam_dma_trace_count, (unsigned)PC,
+                   (unsigned)RAM[0x0200], (unsigned)RAM[0x0201],
+                   (unsigned)RAM[0x0202], (unsigned)RAM[0x0203],
+                   (unsigned)SPRRAM[0], (unsigned)SPRRAM[1],
+                   (unsigned)SPRRAM[2], (unsigned)SPRRAM[3],
+                   (unsigned)RAM[3], (unsigned)RAM[4]);
+          }
+          ++m71_oam_dma_trace_count;
+        }
+#endif
         break;
 
       case 0x3: /* SRAM */
@@ -967,6 +1117,7 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
       break;
 
     case 0x15: /* 0x4015 */
+      InfoNES_pAPUClearDmcIrq();
       InfoNES_pAPUWriteControl(wAddr, byData);
 #if 0
           /* Unknown */

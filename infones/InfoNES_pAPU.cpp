@@ -130,8 +130,8 @@ struct ApuQualityData_t
     // {0xa2567000, 0xa2567000, 0xa2567000, 183, 164, 11025, 1062658},
     // {0x512b3800, 0x512b3800, 0x512b3800, 367, 82, 22050, 531329},
     // {0x289d9c00, 0x289d9c00, 0x289d9c00, 735, 41, 44100, 265664},
-    {0xa2567000, 0xa2567000, 0xa2567000, 45963, 164, 11025, 664935},
-    {0x512b3800, 0x512b3800, 0x512b3800, 91926, 82, 22050, 1329870},
+    {0xa2567000, 0xa2567000, 0xa2567000, 45963, 164, 11025, 10638963},
+    {0x512b3800, 0x512b3800, 0x512b3800, 91926, 82, 22050, 5319481},
     {0x289d9c00, 0x289d9c00, 0x289d9c00, 184402, 41, 44100, 2659741},
 };
 
@@ -140,6 +140,9 @@ struct ApuQualityData_t
 // (44100*1.003)/60/262*65536 = 184402.54534351142
 
 // cycle_rate
+// NES CPU clocks per audio sample, in 16.16 fixed point:
+// 1789773 / 11025 * 65536 = 10638962.660136055
+// 1789773 / 22050 * 65536 = 5319481.330068027
 // 1789773 / 44100 * 65536 = 2659740.665034014
 
 /*-------------------------------------------------------------------*/
@@ -203,6 +206,8 @@ int32_t ApuC4EnvPhase;
 BYTE ApuC5Reg[4];
 BYTE ApuC5Enable;
 BYTE ApuC5Looping;
+BYTE ApuC5IrqEnable;
+BYTE ApuC5IrqPending;
 BYTE ApuC5CurByte;
 BYTE ApuC5DpcmValue;
 
@@ -211,6 +216,18 @@ int ApuC5Phaseacc;
 
 WORD ApuC5Address, ApuC5CacheAddr;
 int ApuC5DmaLength, ApuC5CacheDmaLength;
+
+void __not_in_flash_func(InfoNES_pAPUWriteDmcControl)(BYTE value)
+{
+  ApuC5IrqEnable = value & 0x80;
+  if (!ApuC5IrqEnable)
+    ApuC5IrqPending = 0;
+}
+
+void __not_in_flash_func(InfoNES_pAPUClearDmcIrq)(void)
+{
+  ApuC5IrqPending = 0;
+}
 
 /*-------------------------------------------------------------------*/
 /*  Wave Data                                                        */
@@ -956,6 +973,7 @@ void __not_in_flash_func(ApuRenderingWave5)(int n)
         while (ApuC5Phaseacc < 0)
         {
           ApuC5Phaseacc += ApuC5Freq;
+          const bool finalDmcByte = ApuC5DmaLength == 8;
           if (!(ApuC5DmaLength & 7))
           {
             ApuC5CurByte = K6502_Read(ApuC5Address);
@@ -963,6 +981,17 @@ void __not_in_flash_func(ApuRenderingWave5)(int n)
               ApuC5Address = 0x8000;
             else
               ApuC5Address++;
+
+            /* The DMC IRQ is raised when the last sample byte is fetched,
+             * rather than seven output bits later when the shift register
+             * becomes empty.  $4015 reads expose this latched flag; only a
+             * $4015 write or clearing $4010 bit 7 acknowledges it. */
+            if (finalDmcByte && !ApuC5Looping && ApuC5IrqEnable &&
+                !ApuC5IrqPending)
+            {
+              ApuC5IrqPending = 1;
+              IRQ_REQ;
+            }
           }
           if (!(--ApuC5DmaLength))
           {
@@ -1249,29 +1278,21 @@ void __not_in_flash_func(InfoNES_pAPUHsync)(bool enabled)
   auto n = n16 >> 16;
   leftSamples16 = n16 - (n << 16);
 
-#ifdef PICO_BUILD
-  /*
-   * The deadline producer owns complete 64-sample blocks.  Do not make the
-   * HSync callback perform a ring-admission query for every one-sample slice:
-   * the block mixer already has the bounded backpressure wait and is the only
-   * point that can commit a block to the ring.  This keeps the emulation-side
-   * APU/N163 timeline continuous while a consumer-side DMA half is draining.
-   * Other mappers retain the legacy capacity clamp because they do not use the
-   * bounded block handoff.
-   */
-#if defined(NESCO_AUDIO_BLOCK_PRODUCER)
-  int bufferLeft = (MapperNo == 19) ? 735 :
-                   (AUDIO_RING_SIZE - 1) - audio_ring_available();
-#else
-  /* InfoNES_pAPUHsync() is RAM-resident.  Do not bounce through the
-   * flash-resident compatibility wrapper on every scanline: the ring query
-   * itself is already a RAM hot-path function on Pico builds. */
-  int bufferLeft = (AUDIO_RING_SIZE - 1) - audio_ring_available();
-#endif
-#else
+#ifndef PICO_BUILD
   int bufferLeft = InfoNES_GetSoundBufferSize();
-#endif
   n = std::min<int>(bufferLeft, n);
+#else
+  /*
+   * The APU timeline is part of the emulated NES, not of the PWM producer.
+   * If a full audio ring clamps n to zero here, the CPU and PPU have already
+   * completed this scanline but the DMC timer, byte fetches, and IRQs do not
+   * advance.  In particular, Bee 52 uses that IRQ as game logic timing.
+   *
+   * InfoNES_SoundOutput owns Pico-ring backpressure and sample drops.  Keep
+   * rendering n samples so a consumer-side delay cannot stop emulated APU
+   * time.  Mapper 19's block producer already follows this rule.
+   */
+#endif
 
   if (enabled)
   {
@@ -1404,7 +1425,8 @@ void InfoNES_pAPUInit(void)
   /*   Initialize DPCM's Regs                                          */
   /*-------------------------------------------------------------------*/
   ApuC5Reg[0] = ApuC5Reg[1] = ApuC5Reg[2] = ApuC5Reg[3] = 0;
-  ApuC5Enable = ApuC5Looping = ApuC5CurByte = ApuC5DpcmValue = 0;
+  ApuC5Enable = ApuC5Looping = ApuC5IrqEnable = ApuC5IrqPending =
+      ApuC5CurByte = ApuC5DpcmValue = 0;
   ApuC5Freq = ApuC5Phaseacc;
   ApuC5Address = ApuC5CacheAddr = 0;
   ApuC5DmaLength = ApuC5CacheDmaLength = 0;

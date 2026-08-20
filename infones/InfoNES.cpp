@@ -769,6 +769,89 @@ BYTE byVramWriteEnable;
 /* PPU Address and Scroll Latch Flag*/
 BYTE PPU_Latch_Flag;
 
+namespace
+{
+/*
+ * PPU palette index zero is the universal background colour ($3F00).
+ * It remains visible when PPUMASK hides either the background or sprites;
+ * 0x20 is only a platform-side black sentinel for deliberately cropped
+ * display lines and must not be emitted for a masked NES scanline.
+ */
+constexpr BYTE kPpuUniversalBackgroundPaletteIndex = 0;
+
+struct PpuRenderState
+{
+  BYTE r0;
+  BYTE r1;
+  BYTE scr_h_bit;
+  WORD addr;
+  BYTE *bg_base;
+  BYTE *sp_base;
+  WORD sp_height;
+  BYTE up_down_clip;
+};
+
+PpuRenderState g_ppu_scanline_render_state{};
+bool g_ppu_scanline_uses_latched_state = false;
+uint32_t g_ppu_scanline_start_cpu_clock = 0;
+
+inline PpuRenderState capturePpuRenderState()
+{
+  return {PPU_R0, PPU_R1, PPU_Scr_H_Bit, PPU_Addr,
+          PPU_BG_Base, PPU_SP_Base, PPU_SP_Height, PPU_UpDown_Clip};
+}
+
+inline void applyPpuRenderState(const PpuRenderState &state)
+{
+  PPU_R0 = state.r0;
+  PPU_R1 = state.r1;
+  PPU_Scr_H_Bit = state.scr_h_bit;
+  PPU_Scr_H_Byte = state.addr & 0x001f;
+  PPU_Addr = state.addr;
+  PPU_NameTableBank = NAME_TABLE0 + ((state.addr >> 10) & 3);
+  PPU_BG_Base = state.bg_base;
+  PPU_SP_Base = state.sp_base;
+  PPU_SP_Height = state.sp_height;
+  PPU_UpDown_Clip = state.up_down_clip;
+}
+} // namespace
+
+void InfoNES_BeginScanlineRenderState()
+{
+  g_ppu_scanline_render_state = capturePpuRenderState();
+  g_ppu_scanline_uses_latched_state = false;
+  g_ppu_scanline_start_cpu_clock =
+      static_cast<uint32_t>(getCurrentClocks32());
+}
+
+void InfoNES_RecordPpuRenderRegisterWrite()
+{
+  /*
+   * The renderer is scanline based, while the CPU can change PPU state at
+   * any point during a scanline.  A write after PPU dot 256 cannot affect
+   * the already fetched visible pixels, so render this line using the state
+   * immediately before that first late write.  This keeps the CPU-visible
+   * state live for $2006/$2007 and mapper accesses; only the draw-side view
+   * is latched.
+  */
+  constexpr uint32_t kVisibleEndPpuDot = 256;
+  if (g_ppu_scanline_uses_latched_state ||
+      PPU_Scanline < SCAN_ON_SCREEN_START ||
+      PPU_Scanline >= SCAN_BOTTOM_OFF_SCREEN_START)
+  {
+    return;
+  }
+
+  const uint32_t elapsed_cpu_clocks =
+      static_cast<uint32_t>(getCurrentClocks32()) -
+      g_ppu_scanline_start_cpu_clock;
+  if (elapsed_cpu_clocks * 3 >= kVisibleEndPpuDot)
+  {
+    g_ppu_scanline_render_state = capturePpuRenderState();
+    g_ppu_scanline_uses_latched_state = true;
+  }
+}
+
 /* Up and Down Clipping Flag ( 0: non-clip, 1: clip ) */
 BYTE PPU_UpDown_Clip;
 
@@ -1318,6 +1401,7 @@ void __not_in_flash_func(InfoNES_Cycle)()
   for (;;)
   {
     //util::WorkMeterMark(MARKER_START);
+      InfoNES_BeginScanlineRenderState();
       if (!micromenu)
       {
           int scanline_clocks = STEP_PER_SCANLINE;
@@ -1481,7 +1565,26 @@ void __not_in_flash_func(InfoNES_Cycle)()
 
               // Set a sprite hit flag
               if ((PPU_R1 & R1_SHOW_SP) && (PPU_R1 & R1_SHOW_SCR))
+              {
                   PPU_R2 |= R2_HIT_SP;
+#if defined(NESCO_RUNTIME_LOGS)
+                  if (MapperNo == 71 && SPRRAM[SPR_Y] == 0xA7)
+                  {
+                    static unsigned m71_game_sprite0_set_trace_count;
+                    if (m71_game_sprite0_set_trace_count < 16u)
+                    {
+                      printf("[M71_SPR0_SET] n=%u sl=%u r1=%02X r2=%02X "
+                             "spr0=%02X,%02X,%02X,%02X hit=%u\n",
+                             m71_game_sprite0_set_trace_count++,
+                             (unsigned)PPU_Scanline, (unsigned)PPU_R1,
+                             (unsigned)PPU_R2, (unsigned)SPRRAM[SPR_Y],
+                             (unsigned)SPRRAM[SPR_CHR],
+                             (unsigned)SPRRAM[SPR_ATTR],
+                             (unsigned)SPRRAM[SPR_X], (unsigned)SpriteJustHit);
+                    }
+                  }
+#endif
+              }
 
               // Sprite-0 hit only updates PPUSTATUS.  PPUCTRL bit 6 is the
               // master/slave select and is not an NMI enable bit; the NES
@@ -1617,6 +1720,45 @@ inline void measureSpriteActiveListBuild()
   buildSpriteActiveList();
 }
 
+/*
+ * The sprite overflow bit is a frame-level PPU status flag.  It is
+ * cleared on the pre-render line and remains set after any visible
+ * scanline containing at least eight sprites; it is not cleared at the
+ * start of every scanline.  Sprite overflow is a PPU status event, not a
+ * rendering artifact, so evaluate it even on lines that are cropped from
+ * the 320x320 viewport.  Bee 52 polls this bit at the end of the frame.
+ */
+inline void InfoNES_UpdateSpriteOverflow()
+{
+  if (!(PPU_R1 & R1_SHOW_SP) || PPU_Scanline >= SCAN_UNKNOWN_START)
+    return;
+
+  int visible_sprites;
+  if (spriteActiveListAvailableForScanline(PPU_Scanline))
+  {
+    visible_sprites =
+        g_sprite_active_offsets[PPU_Scanline + 1] -
+        g_sprite_active_offsets[PPU_Scanline];
+  }
+  else
+  {
+    visible_sprites = 0;
+    for (int sprite_index = 0; sprite_index < 64; ++sprite_index)
+    {
+      const int sprite_offset = sprite_index << 2;
+      const int sprite_y = static_cast<int>(SPRRAM[sprite_offset + SPR_Y]) + 1;
+      if (sprite_y <= PPU_Scanline &&
+          PPU_Scanline < sprite_y + static_cast<int>(PPU_SP_Height))
+      {
+        ++visible_sprites;
+      }
+    }
+  }
+
+  if (visible_sprites >= 8)
+    PPU_R2 |= R2_MAX_SP;
+}
+
 /*===================================================================*/
 /*                                                                   */
 /*              InfoNES_HSync() : A function in H-Sync               */
@@ -1635,6 +1777,102 @@ int __not_in_flash_func(InfoNES_HSync)()
   InfoNES_pAPUHsync(!APU_Mute);
   //util::WorkMeterMark(MARKER_SOUND);
 
+  InfoNES_UpdateSpriteOverflow();
+
+#if defined(NESCO_M71_HEARTBEAT)
+  if (MapperNo == 71 && PPU_Scanline == 0)
+  {
+    extern volatile bool g_m71_post_transition;
+    static unsigned m71_heartbeat_frame;
+    if (g_m71_post_transition && m71_heartbeat_frame < 1200u)
+    {
+      printf("[M71_HEARTBEAT] n=%u pc=%04X a=%02X x=%02X y=%02X f=%02X sp=%02X "
+             "r0=%02X r1=%02X r2=%02X nmi_state=%02X ram00=%02X ram2c=%02X "
+             "ram30=%02X ram82=%02X ram83=%02X ram03=%02X ram04=%02X "
+             "ram07=%02X spr0=%02X,%02X,%02X,%02X stk=%02X,%02X,%02X,%02X "
+             "prg0=%u prg2=%u pad=%02X bit=%u frame=%lu cpu=%d\n",
+             m71_heartbeat_frame++, (unsigned)PC, (unsigned)A,
+             (unsigned)X, (unsigned)Y, (unsigned)F, (unsigned)SP,
+             (unsigned)PPU_R0, (unsigned)PPU_R1, (unsigned)PPU_R2,
+             (unsigned)NMI_State, (unsigned)RAM[0x00],
+             (unsigned)RAM[0x2C], (unsigned)RAM[0x30],
+             (unsigned)RAM[0x82], (unsigned)RAM[0x83],
+             (unsigned)RAM[0x03], (unsigned)RAM[0x04],
+             (unsigned)RAM[0x07], (unsigned)SPRRAM[0],
+             (unsigned)SPRRAM[1], (unsigned)SPRRAM[2],
+             (unsigned)RAM[0x01FC], (unsigned)RAM[0x01FD],
+             (unsigned)RAM[0x01FE], (unsigned)RAM[0x01FF],
+             (unsigned)((ROMBANK0 - ROM) >> 13),
+             (unsigned)((ROMBANK2 - ROM) >> 13), (unsigned)PAD1_Latch,
+             (unsigned)PAD1_Bit, (unsigned long)FrameCnt,
+             getCurrentClocks32());
+    }
+  }
+#endif
+
+#if defined(NESCO_M71_COUNTER_DIAGNOSTICS)
+  if (MapperNo == 71 && PPU_Scanline == 0)
+  {
+    extern volatile unsigned g_m71_nmi_service_count;
+    extern volatile unsigned g_m71_irq_service_count;
+    extern volatile unsigned g_m71_c810_rts_count;
+    extern volatile unsigned g_m71_e7c1_count;
+    extern volatile unsigned g_m71_e82e_count;
+    static unsigned m71_counter_frame;
+    if (m71_counter_frame < 20u ||
+        (m71_counter_frame % 10u) == 0u ||
+        (m71_counter_frame >= 320u && m71_counter_frame <= 360u))
+    {
+      printf("[M71_COUNTER] n=%u pc=%04X cpu=%d a=%02X x=%02X y=%02X sp=%02X ram00=%02X ram03=%02X ram04=%02X ram2c=%02X ram30=%02X ram300=%02X ram7fe=%02X f0=%02X f1=%02X f2=%02X f3=%02X f4=%02X f5=%02X f6=%02X f7=%02X f8=%02X f9=%02X fa=%02X fb=%02X fc=%02X pad=%02X bit=%u nmi=%u irq=%u c810rts=%u e7c1=%u e82e=%u skip=%u\n",
+             m71_counter_frame, (unsigned)PC, getCurrentClocks32(),
+             (unsigned)A, (unsigned)X, (unsigned)Y, (unsigned)SP,
+             (unsigned)RAM[0], (unsigned)RAM[3], (unsigned)RAM[4],
+             (unsigned)RAM[0x2C], (unsigned)RAM[0x30],
+             (unsigned)RAM[0x0300], (unsigned)RAM[0x07FE],
+             (unsigned)RAM[0xF0], (unsigned)RAM[0xF1], (unsigned)RAM[0xF2],
+             (unsigned)RAM[0xF3], (unsigned)RAM[0xF4], (unsigned)RAM[0xF5],
+             (unsigned)RAM[0xF6], (unsigned)RAM[0xF7], (unsigned)RAM[0xF8],
+             (unsigned)RAM[0xF9], (unsigned)RAM[0xFA], (unsigned)RAM[0xFB],
+             (unsigned)RAM[0xFC], (unsigned)PAD1_Latch, (unsigned)PAD1_Bit,
+             g_m71_nmi_service_count, g_m71_irq_service_count,
+             g_m71_c810_rts_count, g_m71_e7c1_count, g_m71_e82e_count,
+             (unsigned)FrameCnt);
+    }
+    ++m71_counter_frame;
+  }
+#endif
+
+#if defined(NESCO_RUNTIME_LOGS)
+  if (MapperNo == 71 && PPU_Scanline == 0)
+  {
+    static unsigned m71_frame_trace_count;
+    if (m71_frame_trace_count < 2000u &&
+        (m71_frame_trace_count < 20u ||
+         (m71_frame_trace_count % 10u) == 0u ||
+         (m71_frame_trace_count >= 320u && m71_frame_trace_count <= 360u)))
+    {
+      printf("[M71_FRAME] n=%u pc=%04X a=%02X x=%02X y=%02X f=%02X sp=%02X r0=%02X r1=%02X r2=%02X spr0=%02X,%02X,%02X,%02X hit=%u h=%u stk=%02X,%02X,%02X,%02X p0=%02X p8=%02X cpu=%d ram00=%02X ram01=%02X ram02=%02X ram03=%02X ram04=%02X ram05=%02X ram06=%02X ram07=%02X ram15=%02X ramef=%02X ram7fe=%02X ram7ff=%02X\n",
+             m71_frame_trace_count, (unsigned)PC,
+             (unsigned)A, (unsigned)X, (unsigned)Y, (unsigned)F,
+             (unsigned)SP, (unsigned)PPU_R0, (unsigned)PPU_R1, (unsigned)PPU_R2,
+             (unsigned)SPRRAM[0], (unsigned)SPRRAM[1],
+             (unsigned)SPRRAM[2], (unsigned)SPRRAM[3],
+             (unsigned)SpriteJustHit, (unsigned)PPU_SP_Height,
+             (unsigned)RAM[0x01FC], (unsigned)RAM[0x01FD],
+             (unsigned)RAM[0x01FE], (unsigned)RAM[0x01FF],
+             (unsigned)PPUBANK[0][0], (unsigned)PPUBANK[0][8],
+             getCurrentClocks32(),
+             (unsigned)RAM[0], (unsigned)RAM[1],
+             (unsigned)RAM[2], (unsigned)RAM[3], (unsigned)RAM[4],
+             (unsigned)RAM[5], (unsigned)RAM[6], (unsigned)RAM[7],
+             (unsigned)RAM[0x15], (unsigned)RAM[0xef],
+             (unsigned)RAM[0x07FE & 0x07FF],
+             (unsigned)RAM[0x07FF & 0x07FF]);
+    }
+    ++m71_frame_trace_count;
+  }
+#endif
+
   // int tmpv = (PPU_Addr >> 12) + ((PPU_Addr >> 5) << 3);
   // tmpv -= PPU_Scanline >= 240 ? 0 : PPU_Scanline;
   // PPU_Scr_V_Bit = tmpv & 7;
@@ -1650,9 +1888,12 @@ int __not_in_flash_func(InfoNES_HSync)()
     InfoNES_PreDrawLine(PPU_Scanline);
     if (PPU_Scanline >= 4 && PPU_Scanline < 240 - 4)
     {
-    
+      const PpuRenderState live_render_state = capturePpuRenderState();
+      if (g_ppu_scanline_uses_latched_state)
+        applyPpuRenderState(g_ppu_scanline_render_state);
       InfoNES_DrawLine();
-     
+      if (g_ppu_scanline_uses_latched_state)
+        applyPpuRenderState(live_render_state);
     } else {
       InfoNES_MemorySet(WorkLine, 0x20, NES_DISP_WIDTH);
     }
@@ -1677,7 +1918,22 @@ int __not_in_flash_func(InfoNES_HSync)()
   // PPU_Scr_H_Byte = PPU_Scr_H_Byte_Next;
   // PPU_Scr_H_Bit = PPU_Scr_H_Bit_Next;
 
-  if ((PPU_R1 & R1_SHOW_SP) || (PPU_R1 & R1_SHOW_SCR))
+  /*
+   * Loopy's vertical increment and horizontal reload occur at PPU dots 256
+   * and 257, using PPUMASK as it stood at those dots.  A later write to
+   * $2001 must not make the already-passed scroll operations happen.
+   *
+   * The scanline renderer records the state before the first post-256 PPU
+   * register write.  Reuse that mask for the end-of-scanline bookkeeping;
+   * leave PPU_Addr and PPU_Temp live so $2006/$2007 accesses retain their
+   * CPU-visible behaviour.
+   */
+  const BYTE ppu_r1_at_scroll_dot =
+      g_ppu_scanline_uses_latched_state
+          ? g_ppu_scanline_render_state.r1
+          : PPU_R1;
+  if ((ppu_r1_at_scroll_dot & R1_SHOW_SP) ||
+      (ppu_r1_at_scroll_dot & R1_SHOW_SCR))
   {
     if (PPU_Scanline == SCAN_VBLANK_END)
     {
@@ -2161,7 +2417,8 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     {
       bg_clear_start_us = time_us_64();
     }
-    InfoNES_MemorySet(pPoint, 0x20, NES_DISP_WIDTH);
+    InfoNES_MemorySet(pPoint, kPpuUniversalBackgroundPaletteIndex,
+                      NES_DISP_WIDTH);
     if constexpr (kDetailedPerfLogToSerial)
     {
       g_perf_ppu_bg_clear_us += time_us_64() - bg_clear_start_us;
@@ -2390,7 +2647,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
 
       // pPointTop = &WorkFrame[PPU_Scanline * NES_DISP_WIDTH];
       pPointTop = WorkLine;
-      InfoNES_MemorySet(pPointTop, 0x20, 8);
+      InfoNES_MemorySet(pPointTop, kPpuUniversalBackgroundPaletteIndex, 8);
     }
 
     /*-------------------------------------------------------------------*/
@@ -2435,9 +2692,6 @@ void __not_in_flash_func(InfoNES_DrawLine)()
 
   if (PPU_R1 & R1_SHOW_SP)
   {
-    // Reset Scanline Sprite Count
-    PPU_R2 &= ~R2_MAX_SP;
-
     // Reset sprite buffer
     if constexpr (kDetailedPerfLogToSerial)
     {
@@ -2745,7 +2999,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
 
       // pPointTop = &WorkFrame[PPU_Scanline * NES_DISP_WIDTH];
       pPointTop = WorkLine;
-      InfoNES_MemorySet(pPointTop, 0x20, 8);
+      InfoNES_MemorySet(pPointTop, kPpuUniversalBackgroundPaletteIndex, 8);
     }
 
     if (nSprCnt >= 8)

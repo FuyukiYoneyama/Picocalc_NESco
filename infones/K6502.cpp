@@ -14,6 +14,7 @@
 #include "InfoNES.h"
 #include "InfoNES_Mapper.h"
 #include "InfoNES_System.h"
+#include "InfoNES_pAPU.h"
 #include "display.h"
 #include "InfoNES_StructuredLog.h"
 #include "boko_flash_trace.h"
@@ -317,6 +318,18 @@ int g_wPassedClocks;
 int g_wCurrentClocks;
 static int g_wStepBasePassedClocks;
 static bool g_wStepActive;
+
+#if defined(NESCO_M71_COUNTER_DIAGNOSTICS)
+volatile unsigned g_m71_nmi_service_count;
+volatile unsigned g_m71_irq_service_count;
+volatile unsigned g_m71_c810_rts_count;
+volatile unsigned g_m71_e7c1_count;
+volatile unsigned g_m71_e82e_count;
+#endif
+
+#if defined(NESCO_M71_HEARTBEAT)
+volatile bool g_m71_post_transition;
+#endif
 
 WORD getPassedClocks()
 {
@@ -745,6 +758,38 @@ static void __not_in_flash_func(procNMI)()
   // Dispose of it if there is an interrupt requirement
   if (NMI_State != NMI_Wiring)
   {
+#if defined(NESCO_M71_COUNTER_DIAGNOSTICS)
+    if (MapperNo == 71)
+      ++g_m71_nmi_service_count;
+#endif
+#if defined(NESCO_RUNTIME_LOGS)
+    if (MapperNo == 71)
+    {
+      static unsigned m71_nmi_trace_count;
+      if (m71_nmi_trace_count < 16u)
+      {
+        printf("[M71_NMI] n=%u cpu=%d sl=%u pc=%04X a=%02X x=%02X y=%02X f=%02X sp=%02X ram00=%02X\n",
+               m71_nmi_trace_count++, getCurrentClocks32(),
+               (unsigned)PPU_Scanline, (unsigned)PC, (unsigned)A,
+               (unsigned)X, (unsigned)Y, (unsigned)F, (unsigned)SP,
+               (unsigned)RAM[0]);
+      }
+
+      if (SPRRAM[SPR_Y] == 0xA7)
+      {
+        static unsigned m71_game_nmi_trace_count;
+        if (m71_game_nmi_trace_count < 32u)
+        {
+          printf("[M71_GAME_NMI] n=%u cpu=%d sl=%u pc=%04X a=%02X f=%02X sp=%02X "
+                 "ram15=%02X ramef=%02X ram00=%02X\n",
+                 m71_game_nmi_trace_count++, getCurrentClocks32(),
+                 (unsigned)PPU_Scanline, (unsigned)PC, (unsigned)A,
+                 (unsigned)F, (unsigned)SP, (unsigned)RAM[0x15],
+                 (unsigned)RAM[0xEF], (unsigned)RAM[0]);
+        }
+      }
+    }
+#endif
     // NMI Interrupt
     NMI_State = NMI_Wiring;
     CLK(7);
@@ -756,6 +801,40 @@ static void __not_in_flash_func(procNMI)()
     SETF(FLAG_I);
 
     PC = K6502_ReadW(VECTOR_NMI);
+#if defined(NESCO_RUNTIME_LOGS)
+    if (MapperNo == 71)
+    {
+      static unsigned m71_nmi_vector_trace_count;
+      if (m71_nmi_vector_trace_count < 16u)
+      {
+        printf("[M71_NMI_VECTOR] n=%u cpu=%d pc=%04X sp=%02X\n",
+               m71_nmi_vector_trace_count++, getCurrentClocks32(),
+               (unsigned)PC, (unsigned)SP);
+      }
+
+      /*
+       * Bee 52's gameplay loop waits for its NMI path to advance $0015.
+       * The startup-only vector trace above is exhausted before that scene,
+       * so retain a separate bounded trace for the actual failing state.
+       */
+      if (SPRRAM[SPR_Y] == 0xA7)
+      {
+        static unsigned m71_game_nmi_vector_trace_count;
+        if (m71_game_nmi_vector_trace_count < 32u)
+        {
+          printf("[M71_GAME_NMI_VECTOR] n=%u cpu=%d pc=%04X op=%02X next=%02X "
+                 "r15=%02X bank=%u,%u,%u,%u\n",
+                 m71_game_nmi_vector_trace_count++, getCurrentClocks32(),
+                 (unsigned)PC, (unsigned)K6502_Read(PC),
+                 (unsigned)K6502_Read((WORD)(PC + 1)), (unsigned)RAM[0x15],
+                 (unsigned)((ROMBANK0 - ROM) >> 13),
+                 (unsigned)((ROMBANK1 - ROM) >> 13),
+                 (unsigned)((ROMBANK2 - ROM) >> 13),
+                 (unsigned)((ROMBANK3 - ROM) >> 13));
+        }
+      }
+    }
+#endif
   }
   else if (IRQ_State != IRQ_Wiring)
   {
@@ -763,6 +842,10 @@ static void __not_in_flash_func(procNMI)()
     // Execute IRQ if an I flag isn't being set
     if (!(F & FLAG_I))
     {
+#if defined(NESCO_M71_COUNTER_DIAGNOSTICS)
+      if (MapperNo == 71)
+        ++g_m71_irq_service_count;
+#endif
 #if defined(NESCO_MAPPER4_TIMING_TRACE)
       mapper4_trace_irq_service("procNMI");
 #endif
@@ -1003,7 +1086,131 @@ static void __not_in_flash_func(step)(int wClocks)
       break;
     }
 #endif
+    const WORD executedPc = PC;
     byCode = K6502_Read(PC++);
+
+#if defined(NESCO_RUNTIME_LOGS)
+    /*
+     * Mesen2 enters Bee 52's NMI code at $CA53 and reaches the $0015
+     * update at $CD44.  Record only this real-game segment so the trace
+     * says whether InfoNES diverges before the token update, rather than
+     * merely showing that an NMI edge was observed.
+     */
+    if (MapperNo == 71 && SPRRAM[SPR_Y] == 0xA7 &&
+        executedPc >= 0xCA53 && executedPc <= 0xCD50)
+    {
+      static unsigned m71_game_nmi_exec_trace_count;
+      if (m71_game_nmi_exec_trace_count < 256u)
+      {
+        printf("[M71_GAME_NMI_EXEC] n=%u pc=%04X op=%02X a=%02X x=%02X y=%02X "
+               "f=%02X sp=%02X sl=%u r15=%02X ramef=%02X\n",
+               m71_game_nmi_exec_trace_count++, (unsigned)executedPc,
+               (unsigned)byCode, (unsigned)A, (unsigned)X, (unsigned)Y,
+               (unsigned)F, (unsigned)SP, (unsigned)PPU_Scanline,
+               (unsigned)RAM[0x15], (unsigned)RAM[0xEF]);
+      }
+    }
+#endif
+
+#if defined(NESCO_M71_HEARTBEAT)
+    if (MapperNo == 71 && executedPc == 0xE822)
+      g_m71_post_transition = true;
+#endif
+
+#if defined(NESCO_M71_COUNTER_DIAGNOSTICS)
+    if (MapperNo == 71)
+    {
+      if (executedPc == 0xC819)
+        ++g_m71_c810_rts_count;
+      else if (executedPc == 0xE7C1)
+        ++g_m71_e7c1_count;
+      else if (executedPc == 0xE82E)
+        ++g_m71_e82e_count;
+
+      /*
+       * The Bee 52 start transition is input-sensitive and passes through
+       * several short routines.  Keep a bounded trace at those boundaries
+       * so a run can distinguish a missed controller edge from a CPU/PPU
+       * stall without logging every instruction.
+       */
+      switch (executedPc)
+      {
+      case 0xCAEC:
+      case 0xE79E:
+      case 0xE80A:
+      case 0xE822:
+      case 0xE82E:
+      case 0xCC93:
+      {
+        static unsigned m71_point_trace_count;
+        if (m71_point_trace_count < 1200u &&
+            (RAM[0x002C] == 0x6C || executedPc == 0xCC93 ||
+             PAD1_Latch != 0 || RAM[0x00F6] != 0))
+        {
+          printf("[M71_POINT] n=%u frame=%lu pc=%04X op=%02X cpu=%d sl=%u "
+                 "ram00=%02X ram2c=%02X ram30=%02X ram82=%02X ram83=%02X "
+                 "f0=%02X f3=%02X f6=%02X f9=%02X fb=%02X pad=%02lX bit=%lu "
+                 "a=%02X x=%02X y=%02X sp=%02X f=%02X\n",
+                 m71_point_trace_count++, structured_log_current_frame(),
+                 (unsigned)executedPc, (unsigned)byCode,
+                 getCurrentClocks32(), (unsigned)PPU_Scanline,
+                 (unsigned)RAM[0x00], (unsigned)RAM[0x002C],
+                 (unsigned)RAM[0x0030], (unsigned)RAM[0x0082],
+                 (unsigned)RAM[0x0083], (unsigned)RAM[0x00F0],
+                 (unsigned)RAM[0x00F3], (unsigned)RAM[0x00F6],
+                 (unsigned)RAM[0x00F9], (unsigned)RAM[0x00FB],
+                 (unsigned long)PAD1_Latch, (unsigned long)PAD1_Bit,
+                 (unsigned)A, (unsigned)X, (unsigned)Y, (unsigned)SP,
+                 (unsigned)F);
+        }
+        break;
+      }
+      default:
+        break;
+      }
+    }
+#endif
+
+#if defined(NESCO_RUNTIME_LOGS)
+    if (MapperNo == 71 &&
+        ((executedPc >= 0xE7A0 && executedPc <= 0xE820) ||
+         (executedPc >= 0xC810 && executedPc <= 0xC819)))
+    {
+      static unsigned m71_exec_trace_count;
+      if (m71_exec_trace_count < 256u)
+      {
+        printf("[M71_EXEC] n=%u pc=%04X op=%02X a=%02X x=%02X y=%02X f=%02X sp=%02X sl=%u clocks=%d ram00=%02X stk=%02X,%02X,%02X,%02X\n",
+               m71_exec_trace_count, (unsigned)executedPc,
+               (unsigned)byCode, (unsigned)A, (unsigned)X,
+               (unsigned)Y, (unsigned)F, (unsigned)SP,
+               (unsigned)PPU_Scanline, getCurrentClocks32(),
+               (unsigned)RAM[0], (unsigned)RAM[0x01FC],
+               (unsigned)RAM[0x01FD], (unsigned)RAM[0x01FE],
+               (unsigned)RAM[0x01FF]);
+        ++m71_exec_trace_count;
+      }
+    }
+#if defined(NESCO_RUNTIME_LOGS)
+    if (MapperNo == 71 &&
+        (executedPc == 0xC819 || executedPc == 0xE7C4 ||
+         executedPc == 0xE7D0 || executedPc == 0xE7DE ||
+         executedPc == 0xE7EC || executedPc == 0xE7F2 ||
+         executedPc == 0xE82E || executedPc == 0xE5C2))
+    {
+      static unsigned m71_flow_trace_count;
+      if (m71_flow_trace_count < 128u)
+      {
+        printf("[M71_FLOW] n=%u pc=%04X a=%02X x=%02X y=%02X f=%02X sp=%02X cpu=%d sl=%u ram00=%02X stk=%02X,%02X,%02X,%02X\n",
+               m71_flow_trace_count++, (unsigned)executedPc,
+               (unsigned)A, (unsigned)X, (unsigned)Y, (unsigned)F,
+               (unsigned)SP, getCurrentClocks32(), (unsigned)PPU_Scanline,
+               (unsigned)RAM[0], (unsigned)RAM[0x01FC],
+               (unsigned)RAM[0x01FD], (unsigned)RAM[0x01FE],
+               (unsigned)RAM[0x01FF]);
+      }
+    }
+#endif
+#endif
 
     //    printf("PC %04x %02x\n", PC - 1, byCode);
 

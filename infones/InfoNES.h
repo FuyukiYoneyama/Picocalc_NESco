@@ -349,6 +349,11 @@ int InfoNES_HSync();
 /* Render a scanline */
 void InfoNES_DrawLine();
 
+/* Keep CPU-visible PPU state separate from the state used to render a
+ * scanline when a program changes PPU registers near the right edge. */
+void InfoNES_BeginScanlineRenderState();
+void InfoNES_RecordPpuRenderRegisterWrite();
+
 /* Get a position of scanline hits sprite #0 */
 void InfoNES_GetSprHitY();
 

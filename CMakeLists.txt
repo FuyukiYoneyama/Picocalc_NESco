@@ -22,6 +22,10 @@ set(CMAKE_C_STANDARD 11)
 set(CMAKE_CXX_STANDARD 17)
 
 option(NESCO_RUNTIME_LOGS "Enable verbose runtime logging on device" OFF)
+option(NESCO_M71_COUNTER_DIAGNOSTICS
+       "Enable low-overhead Mapper 71 CPU progress counters" OFF)
+option(NESCO_M71_HEARTBEAT
+       "Enable a bounded post-transition Mapper 71 heartbeat trace" OFF)
 option(NESCO_AUDIO_MEASURE
        "Enable the bounded Mapper 19 audio producer measurement contract" OFF)
 option(NESCO_INPUT_IO_LOGS "Enable focused $4016/$4017 input I/O logging" OFF)
@@ -175,6 +179,18 @@ if(PICO_BUILD)
     if(NESCO_RUNTIME_LOGS)
         target_compile_definitions(Picocalc_NESco PRIVATE
             NESCO_RUNTIME_LOGS=1
+        )
+    endif()
+
+    if(NESCO_M71_COUNTER_DIAGNOSTICS)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_M71_COUNTER_DIAGNOSTICS=1
+        )
+    endif()
+
+    if(NESCO_M71_HEARTBEAT)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_M71_HEARTBEAT=1
         )
     endif()
 

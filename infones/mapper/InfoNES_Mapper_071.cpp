@@ -4,6 +4,8 @@
 /*                                                                   */
 /*===================================================================*/
 
+#include "runtime_log.h"
+
 namespace
 {
 enum : BYTE
@@ -13,6 +15,9 @@ enum : BYTE
 };
 
 BYTE Map71_Mode = MAP71_FIXED_MIRRORING;
+#if defined(NESCO_RUNTIME_LOGS)
+unsigned Map71_WriteLogCount = 0;
+#endif
 
 BYTE Map71_SelectMode()
 {
@@ -70,6 +75,16 @@ void Map71_Init()
 
   Map71_Mode = Map71_SelectMode();
 
+#if defined(NESCO_RUNTIME_LOGS)
+  Map71_WriteLogCount = 0;
+  NESCO_LOG_RUNTIME("[M71] init prg16=%u chr8=%u nes20=%u sub=%u mirroring=%u\n",
+                    (unsigned)NesHeader.byRomSize,
+                    (unsigned)NesHeader.byVRomSize,
+                    ROM_NES2 ? 1u : 0u,
+                    (unsigned)ROM_Submapper,
+                    (unsigned)ROM_Mirroring);
+#endif
+
   /* Set SRAM Banks */
   SRAMBANK = SRAM;
 
@@ -89,16 +104,30 @@ void Map71_Init()
 /*-------------------------------------------------------------------*/
 void Map71_Write( WORD wAddr, BYTE byData )
 {
-  if (Map71_Mode == MAP71_FIRE_HAWK && (wAddr & 0xe000) == 0x8000)
+#if defined(NESCO_RUNTIME_LOGS)
+  if (Map71_WriteLogCount < 128u)
   {
-    /* Fire Hawk connects data bit 4 to CIRAM A10. */
-    InfoNES_Mirroring((byData & 0x10) ? 2 : 3);
-    return;
+    NESCO_LOG_RUNTIME("[M71W] n=%u pc=%04X addr=%04X data=%02X mode=%u\n",
+                      Map71_WriteLogCount++, (unsigned)PC, (unsigned)wAddr,
+                      (unsigned)byData, (unsigned)Map71_Mode);
   }
+#endif
 
-  /* All Mapper 71 boards select the switchable 16 KiB bank here. */
+  /*
+   * Fixed/classic boards decode only $C000-$FFFF as the PRG register.
+   * Fire Hawk uses the same PRG register and additionally decodes
+   * $8000-$9FFF for one-screen mirroring.
+   */
   if ((wAddr & 0xc000) == 0xc000)
   {
     Map71_SetPrgBank(byData);
+    return;
+  }
+
+  if (Map71_Mode == MAP71_FIRE_HAWK &&
+      (wAddr & 0xe000) == 0x8000)
+  {
+    /* Fire Hawk connects data bit 4 to CIRAM A10. */
+    InfoNES_Mirroring((byData & 0x10) ? 2 : 3);
   }
 }
