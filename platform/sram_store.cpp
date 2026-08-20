@@ -123,6 +123,28 @@ bool sram_current_rom_uses_save(void)
     return ROM_SRAM;
 }
 
+BYTE *sram_active_buffer(void)
+{
+    if (MapperNo == 1) {
+        BYTE *const ram = Map1_GetPrgRamData();
+        if (ram) {
+            return ram;
+        }
+    }
+    return SRAM;
+}
+
+unsigned sram_active_size(void)
+{
+    if (MapperNo == 1) {
+        const unsigned size = Map1_GetPrgRamSize();
+        if (size) {
+            return size;
+        }
+    }
+    return SRAM_SIZE;
+}
+
 const char *sram_resolve_save_basis_path(const char *rom_path)
 {
     if (rom_path && std::strncmp(rom_path, "flash:/", 7) == 0) {
@@ -136,7 +158,7 @@ const char *sram_resolve_save_basis_path(const char *rom_path)
 
 void sram_zero_buffer(void)
 {
-    std::memset(SRAM, 0, SRAM_SIZE);
+    std::memset(sram_active_buffer(), 0, sram_active_size());
     SRAMwritten = false;
 }
 
@@ -433,7 +455,9 @@ extern "C" void sram_store_restore_for_current_rom(void)
         return;
     }
 
-    fr = f_read(&file, SRAM, SRAM_SIZE, &bytes_read);
+    BYTE *const buffer = sram_active_buffer();
+    const unsigned size = sram_active_size();
+    fr = f_read(&file, buffer, size, &bytes_read);
     f_close(&file);
     if (fr != FR_OK) {
         sram_zero_buffer();
@@ -442,8 +466,8 @@ extern "C" void sram_store_restore_for_current_rom(void)
         return;
     }
 
-    if (bytes_read < SRAM_SIZE) {
-        std::memset(SRAM + bytes_read, 0, SRAM_SIZE - bytes_read);
+    if (bytes_read < size) {
+        std::memset(buffer + bytes_read, 0, size - bytes_read);
     }
     SRAMwritten = false;
     NESCO_LOG_RUNTIME("[SRAM] restore path=%s bytes=%u\r\n",
@@ -486,9 +510,11 @@ extern "C" void sram_store_flush_current_rom(void)
         return;
     }
 
-    fr = f_write(&file, SRAM, SRAM_SIZE, &bytes_written);
+    BYTE *const buffer = sram_active_buffer();
+    const unsigned size = sram_active_size();
+    fr = f_write(&file, buffer, size, &bytes_written);
     f_close(&file);
-    if (fr != FR_OK || bytes_written != SRAM_SIZE) {
+    if (fr != FR_OK || bytes_written != size) {
         NESCO_LOG_RUNTIME("[SRAM] flush failed path=%s fr=%d bytes=%u\r\n",
                        s_current_save_path,
                        (int)fr,

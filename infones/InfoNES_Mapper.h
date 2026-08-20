@@ -88,6 +88,11 @@ void Map0_RenderScreen(BYTE byMode);
 void Map1_Init();
 void Map1_Write(WORD wAddr, BYTE byData);
 void Map1_set_ROM_banks();
+BYTE Map1_ReadSram(WORD wAddr);
+void Map1_WriteSram(WORD wAddr, BYTE byData);
+BYTE *Map1_GetPrgRamData();
+unsigned Map1_GetPrgRamSize();
+void Map1_Release();
 
 void Map2_Init();
 void Map2_Write(WORD wAddr, BYTE byData);

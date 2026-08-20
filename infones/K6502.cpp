@@ -91,6 +91,14 @@
   Y = (a);     \
   TEST(Y);
 
+/* Memory read-modify-write instructions put the unmodified byte on the
+ * 6502 bus before writing the result.  Mapper 1 uses this consecutive pair
+ * to distinguish RMW serial writes, so collapsing it changes cartridge
+ * visible behaviour. */
+#define RMW_WRITE(a, old_value, new_value) \
+  K6502_Write((a), (old_value));           \
+  K6502_Write((a), (new_value))
+
 // Stack Op.
 #define PUSH(a) K6502_Write(BASE_STACK + SP--, (a))
 #define PUSHW(a)  \
@@ -148,15 +156,15 @@
 #define DEC(a)            \
   wA0 = a;                \
   byD0 = K6502_Read(wA0); \
-  --byD0;                 \
-  K6502_Write(wA0, byD0); \
-  TEST(byD0)
+  byD1 = (BYTE)(byD0 - 1); \
+  RMW_WRITE(wA0, byD0, byD1); \
+  TEST(byD1)
 #define INC(a)            \
   wA0 = a;                \
   byD0 = K6502_Read(wA0); \
-  ++byD0;                 \
-  K6502_Write(wA0, byD0); \
-  TEST(byD0)
+  byD1 = (BYTE)(byD0 + 1); \
+  RMW_WRITE(wA0, byD0, byD1); \
+  TEST(byD1)
 
 // Shift Op.
 #define ASLA                      \
@@ -168,7 +176,7 @@
   wA0 = a;                        \
   byD0 = K6502_Read(wA0);         \
   SETF(g_ASLTable[byD0].byFlag);  \
-  K6502_Write(wA0, g_ASLTable[byD0].byValue)
+  RMW_WRITE(wA0, byD0, g_ASLTable[byD0].byValue)
 #define LSRA                      \
   RSTF(FLAG_N | FLAG_Z | FLAG_C); \
   SETF(g_LSRTable[A].byFlag);     \
@@ -178,7 +186,7 @@
   wA0 = a;                        \
   byD0 = K6502_Read(wA0);         \
   SETF(g_LSRTable[byD0].byFlag);  \
-  K6502_Write(wA0, g_LSRTable[byD0].byValue)
+  RMW_WRITE(wA0, byD0, g_LSRTable[byD0].byValue)
 #define ROLA                        \
   byD0 = F & FLAG_C;                \
   RSTF(FLAG_N | FLAG_Z | FLAG_C);   \
@@ -190,7 +198,7 @@
   wA0 = a;                             \
   byD0 = K6502_Read(wA0);              \
   SETF(g_ROLTable[byD1][byD0].byFlag); \
-  K6502_Write(wA0, g_ROLTable[byD1][byD0].byValue)
+  RMW_WRITE(wA0, byD0, g_ROLTable[byD1][byD0].byValue)
 #define RORA                        \
   byD0 = F & FLAG_C;                \
   RSTF(FLAG_N | FLAG_Z | FLAG_C);   \
@@ -202,7 +210,7 @@
   wA0 = a;                             \
   byD0 = K6502_Read(wA0);              \
   SETF(g_RORTable[byD1][byD0].byFlag); \
-  K6502_Write(wA0, g_RORTable[byD1][byD0].byValue)
+  RMW_WRITE(wA0, byD0, g_RORTable[byD1][byD0].byValue)
 
 // Stable unofficial opcodes implemented by common NES emulators.
 #define SLO(a)                    \
@@ -211,7 +219,7 @@
   byD1 = g_ASLTable[byD0].byValue;\
   RSTF(FLAG_C);                   \
   SETF(g_ASLTable[byD0].byFlag & FLAG_C); \
-  K6502_Write(wA0, byD1);         \
+  RMW_WRITE(wA0, byD0, byD1);     \
   A |= byD1;                      \
   TEST(A)
 #define RLA(a)                    \
@@ -220,9 +228,9 @@
   byD0 = K6502_Read(wA0);         \
   RSTF(FLAG_C);                   \
   SETF(g_ROLTable[byD1][byD0].byFlag & FLAG_C); \
-  byD0 = g_ROLTable[byD1][byD0].byValue; \
-  K6502_Write(wA0, byD0);         \
-  A &= byD0;                      \
+  byD1 = g_ROLTable[byD1][byD0].byValue; \
+  RMW_WRITE(wA0, byD0, byD1);     \
+  A &= byD1;                      \
   TEST(A)
 #define SRE(a)                    \
   wA0 = (a);                      \
@@ -230,7 +238,7 @@
   byD1 = g_LSRTable[byD0].byValue;\
   RSTF(FLAG_C);                   \
   SETF(g_LSRTable[byD0].byFlag & FLAG_C); \
-  K6502_Write(wA0, byD1);         \
+  RMW_WRITE(wA0, byD0, byD1);     \
   A ^= byD1;                      \
   TEST(A)
 /* RRA: ROR memory then ADC. Carry flow:
@@ -242,9 +250,9 @@
   byD0 = K6502_Read(wA0);         \
   RSTF(FLAG_C);                   \
   SETF((byD0 & 0x01) ? FLAG_C : 0); \
-  byD0 = g_RORTable[byD1][byD0].byValue; \
-  K6502_Write(wA0, byD0);         \
-  ADC(byD0)
+  byD1 = g_RORTable[byD1][byD0].byValue; \
+  RMW_WRITE(wA0, byD0, byD1);     \
+  ADC(byD1)
 #define SAX(a) K6502_Write((a), A & X)
 #define LAX(a)                    \
   byD0 = (a);                     \
@@ -253,14 +261,16 @@
   TEST(byD0)
 #define DCP(a)                    \
   wA0 = (a);                      \
-  byD0 = K6502_Read(wA0) - 1;     \
-  K6502_Write(wA0, byD0);         \
-  CMP(byD0)
+  byD0 = K6502_Read(wA0);         \
+  byD1 = (BYTE)(byD0 - 1);        \
+  RMW_WRITE(wA0, byD0, byD1);     \
+  CMP(byD1)
 #define ISB(a)                    \
   wA0 = (a);                      \
-  byD0 = K6502_Read(wA0) + 1;     \
-  K6502_Write(wA0, byD0);         \
-  SBC(byD0)
+  byD0 = K6502_Read(wA0);         \
+  byD1 = (BYTE)(byD0 + 1);        \
+  RMW_WRITE(wA0, byD0, byD1);     \
+  SBC(byD1)
 #define ANC(a)                    \
   A &= (a);                       \
   RSTF(FLAG_N | FLAG_Z | FLAG_C); \

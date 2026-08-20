@@ -33,6 +33,10 @@ void InfoNES_Mapper_ReleaseCurrent()
 {
   switch (MapperNo)
   {
+  case 1:
+    Map1_Release();
+    break;
+
 #if PICOCALC_ENABLE_MAPPER235
   case 235:
     Map235_Release();
