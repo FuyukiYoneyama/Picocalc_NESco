@@ -648,6 +648,10 @@ static inline BYTE __not_in_flash_func(K6502_Read)(WORD wAddr)
     // The other sound registers are not readable.
 
   case 0x6000: /* SRAM */
+    if (MapperNo == 1)
+    {
+      return Map1_ReadSram(wAddr);
+    }
     if (MapperNo == 4 && !Map4_Wram_Enabled)
     {
       return 0xff;
@@ -1202,6 +1206,11 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
     break;
 
   case 0x6000: /* SRAM */
+    if (MapperNo == 1)
+    {
+      Map1_WriteSram(wAddr, byData);
+      break;
+    }
     if ((MapperNo != 4 || Map4_Wram_Write_Enabled) &&
         (MapperNo != 19 || Map19_WramWriteAllowed(wAddr)))
     {
