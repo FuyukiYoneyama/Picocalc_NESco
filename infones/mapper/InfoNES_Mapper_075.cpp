@@ -1,6 +1,6 @@
 /*===================================================================*/
 /*                                                                   */
-/*           Mapper 75 (Konami VRC 1 and Jaleco SS8805)              */
+/*                      Mapper 75 (Konami VRC 1)                    */
 /*                                                                   */
 /*===================================================================*/
 
@@ -77,11 +77,18 @@ void Map75_Write( WORD wAddr, BYTE byData )
       break;
 
     case 0x9000:
-      /* Set Mirroring */
-      if ( byData & 0x01 )
+      /*
+       * VRC1 boards with four-screen VRAM keep all four nametables
+       * independent.  On those boards $9000 bit 0 is not connected to
+       * the mirroring control, although bits 1 and 2 still select the
+       * high CHR-bank bits below.
+       */
+      if ( !ROM_FourScr && ( byData & 0x01 ) )
       {
         InfoNES_Mirroring( 0 );
-      } else {
+      }
+      else if ( !ROM_FourScr )
+      {
         InfoNES_Mirroring( 1 );
       }
 
