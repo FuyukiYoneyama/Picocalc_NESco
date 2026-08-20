@@ -4,6 +4,36 @@
 /*                                                                   */
 /*===================================================================*/
 
+namespace
+{
+/*
+ * NES 2.0 gives UxROM's historically ambiguous bus-conflict wiring an
+ * explicit identity: submapper 1 has no conflict, and submapper 2 latches
+ * CPU data AND the PRG byte that is driving the bus at the write address.
+ * Keep legacy iNES Mapper 2 on its established no-conflict path; many
+ * unlicensed and homebrew images rely on it and have no submapper field to
+ * describe the board.
+ */
+bool Map2_HasBusConflict()
+{
+  return ROM_NES2 && ROM_Submapper == 2;
+}
+
+BYTE Map2_ApplyBusConflict( WORD wAddr, BYTE byData )
+{
+  return (BYTE)(byData & ROMBANK[(wAddr - 0x8000) >> 13][wAddr & 0x1fff]);
+}
+
+void Map2_SetPrgBank( BYTE bank )
+{
+  /* The register is byte-wide; wrap it only at the actual ROM capacity. */
+  bank %= NesHeader.byRomSize;
+  bank <<= 1;
+  ROMBANK0 = ROMPAGE( bank );
+  ROMBANK1 = ROMPAGE( bank + 1 );
+}
+}
+
 /*-------------------------------------------------------------------*/
 /*  Initialize Mapper 2                                              */
 /*-------------------------------------------------------------------*/
@@ -54,10 +84,10 @@ void Map2_Init()
 /*-------------------------------------------------------------------*/
 void Map2_Write( WORD wAddr, BYTE byData )
 {
-  /* Set ROM Banks */
-  byData %= NesHeader.byRomSize;
-  byData <<= 1;
+  if ( Map2_HasBusConflict() )
+  {
+    byData = Map2_ApplyBusConflict( wAddr, byData );
+  }
 
-  ROMBANK0 = ROMPAGE( byData );
-  ROMBANK1 = ROMPAGE( byData + 1 );
+  Map2_SetPrgBank( byData );
 }
