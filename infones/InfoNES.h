@@ -98,6 +98,7 @@ extern BYTE PPU_R1;
 extern BYTE PPU_R2;
 extern BYTE PPU_R3;
 extern BYTE PPU_R7;
+extern BYTE PPU_OpenBus;
 
 extern BYTE PPU_Scr_V;
 extern BYTE PPU_Scr_V_Next;
@@ -267,6 +268,10 @@ extern void (*MapperInit)();
 extern void (*MapperWrite)(WORD wAddr, BYTE byData);
 /* Write to SRAM */
 extern void (*MapperSram)(WORD wAddr, BYTE byData);
+/* Read from SRAM */
+extern BYTE (*MapperReadSram)(WORD wAddr);
+/* Mapper-owned IRQ source query (used by Mapper 5's wired-OR path). */
+extern BYTE (*MapperIrqPending)();
 /* Write to APU */
 extern void (*MapperApu)(WORD wAddr, BYTE byData);
 /* Read from Apu */

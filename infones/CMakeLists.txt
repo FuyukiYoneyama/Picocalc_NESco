@@ -24,6 +24,18 @@ if(NESCO_INPUT_IO_LOGS)
     )
 endif()
 
+if(NESCO_MAPPER5_STATE_TRACE)
+    target_compile_definitions(infones PUBLIC
+        NESCO_MAPPER5_STATE_TRACE=1
+    )
+endif()
+
+if(NESCO_MAPPER5_AUDIO_DIAGNOSTICS)
+    target_compile_definitions(infones PUBLIC
+        NESCO_MAPPER5_AUDIO_DIAGNOSTICS=1
+    )
+endif()
+
 if(NESCO_BOKOSUKA_STATE_LOGS)
     target_compile_definitions(infones PUBLIC
         INFONES_ENABLE_BOKOSUKA_STATE_LOG=1

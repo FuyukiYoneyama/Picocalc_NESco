@@ -99,6 +99,7 @@ ApuWritefunc pAPUSoundRegs[20] =
 
 BYTE wave_buffers[5][735]; /* 44100 / 60 = 735 samples per sync */
 static int16_t map19_audio_buffer[735];
+static int16_t map5_audio_buffer[735];
 
 BYTE ApuCtrl;
 BYTE ApuCtrlNew;
@@ -1351,6 +1352,14 @@ void __not_in_flash_func(InfoNES_pAPUHsync)(bool enabled)
                             map19_audio_buffer, n163Samples);
 #endif
 #endif
+  }
+  else if (MapperNo == 5)
+  {
+    Map5_RenderAudioSlice(map5_audio_buffer, n, enabled);
+    InfoNES_SoundOutputMMC5(n,
+                            wave_buffers[0], wave_buffers[1], wave_buffers[2],
+                            wave_buffers[3], wave_buffers[4],
+                            map5_audio_buffer, n);
   }
   else
   {

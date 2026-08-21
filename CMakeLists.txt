@@ -29,6 +29,12 @@ option(NESCO_M71_HEARTBEAT
 option(NESCO_AUDIO_MEASURE
        "Enable the bounded Mapper 19 audio producer measurement contract" OFF)
 option(NESCO_INPUT_IO_LOGS "Enable focused $4016/$4017 input I/O logging" OFF)
+option(NESCO_CORE1_KEYBOARD_LOG
+       "Diagnostic-only logging of keyboard events handled by core1" OFF)
+option(NESCO_MAPPER5_STATE_TRACE
+       "Diagnostic-only bounded Mapper 5 frame-state trace" OFF)
+option(NESCO_MAPPER5_AUDIO_DIAGNOSTICS
+       "Diagnostic-only one-shot Mapper 5 audio summary" OFF)
 option(NESCO_BOKOSUKA_STATE_LOGS "Enable focused Bokosuka state logging" OFF)
 option(NESCO_CORE1_BASELINE_LOG "Enable one-second baseline performance logs for core1 planning" OFF)
 option(NESCO_BG_TILE_SHARE_LOG "Enable low-overhead background tile share measurement" OFF)
@@ -379,6 +385,24 @@ if(PICO_BUILD)
     if(NESCO_DIAGNOSTIC_AUTOSTART_BUILTIN)
         target_compile_definitions(Picocalc_NESco PRIVATE
             NESCO_DIAGNOSTIC_AUTOSTART_BUILTIN=1
+        )
+    endif()
+
+    if(NESCO_CORE1_KEYBOARD_LOG)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_CORE1_KEYBOARD_LOG=1
+        )
+    endif()
+
+    if(NESCO_MAPPER5_STATE_TRACE)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_MAPPER5_STATE_TRACE=1
+        )
+    endif()
+
+    if(NESCO_MAPPER5_AUDIO_DIAGNOSTICS)
+        target_compile_definitions(Picocalc_NESco PRIVATE
+            NESCO_MAPPER5_AUDIO_DIAGNOSTICS=1
         )
     endif()
 

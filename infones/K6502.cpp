@@ -763,11 +763,40 @@ void K6502_Set_Int_Wiring(BYTE byNMI_Wiring, BYTE byIRQ_Wiring)
   IRQ_Wiring = byIRQ_Wiring;
 }
 
+/* MMC5 acknowledges only its own scanline IRQ at $5204.  The CPU IRQ pin
+ * is nevertheless the wired-OR of mapper, APU frame and DMC sources. */
+void K6502_RefreshIrqLine()
+{
+  if ((MapperIrqPending && MapperIrqPending()) ||
+      (APU_Reg[0x15] & 0x40) || ApuC5IrqPending)
+  {
+    IRQ_REQ;
+  }
+  else
+  {
+    IRQ_State = IRQ_Wiring;
+  }
+}
+
 static void __not_in_flash_func(procNMI)()
 {
   // Dispose of it if there is an interrupt requirement
   if (NMI_State != NMI_Wiring)
   {
+#if defined(NESCO_MAPPER5_STATE_TRACE)
+    if (MapperNo == 5)
+    {
+      static unsigned mapper5_nmi_trace_count;
+      if (mapper5_nmi_trace_count < 96u)
+      {
+        printf("[M5_NMI] n=%u sl=%u pc=%04X r0=%02X r2=%02X r629=%02X\n",
+               mapper5_nmi_trace_count++, (unsigned)PPU_Scanline,
+               (unsigned)PC, (unsigned)PPU_R0, (unsigned)PPU_R2,
+               (unsigned)RAM[0x0629]);
+        fflush(stdout);
+      }
+    }
+#endif
 #if defined(NESCO_M71_COUNTER_DIAGNOSTICS)
     if (MapperNo == 71)
       ++g_m71_nmi_service_count;
@@ -811,6 +840,20 @@ static void __not_in_flash_func(procNMI)()
     SETF(FLAG_I);
 
     PC = K6502_ReadW(VECTOR_NMI);
+#if defined(NESCO_MAPPER5_STATE_TRACE)
+    if (MapperNo == 5)
+    {
+      static unsigned mapper5_nmi_vector_trace_count;
+      if (mapper5_nmi_vector_trace_count < 96u)
+      {
+        printf("[M5_NMI_VECTOR] n=%u vector=%04X op=%02X next=%02X sp=%02X\n",
+               mapper5_nmi_vector_trace_count++, (unsigned)PC,
+               (unsigned)K6502_Read(PC),
+               (unsigned)K6502_Read((WORD)(PC + 1)), (unsigned)SP);
+        fflush(stdout);
+      }
+    }
+#endif
 #if defined(NESCO_RUNTIME_LOGS)
     if (MapperNo == 71)
     {

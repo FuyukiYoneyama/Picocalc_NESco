@@ -96,6 +96,13 @@ static void core1_keyboard_poll_once(void) {
         const DWORD mask = core1_map_key(key);
         DWORD system_bits = 0;
 
+#if defined(NESCO_CORE1_KEYBOARD_LOG)
+        printf("[CORE1_KEY] key=%02X state=%u mask=%08lX\\n",
+               (unsigned)key,
+               (unsigned)state,
+               (unsigned long)mask);
+#endif
+
         if (state == KEY_STATE_PRESSED) {
             if (key == KEY_W_UPPER) {
                 system_bits |= PAD_SYS_VIEW_TOGGLE_LOCAL;

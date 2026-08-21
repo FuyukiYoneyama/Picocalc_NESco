@@ -18,6 +18,9 @@ void Map0_Init()
   /* Write to SRAM */
   MapperSram = Map0_Sram;
 
+  /* Read from SRAM */
+  MapperReadSram = Map0_ReadSram;
+
   /* Write to APU */
   MapperApu = Map0_Apu;
 
@@ -94,6 +97,22 @@ void __not_in_flash_func(Map0_Sram)(WORD wAddr, BYTE byData)
  *  Dummy Write to Sram
  *
  */
+}
+
+/*-------------------------------------------------------------------*/
+/*  Mapper 0 Read from SRAM Function                                 */
+/*-------------------------------------------------------------------*/
+BYTE __not_in_flash_func(Map0_ReadSram)(WORD wAddr)
+{
+  return ROM_SRAM ? SRAM[wAddr & 0x1fff] : SRAMBANK[wAddr & 0x1fff];
+}
+
+/* Most mappers retain their legacy direct IRQ request path.  Mapper 5 opts
+ * into the explicit source query so $4015/$5204 acknowledgements can share
+ * one wired-OR calculation without changing those mappers. */
+BYTE __not_in_flash_func(Map0_IrqPending)()
+{
+  return 0;
 }
 
 /*-------------------------------------------------------------------*/
