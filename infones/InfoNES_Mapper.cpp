@@ -43,6 +43,10 @@ void InfoNES_Mapper_ReleaseCurrent()
     break;
 #endif
 
+  case 5:
+    Map5_Release();
+    break;
+
   case 6:
     Map6_Release();
     break;

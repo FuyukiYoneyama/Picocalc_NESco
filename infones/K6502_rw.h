@@ -437,6 +437,14 @@ static inline BYTE __not_in_flash_func(K6502_Read)(WORD wAddr)
   if (wAddr >= 0x8000)
   {
     byRet = ROMBANK[(wAddr - 0x8000) >> 13][wAddr & 0x1fff];
+    if (MapperNo == 5 &&
+        (Map5_PcmReadMode || wAddr == 0xfffa || wAddr == 0xfffb))
+    {
+      /* MMC5 PCM read mode observes CPU reads from $8000-$BFFF.  The
+       * $FFFA/$FFFB exception lets Mapper 5 reset its scanline detector on
+       * the NMI vector fetch even when PCM read mode is disabled. */
+      byRet = Map5_ReadRom(wAddr, byRet);
+    }
     return byRet;
   }
 
@@ -1074,12 +1082,25 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
       // Write to PPU Memory
       if (addr < 0x2000 && byVramWriteEnable)
       {
+        if (MapperNo == 5 &&
+            !(PPU_R1 & (R1_SHOW_SCR | R1_SHOW_SP)))
+        {
+          /* CPU $2007 pattern writes use the same MMC5 CHR set as CPU
+           * pattern reads.  The normal scanline renderer leaves PPUBANK on
+           * the sprite pass, so restore the last-written A/B set before a
+           * non-rendering CPU write as well. */
+          Map5_SyncCpuChrBanksForCpuRead();
+        }
         // Pattern Data
         ChrBufUpdate |= (1 << (addr >> 10));
         PPUBANK[addr >> 10][addr & 0x3ff] = vramData;
       }
       else if (addr < 0x3f00) /* 0x2000 - 0x3eff */
       {
+        if (MapperNo == 5)
+        {
+          Map5_NotePpuNametableWrite(addr);
+        }
         // Name Table and mirror
         PPUBANK[addr >> 10][addr & 0x3ff] = vramData;
         PPUBANK[(addr ^ 0x1000) >> 10][addr & 0x3ff] = vramData;
@@ -1190,7 +1211,25 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
         break;
 
       case 0x3: /* SRAM */
-        InfoNES_MemoryCopy(SPRRAM, &SRAM[((WORD)byData << 8) & 0x1fff], SPRRAM_SIZE);
+        if (MapperNo == 5)
+        {
+          /* MMC5 maps the $6000 page through $5113.  The legacy DMA fast
+           * path reads the single global SRAM array and therefore bypasses
+           * that bank selection.  Use the mapper read callback for this
+           * source page; the other mappers retain the existing bulk copy. */
+          const WORD wSource = (WORD)(0x6000u +
+                                      (((WORD)byData << 8) & 0x1fffu));
+          for (WORD nByte = 0; nByte < SPRRAM_SIZE; ++nByte)
+          {
+            SPRRAM[nByte] = Map5_ReadSram((WORD)(wSource + nByte));
+          }
+        }
+        else
+        {
+          InfoNES_MemoryCopy(SPRRAM,
+                             &SRAM[((WORD)byData << 8) & 0x1fff],
+                             SPRRAM_SIZE);
+        }
         break;
 
       case 0x4: /* ROM BANK 0 */
@@ -1224,6 +1263,13 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
       }
 #endif
       InfoNES_InvalidateSpriteActiveList();
+      if (MapperNo == 5)
+      {
+        /* MMC5 listens to the fully decoded OAMDMA write and resets its
+         * scanline counter.  The DMA source page itself is not captured by
+         * the mapper. */
+        Map5_OamDmaReset();
+      }
       K6502_ApplyOamDmaStall();
       break;
 

@@ -1413,6 +1413,14 @@ void __not_in_flash_func(InfoNES_Cycle)()
   {
     //util::WorkMeterMark(MARKER_START);
       InfoNES_BeginScanlineRenderState();
+      if (MapperNo == 5)
+      {
+        /* MMC5 scanline IRQs are requested at the beginning of the detected
+         * scanline (PPU dot 4), not after the whole scanline has elapsed.
+         * The scanline-granular core has no dot-4 callback, so notify Mapper
+         * 5 at the scanline boundary before CPU execution. */
+        Map5_ScanlineStart();
+      }
       if (!micromenu)
       {
           int scanline_clocks = STEP_PER_SCANLINE;
