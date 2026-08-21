@@ -4,6 +4,47 @@
 /*                                                                   */
 /*===================================================================*/
 
+namespace
+{
+/*
+ * CNROM's original discrete logic board drives PRG-ROM while its CHR latch
+ * is written, producing an AND-type bus conflict.  NES 2.0 identifies the
+ * wiring explicitly: submapper 1 has no conflict and submapper 2 has one.
+ * Keep legacy Mapper 3 on InfoNES' established no-conflict path; old iNES
+ * images cannot describe the board variant and several mapper-hack images
+ * rely on that compatibility behaviour.
+ */
+bool Map3_HasBusConflict()
+{
+  return ROM_NES2 && ROM_Submapper == 2;
+}
+
+BYTE Map3_ApplyBusConflict( WORD wAddr, BYTE byData )
+{
+  return (BYTE)(byData & ROMBANK[(wAddr - 0x8000) >> 13][wAddr & 0x1fff]);
+}
+
+void Map3_SetChrBank( BYTE bank )
+{
+  DWORD dwBase;
+  int nPage;
+
+  /* CNROM requires CHR-ROM.  A malformed CHR-RAM image has no valid latch. */
+  if ( NesHeader.byVRomSize == 0 )
+  {
+    return;
+  }
+
+  bank %= NesHeader.byVRomSize;
+  dwBase = ( (DWORD)bank ) << 3;
+  for ( nPage = 0; nPage < 8; ++nPage )
+  {
+    PPUBANK[ nPage ] = VROMPAGE( dwBase + nPage );
+  }
+  InfoNES_SetupChr();
+}
+}
+
 /*-------------------------------------------------------------------*/
 /*  Initialize Mapper 3                                              */
 /*-------------------------------------------------------------------*/
@@ -75,20 +116,10 @@ void Map3_Init()
 /*-------------------------------------------------------------------*/
 void Map3_Write( WORD wAddr, BYTE byData )
 {
-  DWORD dwBase;
+  if ( Map3_HasBusConflict() )
+  {
+    byData = Map3_ApplyBusConflict( wAddr, byData );
+  }
 
-  /* Set PPU Banks */
-  byData %= NesHeader.byVRomSize;
-  dwBase = ( (DWORD)byData ) << 3;
-
-  PPUBANK[ 0 ] = VROMPAGE( dwBase + 0 );
-  PPUBANK[ 1 ] = VROMPAGE( dwBase + 1 );
-  PPUBANK[ 2 ] = VROMPAGE( dwBase + 2 );
-  PPUBANK[ 3 ] = VROMPAGE( dwBase + 3 );
-  PPUBANK[ 4 ] = VROMPAGE( dwBase + 4 );
-  PPUBANK[ 5 ] = VROMPAGE( dwBase + 5 );
-  PPUBANK[ 6 ] = VROMPAGE( dwBase + 6 );
-  PPUBANK[ 7 ] = VROMPAGE( dwBase + 7 );
-
-  InfoNES_SetupChr();
+  Map3_SetChrBank( byData );
 }
