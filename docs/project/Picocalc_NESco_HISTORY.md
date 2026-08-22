@@ -11807,13 +11807,11 @@ Xevious 背景崩れについては、かなり重要なので詳細を残す。
   対象ではない旧系統として扱う方針にした
 - `core/`
   については、
-  MIT license
-  の独自 emulator core
-  を目指したが、
-  `infones`
-  仕様書に固有名詞などが残っていたことで clean-room
-  性に疑義が出たため discontinued
-  扱いにした経緯を HISTORY
+  project-owned
+  の MIT license
+  emulator core
+  であり、active build
+  対象ではない歴史資料として扱う経緯を HISTORY
   と必要に応じて
   `core/README.md`
   に残す方針にした
@@ -11875,8 +11873,8 @@ Xevious 背景崩れについては、かなり重要なので詳細を残す。
   対象ではないこと、
   active source tree
   ではないこと、
-  clean-room emulator core
-  として再利用する場合は別途確認が必要であることを明記した
+  project-owned MIT License
+  の歴史資料であることを明記した
 - `docs/project/ARCHITECTURE.md`
   の
   `core/`

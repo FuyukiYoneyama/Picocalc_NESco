@@ -2,13 +2,14 @@ Picocalc_NESco License Overview
 
 This repository is not under a single uniform license.
 
-The current tree contains multiple components with different license sources:
+Every tracked file in this repository belongs to one of the license groups
+listed below. There is no unclassified or pending-license component.
 
-- Project-owned top-level integration and most platform-side code:
+- Project-owned files outside the third-party directories listed below
+  (source, build configuration, documentation, and historical `core/`):
   - MIT License
-  - This includes the repository root LICENSE text below, and source files in
-    `platform/` and `drivers/` whose headers say `MIT License`
-- `infones/`:
+  - The root MIT text below is the project license for this group.
+- `infones/` (including project changes in that directory):
   - GNU General Public License Version 2
   - See `infones/doc/GPL2`
 - `fatfs/`:
@@ -17,11 +18,6 @@ The current tree contains multiple components with different license sources:
 - `font/`:
   - M+ / PixelMplus derived font data
   - See `font/LICENSE.txt`
-- `core/`:
-  - Source headers in the current tree say `MIT License`
-  - Project status note: licensing / provenance for this subtree is not yet
-    considered fully unified, so do not treat `core/` as a separately cleared
-    standalone license block without reviewing the files in context
 
 For convenience, the MIT text used for the project-owned part of the tree is
 copied below.

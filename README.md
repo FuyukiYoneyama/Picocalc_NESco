@@ -215,11 +215,11 @@ GitHub Actions では、push / pull request / manual run 時に clean configure 
 
 この repo は単一 license ではありません。概要は次です。
 
-- project-owned top-level / `platform/` / `drivers/` : MIT
-- `infones/` : GNU GPL v2
+- project-owned files outside the listed third-party directories (source / build configuration / documentation / `platform/` / `drivers/` / `core/`) : MIT
+- `infones/`（この directory 内の project changes を含む）: GNU GPL v2
 - `fatfs/` : FatFs license
 - `font/` : M+ / PixelMplus derived data
-- `core/` : source header 上は MIT だが、由来整理は継続中
+- `core/` : こちらで作成した MIT License の inactive な歴史資料。active build には含まれません
 
 `infones`、`fatfs`、font 系既存資産を除く PicoCalc 向け接続層・周辺実装の大半は Codex 支援のもとで作成しています。
 

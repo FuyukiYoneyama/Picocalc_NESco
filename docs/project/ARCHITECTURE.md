@@ -28,7 +28,8 @@
 - `core/`
   - 現在の active target source には入っていない旧系統。
   - 経緯確認用として残す。
-  - active source tree や clean-room emulator core として再利用する場合は、別途確認する。
+  - こちらで作成したコードとして MIT License で扱う。
+  - active source tree や再利用可能な emulator core として扱う場合は、別途確認する。
   - 詳細は `core/README.md` と `docs/project/Picocalc_NESco_HISTORY.md` を参照する。
 
 ## 起動と ROM 実行の流れ
