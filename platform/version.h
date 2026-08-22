@@ -3,7 +3,8 @@
  *
  * System version is managed intentionally by the project.
  * PICOCALC_NESCO_VERSION is bumped for releases or significant checkpoints.
- * Build id changes on every compile so hardware logs can distinguish binaries.
+ * Diagnostic build labels remain available to compile-time tooling, while the
+ * public runtime/menu labels intentionally show only the release version.
  */
 
 #pragma once

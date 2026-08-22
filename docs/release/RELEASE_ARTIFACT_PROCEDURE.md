@@ -45,7 +45,7 @@ test -f build/Picocalc_NESco.elf
 test -f build/Picocalc_NESco.uf2
 ```
 
-version / build id:
+version banner:
 
 ```sh
 strings build/Picocalc_NESco.elf | grep 'PicoCalc NESco Ver\\.' | head -n 1
@@ -66,7 +66,7 @@ sha256sum build/Picocalc_NESco.uf2 build/Picocalc_NESco.elf
 ## UF2 artifact
 
 ローカルの実機確認とSD cardでは、build出力`Picocalc_NESco.uf2`を同じ名前のまま上書きする。
-versionとbuildの識別はbanner、build ID、SHA-256で行う。
+versionとbuildの識別はversion banner、build directory、SHA-256で行う。公開runtime/menu表示にはbuild IDやdiagnostic variantを含めない。
 
 ```sh
 test -f build/Picocalc_NESco.uf2
@@ -157,7 +157,7 @@ release note には最低限次を記録する。
 - release tag
 - commit hash
 - version
-- build id
+- version banner
 - UF2 file name
 - UF2 SHA-256
 - source archive の扱い

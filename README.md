@@ -34,6 +34,7 @@ PicoCalc 向け以外の build は未検証なので、現在は明示的に無�
 - ROM menu / help / game 中の screenshot 保存と、ROM menu からの screenshot viewer に対応しています
 - core1 keyboard polling と core1 LCD worker により、入力応答と game 表示処理を補助しています
 - battery-backed SRAM の `*.srm` save / restore に対応しています。`DragonQuest3` で実機確認済みです
+- `Mapper5` / MMC5 の主要な PRG/CHR/WRAM/ExRAM/nametable/split/IRQ/audio と battery save (`*.m5s`) を実装し、複数タイトルを実機確認済みです。実用判定は「多分動く」です
 - `Mapper30` ROM の起動と表示を実機確認済みです。ただし `*.m30` 保存 / 復元は未確認です
 - `Map6` `Map19` `Map185` `Map188` `Map235` は dynamic 化済みです。ただし対象 mapper ROM での実機確認は未完です
 - runtime log は default では banner 1 行目以外 disable です
@@ -123,7 +124,7 @@ cmake -S . -B build-release \
 cmake --build build-release --clean-first -j4
 ```
 
-この通常 build は起動時の version / build ID banner 1 行だけを出し、
+この通常 build は起動時の version banner 1 行だけを出し、
 `[CORE1_BASE]`、`[FRAME_STATS]`、`[BG_SHARE]`、`[PALETTE_SNAPSHOT]` は出力しません。
 
 計測用 build は通常 build と分けて生成します。baseline 版は `[CORE1_BASE]` と
@@ -147,7 +148,7 @@ cmake --build build-bg-share -j4
 build 後は、生成物から次を自動表示するようにしています。
 
 - `arm-none-eabi-size`
-- 埋め込み version / build id banner
+- 埋め込み version banner
 
 想定生成物:
 
@@ -158,7 +159,7 @@ GitHub Actions では、push / pull request / manual run 時に clean configure 
 
 実行時メモ:
 
-- 起動時は version / build id banner を 1 行表示します
+- 起動時は version banner を 1 行表示します
 - UART baud rate は `921600 bps` です
 - それ以外の verbose runtime log は default では無効です
 - game 開始時と通常表示復帰時には、viewport 外側へ `Shift+W Stretch Screen` のヒントを表示します
@@ -187,6 +188,7 @@ GitHub Actions では、push / pull request / manual run 時に clean configure 
   該当不具合の実機検収を完了しました。ただし Mapper 全体の互換性は未保証です
 - Mapper9 / MMC2 は CHR / background 崩れを確認しており、未解決です
 - `Mapper30` の `*.m30` 保存 / 復元は実装済みですが、実ゲームでの書き込み / 復元確認は未完です
+- `Mapper5` は RP2040 の SRAM 制約により PRG-RAM の常駐を 64 KiB までに制限しています。64 KiB 超の完全互換、PPU dot 単位の厳密な scanline IRQ、Mesen2 が未実装の PCM IRQ の同一波形比較は対象外です
 - `Map6` `Map19` `Map185` `Map188` `Map235` は dynamic 化済みですが、対象 mapper ROM での実機確認は未完です
 - `core/` ディレクトリは repo に残っていますが、現在の active target source には入っていません
 - 電源 ON 時の audio pop は残ることがありますが、現状は運用上許容として扱っています

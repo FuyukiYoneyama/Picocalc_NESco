@@ -33,8 +33,8 @@
 ## version
 
 - version は `platform/version.h` の `PICOCALC_NESCO_VERSION` を更新する。
-- build 後、ELF / UF2 生成物から version と build id を確認する。
-- ユーザーに build 結果を伝えるときは、version と build id の両方を示す。
+- build 後、ELF / UF2 生成物から version banner と SHA-256 を確認する。
+- ユーザーに build 結果を伝えるときは、version、生成物のパス、必要に応じて SHA-256 を示す。公開表示へ build id や diagnostic variant は含めない。
 - version は `MAJOR.MINOR.PATCH` として扱う。
 - `MAJOR` は、大きな構成変更や互換性に影響する変更で上げる。
   - 例: emulator core を `infones` 以外へ置き換える。
@@ -49,7 +49,7 @@
 - release version 更新時の順序:
   1. `platform/version.h` の `PICOCALC_NESCO_VERSION` を更新する。
   2. build する。
-  3. 生成物から version と build id を確認する。
+  3. 生成物から version banner と SHA-256 を確認する。
   4. `README.md` の現在 version 記述を必要に応じて更新する。
   5. `docs/project/Picocalc_NESco_HISTORY.md` に結果を記録する。
   6. 完了した項目を `docs/project/TASKS.md` から外す。
@@ -76,7 +76,7 @@
   `Picocalc_NESco.uf2`とする。
   - version、用途、実験名をUF2 filenameへ付けない。
   - SD card上では同じ`Picocalc_NESco.uf2`を上書きし、複数名のUF2を増やさない。
-  - buildの区別はbuild directory、ELF bannerのversion / build ID、SHA-256で行う。
+  - buildの区別はbuild directory、ELFに埋め込まれたversion banner、必要に応じたartifactのSHA-256で行う。公開runtime/menu表示にはBuild IDやdiagnostic variantを含めない。
 - GitHub Releaseのasset管理はローカル／SD card管理と分ける。
   - GitHub Releaseへ添付する公開assetは既存releaseと同じ
     `Picocalc_NESco-<version>.uf2`形式にする。

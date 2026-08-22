@@ -10,6 +10,22 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## `1.2.4` Mapper 5 / MMC5 実用対応 — 多分動く (2026-08-22)
+
+- Mapper 5 の PRG/CHR/WRAM、ExRAM、nametable/fill、extended attribute、vertical split、IRQ、MMC5 audio、
+  battery save (`*.m5s`) を製品側へ統合した。製品統合 commit は `0f0b827`、version 更新 commit は `068713c`。
+- Mapper 5 の fixture と Mesen2/Picoem 比較、battery save の保存・復元記録を `mapper_check` 側へ統合した。
+  検証リポジトリの統合 commit は `1804a21`。
+- ユーザーが通常 release UF2 で複数の Mapper 5 タイトルを実機確認し、画面・操作・音声に問題がないと報告した。
+  音質も実機検証合格とし、Mapper 5 の実用判定を **「多分動く」** とする。
+- 通常 release build は `text/data/bss=304148/0/119684`。生成物は
+  `build-release/Picocalc_NESco.uf2`、SHA-256 は
+  `5f6dfc372d194d970ceb82418cac1f5bc640a8dd774642b1c8aa257124451dc1`。
+- 起動時の公開表示は version のみとし、`PicoCalc NESco Ver. 1.2.4` を表示する。旧 diagnostic variant / build timestamp は
+  公開表示へ含めない。
+- これは Mapper 5 の全機種・全タイミングの完全適合宣言ではない。現行 source の適用範囲として、PRG-RAM 常駐は
+  64 KiB まで、scanline IRQ は scanline 境界ベース、Mesen2 側が未実装の PCM IRQ の厳密比較は未解決として残す。
+
 ## `1.2.2` Mapper 7 compatibility fix — hardware verification pending (2026-08-11)
 
 - Mapper 7 / AxROM の既存実装に、NES 2.0 submapper 2 の AND bus conflict と
