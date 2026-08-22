@@ -35,14 +35,30 @@ PicoCalc 向け以外の build は未検証なので、現在は明示的に無�
 - core1 keyboard polling と core1 LCD worker により、入力応答と game 表示処理を補助しています
 - battery-backed SRAM の `*.srm` save / restore に対応しています。`DragonQuest3` で実機確認済みです
 - `Mapper5` / MMC5 の主要な PRG/CHR/WRAM/ExRAM/nametable/split/IRQ/audio と battery save (`*.m5s`) を実装し、複数タイトルを実機確認済みです。実用判定は「多分動く」です
+- `Mapper19` は実用版を統合済みで、実用判定は「多分動く（音質未保証）」です。実タイトルの個別検証は未記録です
 - `Mapper30` ROM の起動と表示を実機確認済みです。ただし `*.m30` 保存 / 復元は未確認です
-- `Map6` `Map19` `Map185` `Map188` `Map235` は dynamic 化済みです。ただし対象 mapper ROM での実機確認は未完です
+- `Map6` `Map185` `Map188` `Map235` は dynamic 化済みです。ただし対象 mapper ROM での実機確認は未完です
 - runtime log は default では banner 1 行目以外 disable です
 - sprite 描画は scanline ごとの active list を使い、描画対象外の OAM entry の固定走査を削減しています
 - game 描画ラインは palette index で保持し、LCD worker で RGB565 へ変換します。
   RGB565 line を直接 queue していた `1.1.26` と比べて line traffic を約 `42%` 削減し、
   実機計測では normal 表示の代表 3 ROM が約 `60fps` の pacing 上限へ到達しました
 - PicoCalc debug console の UART は `921600 bps` で初期化します
+
+### Mapper の現行判定
+
+以下は今回の整理対象と現行課題に関係する mapper の実用判定です。「多分動く」は、実装と確認範囲から通常利用を見込む判定であり、全 variant の完全互換を意味しません。
+
+| Mapper | 現在の判定 |
+|---|---|
+| `1` / `2` / `3` / `5` / `7` / `71` | 多分動く（実機確認済み） |
+| `4` | 多分動く（専用検査 ROM と emulator の結果一致、実ゲーム・実機未検証） |
+| `87` | 多分動く（ユーザー UF2 確認済み、全 variant 未保証） |
+| `10` / `11` / `34` / `66` / `70` / `75` / `76` / `88` / `206` | 多分動く（emulator 検証済み、実機未検証） |
+| `19` | 多分動く（音質未保証、実タイトルの個別検証は未記録） |
+| `30` | 多分動く（起動・表示確認済み、flash 保存 / 復元未保証） |
+| `9` | 未解決 |
+| `6` / `185` / `188` / `235` | dynamic 化済み、対象 ROM の実機確認未完 |
 
 ## すぐ使うには
 
@@ -189,7 +205,8 @@ GitHub Actions では、push / pull request / manual run 時に clean configure 
 - Mapper9 / MMC2 は CHR / background 崩れを確認しており、未解決です
 - `Mapper30` の `*.m30` 保存 / 復元は実装済みですが、実ゲームでの書き込み / 復元確認は未完です
 - `Mapper5` は RP2040 の SRAM 制約により PRG-RAM の常駐を 64 KiB までに制限しています。64 KiB 超の完全互換、PPU dot 単位の厳密な scanline IRQ、Mesen2 が未実装の PCM IRQ の同一波形比較は対象外です
-- `Map6` `Map19` `Map185` `Map188` `Map235` は dynamic 化済みですが、対象 mapper ROM での実機確認は未完です
+- `Mapper19` は「多分動く（音質未保証）」として採用していますが、実タイトルの個別検証と全 variant の完全互換は未保証です
+- `Map6` `Map185` `Map188` `Map235` は dynamic 化済みですが、対象 mapper ROM での実機確認は未完です
 - `core/` ディレクトリは repo に残っていますが、現在の active target source には入っていません
 - 電源 ON 時の audio pop は残ることがありますが、現状は運用上許容として扱っています
 - 互換性確認の最小セットは `docs/project/ARCHITECTURE.md` の `互換性確認の基準` を参照してください

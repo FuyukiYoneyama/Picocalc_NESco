@@ -33,7 +33,6 @@
 - `[pending]` Mapper30 の `*.m30` 保存 / 復元を実ゲームで確認する
   - ROM 起動と表示は実機確認済み
   - 未確認なのは PRG flash overlay の書き込み / 復元
-- `[pending]` Mapper87 / Choplifter 系の確認を、別の Mapper87 ROM 入手後に再開する
 
 ## 保留中の改善候補
 

@@ -29,6 +29,12 @@
    - GitHub Actions による最小 build CI 導入設計。
 ## 完了済み計画 / 結果
 
+- Mapper compatibility sweep / current-status reconciliation
+  - 結果: `docs/project/Picocalc_NESco_HISTORY.md`
+  - Mapper source の registry と直近の emulator / 実機確認結果を突き合わせ、製品側の判定を mapper 番号単位で整理した
+  - 実用判定は「多分動く」、実機未確認、未解決、dynamic 化済みを分離して記載した
+  - 製品公開文書には、許可範囲外の実在タイトル名を追加しない
+
 - `1.2.0` release
   - gate: `docs/release/RELEASE_GATE_1_2_0.md`
   - notes: `docs/release/RELEASE_NOTES_1_2_0.md`
