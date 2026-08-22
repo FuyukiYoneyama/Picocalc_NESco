@@ -18,6 +18,10 @@
 #include "runtime_log.h"
 #include <stdio.h>
 
+#ifdef NESCO_MAPPER5_AUDIO_DIAGNOSTICS
+#include "InfoNES_Mapper.h"
+#endif
+
 #ifdef PICO_BUILD
 #include "pico/time.h"
 #endif
@@ -132,6 +136,44 @@ static int16_t s_n163_diag_max_sample = 0;
 static uint32_t s_n163_diag_nonzero_count = 0;
 static uint8_t s_n163_diag_capture[AUDIO_N163_DIAG_CAPTURE_SAMPLES];
 static uint32_t s_n163_diag_capture_count = 0;
+#endif
+
+#ifdef NESCO_MAPPER5_AUDIO_DIAGNOSTICS
+#define M5_AUDIO_DIAG_CAPTURE_SAMPLES 4096u
+static bool s_mmc5_diag_seen = false;
+static bool s_mmc5_diag_reported = false;
+static BYTE s_mmc5_diag_duty_min = 255u;
+static BYTE s_mmc5_diag_duty_max = 0u;
+static uint32_t s_mmc5_diag_pushed = 0;
+static uint32_t s_mmc5_diag_dropped = 0;
+
+static void audio_mmc5_diag_dump(void)
+{
+    uint32_t generator_samples = 0;
+    int16_t generator_min = 0;
+    int16_t generator_max = 0;
+
+    Map5_AudioDiagnosticsSnapshot(&generator_samples,
+                                  &generator_min,
+                                  &generator_max);
+
+    if (!s_mmc5_diag_seen || s_mmc5_diag_reported ||
+        generator_samples < M5_AUDIO_DIAG_CAPTURE_SAMPLES) {
+        return;
+    }
+
+    printf("[M5_AUDIO_DIAG] gen_samples=%lu gen_min=%d gen_max=%d "
+           "duty_min=%u duty_max=%u pushed=%lu dropped=%lu\r\n",
+           (unsigned long)generator_samples,
+           (int)generator_min,
+           (int)generator_max,
+           (unsigned)s_mmc5_diag_duty_min,
+           (unsigned)s_mmc5_diag_duty_max,
+           (unsigned long)s_mmc5_diag_pushed,
+           (unsigned long)s_mmc5_diag_dropped);
+    fflush(stdout);
+    s_mmc5_diag_reported = true;
+}
 #endif
 
 #ifdef NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC
@@ -379,6 +421,14 @@ void audio_reset_runtime_state(void) {
     s_mix_peak = 0;
     s_noise_peak = 0;
     s_dpcm_peak = 0;
+#ifdef NESCO_MAPPER5_AUDIO_DIAGNOSTICS
+    s_mmc5_diag_seen = false;
+    s_mmc5_diag_reported = false;
+    s_mmc5_diag_duty_min = 255u;
+    s_mmc5_diag_duty_max = 0u;
+    s_mmc5_diag_pushed = 0;
+    s_mmc5_diag_dropped = 0;
+#endif
 #ifdef PICO_BUILD
     s_audio_debug_last_us = time_us_64();
 #endif
@@ -422,6 +472,11 @@ void audio_debug_poll(void) {
     pwm_audio_debug_poll();
 #ifdef PICO_BUILD
     uint64_t now = time_us_64();
+#ifdef NESCO_MAPPER5_AUDIO_DIAGNOSTICS
+    if ((now - s_audio_debug_last_us) >= 1000000ull) {
+        audio_mmc5_diag_dump();
+    }
+#endif
     if ((now - s_audio_debug_last_us) < 1000000ull) {
         return;
     }
@@ -540,6 +595,9 @@ int InfoNES_SoundOpen(int samples_per_sync, int sample_rate) {
 }
 
 void InfoNES_SoundClose(void) {
+#ifdef NESCO_MAPPER5_AUDIO_DIAGNOSTICS
+    audio_mmc5_diag_dump();
+#endif
     audio_reset_runtime_state();
     /* Close stays silent-idle; stats are reset so menu->game / game->menu
      * comparisons stay local to the current session window. */
@@ -595,10 +653,18 @@ int InfoNES_GetSoundBufferSize(void) {
 static void AUDIO_MIX_RAMFUNC(audio_sound_output_impl)(int nch,
                                                    BYTE *buf0, BYTE *buf1,
                                                    BYTE *buf2, BYTE *buf3, BYTE *buf4,
-                                                   const int16_t *n163, int n163_samples) {
+                                                   const int16_t *n163, int n163_samples,
+                                                   const int16_t *mmc5, int mmc5_samples,
+                                                   bool is_mmc5) {
     if (s_audio_paused) {
         return;
     }
+
+#ifdef NESCO_MAPPER5_AUDIO_DIAGNOSTICS
+    if (is_mmc5 && nch > 0) {
+        s_mmc5_diag_seen = true;
+    }
+#endif
 
 #if defined(PICO_BUILD) && defined(NESCO_AUDIO_MEASURE)
     const bool measure_block_active = s_audio_measure_active;
@@ -641,6 +707,11 @@ static void AUDIO_MIX_RAMFUNC(audio_sound_output_impl)(int nch,
             s_perf_audio_wait_us += time_us_64() - wait_start_us;
             s_ring_overrun_count++;
             s_prod_drop_samples += (uint32_t)output_nch;
+#ifdef NESCO_MAPPER5_AUDIO_DIAGNOSTICS
+            if (is_mmc5) {
+                s_mmc5_diag_dropped += (uint32_t)output_nch;
+            }
+#endif
             return;
         }
     }
@@ -681,13 +752,18 @@ static void AUDIO_MIX_RAMFUNC(audio_sound_output_impl)(int nch,
 #ifdef NESCO_MAPPER19_N163_MUTE_DIAGNOSTIC
         n163Mix = 0;
 #endif
+        int mmc5Mix = 0;
+        if (mmc5 != NULL && i < mmc5_samples) {
+            mmc5Mix = (int)mmc5[i];
+        }
         const int mixed =
             (int)buf0[i] +
             (int)buf1[i] +
             (int)buf2[i] +
             noise +
             (int)buf4[i] +
-            n163Mix;
+            n163Mix +
+            mmc5Mix;
         const int mixedMagnitude = mixed < 0 ? -mixed : mixed;
 #if defined(NESCO_AUDIO_MIX_FAST_DIVISION)
         /*
@@ -729,6 +805,16 @@ static void AUDIO_MIX_RAMFUNC(audio_sound_output_impl)(int nch,
         if ((BYTE)mix > s_mix_peak) s_mix_peak = (BYTE)mix;
         if (buf3[i] > s_noise_peak) s_noise_peak = buf3[i];
         if (buf4[i] > s_dpcm_peak) s_dpcm_peak = buf4[i];
+#ifdef NESCO_MAPPER5_AUDIO_DIAGNOSTICS
+        if (is_mmc5) {
+            if ((BYTE)mix < s_mmc5_diag_duty_min) {
+                s_mmc5_diag_duty_min = (BYTE)mix;
+            }
+            if ((BYTE)mix > s_mmc5_diag_duty_max) {
+                s_mmc5_diag_duty_max = (BYTE)mix;
+            }
+        }
+#endif
 
 #if defined(PICO_BUILD) && defined(NESCO_AUDIO_CLOCK_LOCK)
         if (clock_lock_active) {
@@ -743,6 +829,11 @@ static void AUDIO_MIX_RAMFUNC(audio_sound_output_impl)(int nch,
                 g_audio_ring[s_ring_write] = (BYTE)mix;
                 s_ring_write = next_write;
                 s_prod_push_samples++;
+#ifdef NESCO_MAPPER5_AUDIO_DIAGNOSTICS
+                if (is_mmc5) {
+                    s_mmc5_diag_pushed++;
+                }
+#endif
 #if defined(PICO_BUILD) && defined(NESCO_AUDIO_MEASURE)
                 if (s_audio_measure_active) {
                     s_audio_measure_push_samples++;
@@ -751,6 +842,11 @@ static void AUDIO_MIX_RAMFUNC(audio_sound_output_impl)(int nch,
             } else {
                 s_ring_overrun_count++;
                 s_prod_drop_samples++;
+#ifdef NESCO_MAPPER5_AUDIO_DIAGNOSTICS
+                if (is_mmc5) {
+                    s_mmc5_diag_dropped++;
+                }
+#endif
 #if defined(PICO_BUILD) && defined(NESCO_AUDIO_MEASURE)
                 if (s_audio_measure_active) {
                     s_audio_measure_drop_samples++;
@@ -947,7 +1043,8 @@ static void AUDIO_MIX_RAMFUNC(audio_sound_output_impl)(int nch,
 void AUDIO_MIX_RAMFUNC(InfoNES_SoundOutput)(int nch,
                                             BYTE *buf0, BYTE *buf1,
                                             BYTE *buf2, BYTE *buf3, BYTE *buf4) {
-    audio_sound_output_impl(nch, buf0, buf1, buf2, buf3, buf4, NULL, 0);
+    audio_sound_output_impl(nch, buf0, buf1, buf2, buf3, buf4,
+                            NULL, 0, NULL, 0, false);
 }
 
 #ifdef PICO_BUILD
@@ -958,7 +1055,17 @@ void AUDIO_MIX_RAMFUNC(InfoNES_SoundOutputN163)(int nch,
                                                 const int16_t *n163,
                                                 int n163_samples) {
     audio_sound_output_impl(nch, buf0, buf1, buf2, buf3, buf4,
-                            n163, n163_samples);
+                            n163, n163_samples, NULL, 0, false);
+}
+
+void AUDIO_MIX_RAMFUNC(InfoNES_SoundOutputMMC5)(int nch,
+                                                BYTE *buf0, BYTE *buf1,
+                                                BYTE *buf2, BYTE *buf3,
+                                                BYTE *buf4,
+                                                const int16_t *mmc5,
+                                                int mmc5_samples) {
+    audio_sound_output_impl(nch, buf0, buf1, buf2, buf3, buf4,
+                            NULL, 0, mmc5, mmc5_samples, true);
 }
 #endif
 

@@ -16,6 +16,7 @@ char s_current_rom_path[160] = "";
 char s_current_save_path[192] = "";
 char s_current_map30_path[192] = "";
 char s_current_map19_path[192] = "";
+char s_current_map5_path[192] = "";
 bool s_session_active = false;
 
 struct Map30PersistHeader {
@@ -25,6 +26,14 @@ struct Map30PersistHeader {
     BYTE used[2];
     BYTE bank[2];
     BYTE padding[2];
+};
+
+struct Map5PersistHeader {
+    char magic[4];
+    BYTE version;
+    /* v1/v2: data[0]=8-bank mask, data[1]=ExRAM flag, data[2]=reserved.
+     * v3:    data[0..1]=16-bank mask (little endian), data[2]=ExRAM flag. */
+    BYTE data[3];
 };
 
 void sram_copy_string(char *dst, size_t dst_size, const char *src)
@@ -115,10 +124,19 @@ void sram_build_map19_path(char *dst, size_t dst_size, const char *rom_path)
     sram_build_path_with_ext(dst, dst_size, rom_path, ".n19");
 }
 
+void sram_build_map5_path(char *dst, size_t dst_size, const char *rom_path)
+{
+    sram_build_path_with_ext(dst, dst_size, rom_path, ".m5s");
+}
+
 bool sram_current_rom_uses_save(void)
 {
     if (MapperNo == 19) {
         return Map19_ExternalWramBatteryEnabled();
+    }
+    if (MapperNo == 5) {
+        /* MMC5 has banked RAM and is persisted through its own image below. */
+        return false;
     }
     return ROM_SRAM;
 }
@@ -167,7 +185,9 @@ void sram_ensure_save_dir(void)
     const bool save_path_uses_fallback = std::strncmp(s_current_save_path, "0:/saves/", 9) == 0;
     const bool map30_path_uses_fallback = std::strncmp(s_current_map30_path, "0:/saves/", 9) == 0;
     const bool map19_path_uses_fallback = std::strncmp(s_current_map19_path, "0:/saves/", 9) == 0;
-    if (!save_path_uses_fallback && !map30_path_uses_fallback && !map19_path_uses_fallback) {
+    const bool map5_path_uses_fallback = std::strncmp(s_current_map5_path, "0:/saves/", 9) == 0;
+    if (!save_path_uses_fallback && !map30_path_uses_fallback &&
+        !map19_path_uses_fallback && !map5_path_uses_fallback) {
         return;
     }
 
@@ -396,6 +416,174 @@ void sram_store_flush_map19(void)
                    (unsigned)bytes_written);
 }
 
+void sram_store_restore_map5(void)
+{
+    FIL file;
+    UINT bytes_read = 0;
+    FRESULT fr;
+    Map5PersistHeader header = {};
+
+    if (MapperNo != 5 ||
+        (!Map5_HasBatteryWram() && !Map5_HasBatteryExRam())) {
+        return;
+    }
+
+    fr = f_open(&file, s_current_map5_path, FA_READ);
+    if (fr != FR_OK) {
+        NESCO_LOG_RUNTIME("[M5] restore no save path=%s fr=%d\r\n",
+                          s_current_map5_path, (int)fr);
+        return;
+    }
+
+    fr = f_read(&file, &header, sizeof(header), &bytes_read);
+    if (fr != FR_OK || bytes_read != sizeof(header) ||
+        std::memcmp(header.magic, "M5SR", 4) != 0 ||
+        (header.version != 1 && header.version != 2 && header.version != 3)) {
+        f_close(&file);
+        NESCO_LOG_RUNTIME("[M5] restore invalid path=%s fr=%d bytes=%u\r\n",
+                          s_current_map5_path, (int)fr, (unsigned)bytes_read);
+        return;
+    }
+
+    unsigned restored_banks = 0;
+    const uint16_t header_bank_mask =
+        header.version >= 3 ?
+            (uint16_t)header.data[0] | ((uint16_t)header.data[1] << 8) :
+            header.data[0];
+    const uint16_t accepted_mask = Map5_GetBatteryWramMask();
+    for (BYTE bank = 0; bank < 16; ++bank) {
+        if (!(header_bank_mask & (uint16_t)(1u << bank))) {
+            continue;
+        }
+
+        if (accepted_mask & (uint16_t)(1u << bank)) {
+            BYTE *const dst = Map5_GetWramBankData(bank);
+            fr = f_read(&file, dst, 0x2000, &bytes_read);
+            if (fr != FR_OK || bytes_read != 0x2000u) {
+                f_close(&file);
+                NESCO_LOG_RUNTIME("[M5] restore failed path=%s bank=%u fr=%d bytes=%u\r\n",
+                                  s_current_map5_path, (unsigned)bank,
+                                  (int)fr, (unsigned)bytes_read);
+                return;
+            }
+            ++restored_banks;
+        } else {
+            fr = f_lseek(&file, f_tell(&file) + 0x2000u);
+            if (fr != FR_OK) {
+                f_close(&file);
+                NESCO_LOG_RUNTIME("[M5] restore skip failed path=%s bank=%u fr=%d\r\n",
+                                  s_current_map5_path, (unsigned)bank, (int)fr);
+                return;
+            }
+        }
+    }
+
+    const bool header_has_exram =
+        header.version >= 3 ? header.data[2] != 0 :
+        (header.version >= 2 && header.data[1] != 0);
+    if (header_has_exram) {
+        BYTE exram[0x400];
+        fr = f_read(&file, exram, sizeof(exram), &bytes_read);
+        if (fr != FR_OK || bytes_read != sizeof(exram)) {
+            f_close(&file);
+            NESCO_LOG_RUNTIME("[M5] restore ExRAM failed path=%s fr=%d bytes=%u\r\n",
+                              s_current_map5_path, (int)fr, (unsigned)bytes_read);
+            return;
+        }
+        if (Map5_HasBatteryExRam()) {
+            (void)Map5_RestoreBatteryExRam(exram, sizeof(exram));
+        }
+    }
+
+    f_close(&file);
+    Map5_ClearBatteryWramDirty();
+    Map5_ClearBatteryExRamDirty();
+    NESCO_LOG_RUNTIME("[M5] restore path=%s banks=%u exram=%u\r\n",
+                      s_current_map5_path, restored_banks,
+                      (unsigned)header_has_exram);
+}
+
+void sram_store_flush_map5(void)
+{
+    FIL file;
+    UINT bytes_written = 0;
+    FRESULT fr;
+    Map5PersistHeader header = {};
+
+    if (MapperNo != 5 ||
+        (!Map5_HasBatteryWram() && !Map5_HasBatteryExRam())) {
+        return;
+    }
+    if (!Map5_IsBatteryWramDirty() && !Map5_IsBatteryExRamDirty()) {
+        NESCO_LOG_RUNTIME("[M5] flush skip clean path=%s\r\n", s_current_map5_path);
+        return;
+    }
+
+    sram_ensure_save_dir();
+    std::memcpy(header.magic, "M5SR", 4);
+    header.version = 3;
+    const uint16_t bank_mask = Map5_GetBatteryWramMask();
+    header.data[0] = (BYTE)(bank_mask & 0xff);
+    header.data[1] = (BYTE)(bank_mask >> 8);
+    header.data[2] = Map5_HasBatteryExRam() ? 1 : 0;
+
+    fr = f_open(&file, s_current_map5_path, FA_CREATE_ALWAYS | FA_WRITE);
+    if (fr != FR_OK) {
+        NESCO_LOG_RUNTIME("[M5] flush open failed path=%s fr=%d\r\n",
+                          s_current_map5_path, (int)fr);
+        return;
+    }
+
+    fr = f_write(&file, &header, sizeof(header), &bytes_written);
+    if (fr != FR_OK || bytes_written != sizeof(header)) {
+        f_close(&file);
+        NESCO_LOG_RUNTIME("[M5] flush header failed path=%s fr=%d bytes=%u\r\n",
+                          s_current_map5_path, (int)fr, (unsigned)bytes_written);
+        return;
+    }
+
+    unsigned saved_banks = 0;
+    for (BYTE bank = 0; bank < 16; ++bank) {
+        if (!(bank_mask & (uint16_t)(1u << bank))) {
+            continue;
+        }
+        fr = f_write(&file, Map5_GetWramBankData(bank), 0x2000, &bytes_written);
+        if (fr != FR_OK || bytes_written != 0x2000u) {
+            f_close(&file);
+            NESCO_LOG_RUNTIME("[M5] flush failed path=%s bank=%u fr=%d bytes=%u\r\n",
+                              s_current_map5_path, (unsigned)bank,
+                              (int)fr, (unsigned)bytes_written);
+            return;
+        }
+        ++saved_banks;
+    }
+
+    if (header.data[2]) {
+        const BYTE *const exram = Map5_GetBatteryExRamData();
+        if (!exram) {
+            f_close(&file);
+            NESCO_LOG_RUNTIME("[M5] flush ExRAM missing path=%s\r\n",
+                              s_current_map5_path);
+            return;
+        }
+        fr = f_write(&file, exram, 0x400, &bytes_written);
+        if (fr != FR_OK || bytes_written != 0x400u) {
+            f_close(&file);
+            NESCO_LOG_RUNTIME("[M5] flush ExRAM failed path=%s fr=%d bytes=%u\r\n",
+                              s_current_map5_path, (int)fr,
+                              (unsigned)bytes_written);
+            return;
+        }
+    }
+
+    f_close(&file);
+    Map5_ClearBatteryWramDirty();
+    Map5_ClearBatteryExRamDirty();
+    NESCO_LOG_RUNTIME("[M5] flush path=%s banks=%u exram=%u\r\n",
+                      s_current_map5_path, saved_banks,
+                      (unsigned)(header.data[2] != 0));
+}
+
 } // namespace
 
 extern "C" void sram_store_begin_rom(const char *rom_path)
@@ -406,6 +594,7 @@ extern "C" void sram_store_begin_rom(const char *rom_path)
     sram_build_save_path(s_current_save_path, sizeof(s_current_save_path), save_basis_path);
     sram_build_map30_path(s_current_map30_path, sizeof(s_current_map30_path), save_basis_path);
     sram_build_map19_path(s_current_map19_path, sizeof(s_current_map19_path), save_basis_path);
+    sram_build_map5_path(s_current_map5_path, sizeof(s_current_map5_path), save_basis_path);
     s_session_active = s_current_save_path[0] != '\0';
 }
 
@@ -413,12 +602,14 @@ extern "C" bool sram_store_has_save_for_rom(const char *rom_path)
 {
     char save_path[192];
     char map19_path[192];
+    char map5_path[192];
     FILINFO fno;
     const char *save_basis_path = sram_resolve_save_basis_path(rom_path);
 
     sram_build_save_path(save_path, sizeof(save_path), save_basis_path);
     sram_build_map19_path(map19_path, sizeof(map19_path), save_basis_path);
-    if (save_path[0] == '\0' && map19_path[0] == '\0') {
+    sram_build_map5_path(map5_path, sizeof(map5_path), save_basis_path);
+    if (save_path[0] == '\0' && map19_path[0] == '\0' && map5_path[0] == '\0') {
         return false;
     }
 
@@ -426,7 +617,9 @@ extern "C" bool sram_store_has_save_for_rom(const char *rom_path)
                                f_stat(save_path, &fno) == FR_OK;
     const bool has_map19_save = map19_path[0] != '\0' &&
                                 f_stat(map19_path, &fno) == FR_OK;
-    return has_sram_save || has_map19_save;
+    const bool has_map5_save = map5_path[0] != '\0' &&
+                               f_stat(map5_path, &fno) == FR_OK;
+    return has_sram_save || has_map19_save || has_map5_save;
 }
 
 extern "C" void sram_store_restore_for_current_rom(void)
@@ -440,6 +633,7 @@ extern "C" void sram_store_restore_for_current_rom(void)
     }
 
     sram_store_restore_map19();
+    sram_store_restore_map5();
     sram_zero_buffer();
 
     if (!sram_current_rom_uses_save()) {
@@ -488,6 +682,7 @@ extern "C" void sram_store_flush_current_rom(void)
     }
 
     sram_store_flush_map19();
+    sram_store_flush_map5();
 
     if (!sram_current_rom_uses_save()) {
         NESCO_LOG_RUNTIME("[SRAM] flush skip no-sram path=%s\r\n", s_current_rom_path);
@@ -537,5 +732,6 @@ extern "C" void sram_store_clear_session(void)
     s_current_save_path[0] = '\0';
     s_current_map30_path[0] = '\0';
     s_current_map19_path[0] = '\0';
+    s_current_map5_path[0] = '\0';
     s_session_active = false;
 }

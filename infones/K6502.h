@@ -54,6 +54,8 @@ typedef unsigned char BYTE;
 void K6502_Init();
 void K6502_Reset();
 void K6502_Set_Int_Wiring(BYTE byNMI_Wiring, BYTE byIRQ_Wiring);
+/* Recompute the shared IRQ pin while preserving a pending APU IRQ. */
+void K6502_RefreshIrqLine();
 void K6502_Step(int wClocks);
 /* Run CPU clocks without polling the interrupt pins at the entry point. */
 void K6502_Step_NoInterrupt(int wClocks);

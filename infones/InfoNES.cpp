@@ -719,6 +719,7 @@ BYTE PPU_R1;
 BYTE PPU_R2;
 BYTE PPU_R3;
 BYTE PPU_R7;
+BYTE PPU_OpenBus;
 
 /* Vertical scroll value */
 BYTE PPU_Scr_V;
@@ -925,6 +926,10 @@ void (*MapperInit)();
 void (*MapperWrite)(WORD wAddr, BYTE byData);
 /* Write to SRAM */
 void (*MapperSram)(WORD wAddr, BYTE byData);
+/* Read from SRAM */
+BYTE (*MapperReadSram)(WORD wAddr);
+/* Mapper IRQ source query */
+BYTE (*MapperIrqPending)();
 /* Write to Apu */
 void (*MapperApu)(WORD wAddr, BYTE byData);
 /* Read from Apu */
@@ -1233,6 +1238,12 @@ int InfoNES_Reset()
     return -1;
   }
 
+  /* Most mappers use the legacy SRAM read path.  Reset this callback before
+   * every cartridge session so a previously loaded Mapper 5 cannot leave its
+   * banked PRG-RAM reader installed for the next mapper. */
+  MapperReadSram = Map0_ReadSram;
+  MapperIrqPending = Map0_IrqPending;
+
   // Set up a mapper initialization function
   MapperTable[nIdx].pMapperInit();
 
@@ -1265,7 +1276,7 @@ void InfoNES_SetupPPU()
   InfoNES_InvalidateSpriteActiveList();
 
   // Reset PPU Register
-  PPU_R0 = PPU_R1 = PPU_R2 = PPU_R3 = PPU_R7 = 0;
+  PPU_R0 = PPU_R1 = PPU_R2 = PPU_R3 = PPU_R7 = PPU_OpenBus = 0;
 
   // Reset latch flag
   PPU_Latch_Flag = 0;
@@ -1402,6 +1413,14 @@ void __not_in_flash_func(InfoNES_Cycle)()
   {
     //util::WorkMeterMark(MARKER_START);
       InfoNES_BeginScanlineRenderState();
+      if (MapperNo == 5)
+      {
+        /* MMC5 scanline IRQs are requested at the beginning of the detected
+         * scanline (PPU dot 4), not after the whole scanline has elapsed.
+         * The scanline-granular core has no dot-4 callback, so notify Mapper
+         * 5 at the scanline boundary before CPU execution. */
+        Map5_ScanlineStart();
+      }
       if (!micromenu)
       {
           int scanline_clocks = STEP_PER_SCANLINE;
@@ -1566,6 +1585,21 @@ void __not_in_flash_func(InfoNES_Cycle)()
               // Set a sprite hit flag
               if ((PPU_R1 & R1_SHOW_SP) && (PPU_R1 & R1_SHOW_SCR))
               {
+#if defined(NESCO_MAPPER5_STATE_TRACE)
+                  if (MapperNo == 5)
+                  {
+                    static unsigned mapper5_sprite_hit_trace_count;
+                    if (mapper5_sprite_hit_trace_count < 16u)
+                    {
+                      std::printf("[M5_SPR_HIT] n=%u sl=%u hit=%u spr0=%02X,%02X,%02X,%02X\n",
+                                  mapper5_sprite_hit_trace_count++,
+                                  (unsigned)PPU_Scanline, (unsigned)SpriteJustHit,
+                                  (unsigned)SPRRAM[0], (unsigned)SPRRAM[1],
+                                  (unsigned)SPRRAM[2], (unsigned)SPRRAM[3]);
+                      std::fflush(stdout);
+                    }
+                  }
+#endif
                   PPU_R2 |= R2_HIT_SP;
 #if defined(NESCO_RUNTIME_LOGS)
                   if (MapperNo == 71 && SPRRAM[SPR_Y] == 0xA7)
@@ -1756,7 +1790,23 @@ inline void InfoNES_UpdateSpriteOverflow()
   }
 
   if (visible_sprites >= 8)
+  {
+#if defined(NESCO_MAPPER5_STATE_TRACE)
+    if (MapperNo == 5)
+    {
+      static unsigned mapper5_sprite_overflow_trace_count;
+      if (mapper5_sprite_overflow_trace_count < 16u)
+      {
+        std::printf("[M5_SPR_OVERFLOW] n=%u sl=%u count=%d spr0=%02X,%02X,%02X,%02X\n",
+                    mapper5_sprite_overflow_trace_count++, (unsigned)PPU_Scanline,
+                    visible_sprites, (unsigned)SPRRAM[0], (unsigned)SPRRAM[1],
+                    (unsigned)SPRRAM[2], (unsigned)SPRRAM[3]);
+        std::fflush(stdout);
+      }
+    }
+#endif
     PPU_R2 |= R2_MAX_SP;
+  }
 }
 
 /*===================================================================*/
@@ -1778,6 +1828,36 @@ int __not_in_flash_func(InfoNES_HSync)()
   //util::WorkMeterMark(MARKER_SOUND);
 
   InfoNES_UpdateSpriteOverflow();
+
+#if defined(NESCO_MAPPER5_STATE_TRACE)
+  if (MapperNo == 5)
+  {
+    static bool mapper5_oam_watch_initialized;
+    static BYTE mapper5_oam_watch[4];
+    const bool changed = !mapper5_oam_watch_initialized ||
+                         mapper5_oam_watch[0] != SPRRAM[0] ||
+                         mapper5_oam_watch[1] != SPRRAM[1] ||
+                         mapper5_oam_watch[2] != SPRRAM[2] ||
+                         mapper5_oam_watch[3] != SPRRAM[3];
+    if (changed)
+    {
+      static unsigned mapper5_oam_watch_count;
+      if (mapper5_oam_watch_count < 64u)
+      {
+        std::printf("[M5_OAM_CHANGE] n=%u sl=%u pc=%04X value=%02X,%02X,%02X,%02X\n",
+                    mapper5_oam_watch_count++, (unsigned)PPU_Scanline,
+                    (unsigned)PC, (unsigned)SPRRAM[0], (unsigned)SPRRAM[1],
+                    (unsigned)SPRRAM[2], (unsigned)SPRRAM[3]);
+        std::fflush(stdout);
+      }
+      mapper5_oam_watch[0] = SPRRAM[0];
+      mapper5_oam_watch[1] = SPRRAM[1];
+      mapper5_oam_watch[2] = SPRRAM[2];
+      mapper5_oam_watch[3] = SPRRAM[3];
+      mapper5_oam_watch_initialized = true;
+    }
+  }
+#endif
 
 #if defined(NESCO_M71_HEARTBEAT)
   if (MapperNo == 71 && PPU_Scanline == 0)
@@ -1870,6 +1950,50 @@ int __not_in_flash_func(InfoNES_HSync)()
              (unsigned)RAM[0x07FF & 0x07FF]);
     }
     ++m71_frame_trace_count;
+  }
+#endif
+
+#if defined(NESCO_MAPPER5_STATE_TRACE)
+  extern BYTE Map5_Prg_Reg[8];
+  if (MapperNo == 5 && PPU_Scanline == 0)
+  {
+    static unsigned mapper5_trace_frame;
+    const bool sample = mapper5_trace_frame < 40u ||
+                        (mapper5_trace_frame % 60u) == 0u ||
+                        (mapper5_trace_frame >= 560u && mapper5_trace_frame <= 660u);
+    if (sample)
+    {
+      std::printf("[M5_FRAME] n=%u pc=%04X a=%02X x=%02X y=%02X f=%02X sp=%02X "
+                  "r0=%02X r1=%02X r2=%02X v=%04X t=%04X pad=%08lX bit=%u "
+                  "ram00=%02X ram01=%02X ram02=%02X ram03=%02X ram04=%02X "
+                  "d0=%02X d1=%02X d6=%02X d7=%02X d8=%02X d9=%02X "
+                  "r623=%02X r62f=%02X r629=%02X r62a=%02X r62b=%02X r6ec=%02X r6ed=%02X "
+                  "prg=%02X,%02X,%02X,%02X cpu=%d\\n",
+                  mapper5_trace_frame, static_cast<unsigned>(PC),
+                  static_cast<unsigned>(A), static_cast<unsigned>(X),
+                  static_cast<unsigned>(Y), static_cast<unsigned>(F),
+                  static_cast<unsigned>(SP), static_cast<unsigned>(PPU_R0),
+                  static_cast<unsigned>(PPU_R1), static_cast<unsigned>(PPU_R2),
+                  static_cast<unsigned>(PPU_Addr), static_cast<unsigned>(PPU_Temp),
+                  static_cast<unsigned long>(PAD1_Latch),
+                  static_cast<unsigned>(PAD1_Bit), static_cast<unsigned>(RAM[0]),
+                  static_cast<unsigned>(RAM[1]), static_cast<unsigned>(RAM[2]),
+                  static_cast<unsigned>(RAM[3]), static_cast<unsigned>(RAM[4]),
+                  static_cast<unsigned>(RAM[0x00d0]), static_cast<unsigned>(RAM[0x00d1]),
+                  static_cast<unsigned>(RAM[0x00d6]), static_cast<unsigned>(RAM[0x00d7]),
+                  static_cast<unsigned>(RAM[0x00d8]), static_cast<unsigned>(RAM[0x00d9]),
+                  static_cast<unsigned>(RAM[0x0623]), static_cast<unsigned>(RAM[0x062f]),
+                  static_cast<unsigned>(RAM[0x0629]), static_cast<unsigned>(RAM[0x062a]),
+                  static_cast<unsigned>(RAM[0x062b]), static_cast<unsigned>(RAM[0x06ec]),
+                  static_cast<unsigned>(RAM[0x06ed]),
+                  static_cast<unsigned>(Map5_Prg_Reg[4]),
+                  static_cast<unsigned>(Map5_Prg_Reg[5]),
+                  static_cast<unsigned>(Map5_Prg_Reg[6]),
+                  static_cast<unsigned>(Map5_Prg_Reg[7]),
+                  getCurrentClocks32());
+      std::fflush(stdout);
+    }
+    ++mapper5_trace_frame;
   }
 #endif
 
@@ -2190,6 +2314,21 @@ int __not_in_flash_func(InfoNES_HSync)()
     // NMI on V-Blank
     if (PPU_R0 & R0_NMI_VB)
     {
+#if defined(NESCO_MAPPER5_STATE_TRACE)
+      if (MapperNo == 5)
+      {
+        static unsigned mapper5_vblank_trace_count;
+        if (mapper5_vblank_trace_count < 96u)
+        {
+          std::printf("[M5_VBLANK] n=%u pc=%04X r0=%02X r2=%02X nmi=%02X r629=%02X\n",
+                      mapper5_vblank_trace_count++, static_cast<unsigned>(PC),
+                      static_cast<unsigned>(PPU_R0), static_cast<unsigned>(PPU_R2),
+                      static_cast<unsigned>(NMI_State),
+                      static_cast<unsigned>(RAM[0x0629]));
+          std::fflush(stdout);
+        }
+      }
+#endif
       //      printf("nmi %04x %02x\n", PC, PPU_R0);
       structured_log_note_nmi_request();
       NMI_REQ;
@@ -2487,6 +2626,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
 
     auto buildBgTile = [&](BYTE *nameTablePtr,
                            BYTE paletteBase,
+                           int screenTileX,
                            BYTE *dst,
                            int clipLeft,
                            int clipRight) -> BgTileDescriptor
@@ -2505,6 +2645,24 @@ void __not_in_flash_func(InfoNES_DrawLine)()
                                                     (ch << 4) +
                                                     yOfsModBG + 8);
       desc.palette_base = paletteBase;
+      if (MapperNo == 5)
+      {
+        BYTE mmc5Tile;
+        BYTE mmc5PaletteBase;
+        BYTE *mmc5PatternRow;
+        if (Map5_ResolveBackgroundTile(nY, nX, screenTileX,
+                                       static_cast<WORD>(desc.ppu_pattern_address - 8),
+                                       &mmc5Tile,
+                                       &mmc5PaletteBase,
+                                       &mmc5PatternRow))
+        {
+          desc.pattern_row = mmc5PatternRow;
+          desc.palette_base = mmc5PaletteBase;
+          desc.ppu_pattern_address = static_cast<WORD>((patternTableIdBG << 12) +
+                                                        (mmc5Tile << 4) +
+                                                        (desc.ppu_pattern_address & 0x0007) + 8);
+        }
+      }
       desc.dst = dst;
       desc.clip_left = (BYTE)clipLeft;
       desc.clip_right = (BYTE)clipRight;
@@ -2514,6 +2672,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     auto emitBgTile = [&](BYTE *nameTablePtr,
                           BYTE *attrBase,
                           int tileX,
+                          int screenTileX,
                           BYTE *dst,
                           int clipLeft,
                           int clipRight)
@@ -2532,7 +2691,8 @@ void __not_in_flash_func(InfoNES_DrawLine)()
       }
 
       const BYTE paletteBase = resolveBgPaletteBase(attrBase, tileX);
-      BgTileDescriptor desc = buildBgTile(nameTablePtr, paletteBase, dst, clipLeft, clipRight);
+      BgTileDescriptor desc = buildBgTile(nameTablePtr, paletteBase, screenTileX,
+                                          dst, clipLeft, clipRight);
 
       renderBgTile(desc);
 
@@ -2564,15 +2724,18 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     {
       bg_tile_start_us = time_us_64();
     }
+    int nScreenTileX = 0;
     emitBgTile(pbyNameTable,
                pAttrBase,
                nX,
+               nScreenTileX,
                pPoint,
                PPU_Scr_H_Bit,
                8);
     pPoint += 8 - PPU_Scr_H_Bit;
 
     ++nX;
+    ++nScreenTileX;
     ++pbyNameTable;
 
     /*-------------------------------------------------------------------*/
@@ -2584,12 +2747,14 @@ void __not_in_flash_func(InfoNES_DrawLine)()
       emitBgTile(pbyNameTable,
                  pAttrBase,
                  nX,
+                 nScreenTileX,
                  pPoint,
                  0,
                  8);
       pPoint += 8;
 
       ++pbyNameTable;
+      ++nScreenTileX;
     }
 
     // Holizontal Mirror
@@ -2611,12 +2776,14 @@ void __not_in_flash_func(InfoNES_DrawLine)()
       emitBgTile(pbyNameTable,
                  pAttrBase,
                  nX,
+                 nScreenTileX,
                  pPoint,
                  0,
                  8);
       pPoint += 8;
 
       ++pbyNameTable;
+      ++nScreenTileX;
     }
 
     /*-------------------------------------------------------------------*/
@@ -2626,6 +2793,7 @@ void __not_in_flash_func(InfoNES_DrawLine)()
     emitBgTile(pbyNameTable,
                pAttrBase,
                nX,
+               nScreenTileX,
                pPoint,
                0,
                PPU_Scr_H_Bit);

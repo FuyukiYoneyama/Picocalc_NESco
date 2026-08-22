@@ -437,6 +437,14 @@ static inline BYTE __not_in_flash_func(K6502_Read)(WORD wAddr)
   if (wAddr >= 0x8000)
   {
     byRet = ROMBANK[(wAddr - 0x8000) >> 13][wAddr & 0x1fff];
+    if (MapperNo == 5 &&
+        (Map5_PcmReadMode || wAddr == 0xfffa || wAddr == 0xfffb))
+    {
+      /* MMC5 PCM read mode observes CPU reads from $8000-$BFFF.  The
+       * $FFFA/$FFFB exception lets Mapper 5 reset its scanline detector on
+       * the NMI vector fetch even when PCM read mode is disabled. */
+      byRet = Map5_ReadRom(wAddr, byRet);
+    }
     return byRet;
   }
 
@@ -454,6 +462,15 @@ static inline BYTE __not_in_flash_func(K6502_Read)(WORD wAddr)
       PPU_Addr += PPU_Increment;
       addr &= 0x3fff;
 
+      /* MMC5 exposes the CHR set selected by the last $5120-$512B write to
+       * CPU $2007 reads while the PPU is not rendering.  Rendering itself
+       * deliberately leaves PPUBANK on its sprite/A pass. */
+      if (MapperNo == 5 && addr < 0x2000 &&
+          !(PPU_R1 & (R1_SHOW_SCR | R1_SHOW_SP)))
+      {
+        Map5_SyncCpuChrBanksForCpuRead();
+      }
+
       /*
        * The PPU bus address changes after a $2007 access.  MMC3 observes
        * the resulting A12 transition; MMC2/MMC4 also use the PPU access
@@ -466,17 +483,34 @@ static inline BYTE __not_in_flash_func(K6502_Read)(WORD wAddr)
 
       // Read PPU Memory
       PPU_R7 = PPUBANK[addr >> 10][addr & 0x3ff];
+      PPU_OpenBus = byRet;
 
       return byRet;
     }
     else if ((wAddr & 0x7) == 0x4) /* SPR_RAM I/O Register */
     {
-      return SPRRAM[PPU_R3++];
+      byRet = SPRRAM[PPU_R3++];
+      PPU_OpenBus = byRet;
+      return byRet;
     }
     else if ((wAddr & 0x7) == 0x2) /* PPU Status */
     {
       // Set return value
-      byRet = PPU_R2;
+      byRet = (PPU_R2 & 0xe0) | (PPU_OpenBus & 0x1f);
+      PPU_OpenBus = byRet;
+#if defined(NESCO_MAPPER5_STATE_TRACE)
+      if (MapperNo == 5)
+      {
+        static unsigned mapper5_ppustatus_trace_count;
+        if (mapper5_ppustatus_trace_count < 160u)
+        {
+          printf("[M5_PPUSTATUS] n=%u sl=%u pc=%04X value=%02X r2=%02X\n",
+                 mapper5_ppustatus_trace_count++, (unsigned)PPU_Scanline,
+                 (unsigned)PC, (unsigned)byRet, (unsigned)PPU_R2);
+          fflush(stdout);
+        }
+      }
+#endif
 #if defined(NESCO_RUNTIME_LOGS)
       /*
        * Bee 52 waits at $E6D2 until the sprite-0 bit is visible.  Keep a
@@ -564,7 +598,8 @@ static inline BYTE __not_in_flash_func(K6502_Read)(WORD wAddr)
 
       return byRet;
     }
-    break;
+    /* Writes-only PPU registers read back the CPU-side PPU bus latch. */
+    return PPU_OpenBus;
 
   case 0x4000: /* Sound */
     if (wAddr == 0x4015)
@@ -586,6 +621,10 @@ static inline BYTE __not_in_flash_func(K6502_Read)(WORD wAddr)
 
       // FrameIRQ
       APU_Reg[0x15] &= ~0x40;
+      if (MapperNo == 5)
+      {
+        K6502_RefreshIrqLine();
+      }
       return byRet;
     }
     else if (wAddr == 0x4016)
@@ -660,14 +699,7 @@ static inline BYTE __not_in_flash_func(K6502_Read)(WORD wAddr)
     {
       return 0xff;
     }
-    if (ROM_SRAM)
-    {
-      return SRAM[wAddr & 0x1fff];
-    }
-    else
-    { /* SRAM BANK */
-      return SRAMBANK[wAddr & 0x1fff];
-    }
+    return MapperReadSram(wAddr);
 
     // case 0x8000: /* ROM BANK 0 */
     //   return ROMBANK0[wAddr & 0x1fff];
@@ -712,12 +744,43 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
    *
    */
 
+  /*
+   * $5000-$5fff is cartridge expansion space, not a mirror of APU/IO
+   * registers selected by the low five address bits.  In particular MMC5
+   * uses $5100-$5206 extensively.  Letting those writes enter the $4000
+   * switch first made e.g. $5114 spuriously perform an OAM DMA as $4014.
+   */
+  if (wAddr >= 0x5000 && wAddr <= 0x5fff)
+  {
+    MapperApu(wAddr, byData);
+    return;
+  }
+
   switch (wAddr & 0xe000)
   {
   case 0x0000: /* RAM */
   {
     auto addr = wAddr & 0x7ff;
+    const BYTE previous = RAM[addr];
     RAM[addr] = byData;
+#if defined(NESCO_MAPPER5_STATE_TRACE)
+    if (MapperNo == 5 &&
+        (addr == 0x00d7 || addr == 0x00d8 ||
+         addr == 0x062a || addr == 0x062b || addr == 0x06ec ||
+         addr == 0x06ed ||
+         (addr == 0x0629 && (PC == 0x815b || PC == 0xf481))))
+    {
+      static unsigned mapper5_ram_write_trace_count;
+      if (mapper5_ram_write_trace_count < 160u)
+      {
+        printf("[M5_RAMW] n=%u sl=%u pc=%04X addr=%04X value=%02X old=%02X\n",
+               mapper5_ram_write_trace_count++, (unsigned)PPU_Scanline,
+               (unsigned)PC, (unsigned)addr, (unsigned)byData,
+               (unsigned)previous);
+        fflush(stdout);
+      }
+    }
+#endif
     structured_log_note_initial_a5_ram_write(addr, byData);
 #if INFONES_ENABLE_BOKOSUKA_STATE_LOG
     bokosuka_state_maybe_log_ram_write(addr, byData);
@@ -754,6 +817,8 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
   break;
 
   case 0x2000: /* PPU */
+    /* Every CPU write to the PPU register window drives the PPU data bus. */
+    PPU_OpenBus = byData;
     switch (wAddr & 0x7)
     {
     case 0: /* 0x2000 */
@@ -849,6 +914,19 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
 
     case 4: /* 0x2004 */
       // Write data to Sprite RAM
+#if defined(NESCO_MAPPER5_STATE_TRACE)
+      if (MapperNo == 5)
+      {
+        static unsigned mapper5_oam_data_trace_count;
+        if (mapper5_oam_data_trace_count < 128u)
+        {
+          printf("[M5_OAM_DATA] n=%u sl=%u pc=%04X addr=%02X value=%02X\n",
+                 mapper5_oam_data_trace_count++, (unsigned)PPU_Scanline,
+                 (unsigned)PC, (unsigned)PPU_R3, (unsigned)byData);
+          fflush(stdout);
+        }
+      }
+#endif
       SPRRAM[PPU_R3++] = byData;
       InfoNES_InvalidateSpriteActiveList();
       break;
@@ -1004,12 +1082,25 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
       // Write to PPU Memory
       if (addr < 0x2000 && byVramWriteEnable)
       {
+        if (MapperNo == 5 &&
+            !(PPU_R1 & (R1_SHOW_SCR | R1_SHOW_SP)))
+        {
+          /* CPU $2007 pattern writes use the same MMC5 CHR set as CPU
+           * pattern reads.  The normal scanline renderer leaves PPUBANK on
+           * the sprite pass, so restore the last-written A/B set before a
+           * non-rendering CPU write as well. */
+          Map5_SyncCpuChrBanksForCpuRead();
+        }
         // Pattern Data
         ChrBufUpdate |= (1 << (addr >> 10));
         PPUBANK[addr >> 10][addr & 0x3ff] = vramData;
       }
       else if (addr < 0x3f00) /* 0x2000 - 0x3eff */
       {
+        if (MapperNo == 5)
+        {
+          Map5_NotePpuNametableWrite(addr);
+        }
         // Name Table and mirror
         PPUBANK[addr >> 10][addr & 0x3ff] = vramData;
         PPUBANK[(addr ^ 0x1000) >> 10][addr & 0x3ff] = vramData;
@@ -1066,6 +1157,10 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
       if (wAddr == 0x4010)
       {
         InfoNES_pAPUWriteDmcControl(byData);
+        if (MapperNo == 5)
+        {
+          K6502_RefreshIrqLine();
+        }
       }
       if (!APU_Mute)
         pAPUSoundRegs[wAddr & 0x1f](wAddr, byData);
@@ -1077,6 +1172,25 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
       {
       case 0x0: /* RAM */
         InfoNES_MemoryCopy(SPRRAM, &RAM[((WORD)byData << 8) & 0x7ff], SPRRAM_SIZE);
+#if defined(NESCO_MAPPER5_STATE_TRACE)
+        if (MapperNo == 5)
+        {
+          static unsigned mapper5_oam_dma_trace_count;
+          if (mapper5_oam_dma_trace_count < 64u)
+          {
+            const WORD base = ((WORD)byData << 8) & 0x7ff;
+            printf("[M5_OAM_DMA] n=%u sl=%u pc=%04X page=%02X src=%02X,%02X,%02X,%02X dst=%02X,%02X,%02X,%02X\n",
+                   mapper5_oam_dma_trace_count++, (unsigned)PPU_Scanline,
+                   (unsigned)PC, (unsigned)byData, (unsigned)RAM[base],
+                   (unsigned)RAM[(base + 1) & 0x7ff],
+                   (unsigned)RAM[(base + 2) & 0x7ff],
+                   (unsigned)RAM[(base + 3) & 0x7ff],
+                   (unsigned)SPRRAM[0], (unsigned)SPRRAM[1],
+                   (unsigned)SPRRAM[2], (unsigned)SPRRAM[3]);
+            fflush(stdout);
+          }
+        }
+#endif
 #if defined(NESCO_M71_COUNTER_DIAGNOSTICS)
         if (MapperNo == 71 && byData == 0x02)
         {
@@ -1097,7 +1211,25 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
         break;
 
       case 0x3: /* SRAM */
-        InfoNES_MemoryCopy(SPRRAM, &SRAM[((WORD)byData << 8) & 0x1fff], SPRRAM_SIZE);
+        if (MapperNo == 5)
+        {
+          /* MMC5 maps the $6000 page through $5113.  The legacy DMA fast
+           * path reads the single global SRAM array and therefore bypasses
+           * that bank selection.  Use the mapper read callback for this
+           * source page; the other mappers retain the existing bulk copy. */
+          const WORD wSource = (WORD)(0x6000u +
+                                      (((WORD)byData << 8) & 0x1fffu));
+          for (WORD nByte = 0; nByte < SPRRAM_SIZE; ++nByte)
+          {
+            SPRRAM[nByte] = Map5_ReadSram((WORD)(wSource + nByte));
+          }
+        }
+        else
+        {
+          InfoNES_MemoryCopy(SPRRAM,
+                             &SRAM[((WORD)byData << 8) & 0x1fff],
+                             SPRRAM_SIZE);
+        }
         break;
 
       case 0x4: /* ROM BANK 0 */
@@ -1116,13 +1248,38 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
         InfoNES_MemoryCopy(SPRRAM, &ROMBANK3[((WORD)byData << 8) & 0x1fff], SPRRAM_SIZE);
         break;
       }
+#if defined(NESCO_MAPPER5_STATE_TRACE)
+      if (MapperNo == 5)
+      {
+        static unsigned mapper5_oam_dma_register_trace_count;
+        if (mapper5_oam_dma_register_trace_count < 128u)
+        {
+          printf("[M5_OAM_DMA_REG] n=%u sl=%u pc=%04X page=%02X dst=%02X,%02X,%02X,%02X\n",
+                 mapper5_oam_dma_register_trace_count++, (unsigned)PPU_Scanline,
+                 (unsigned)PC, (unsigned)byData, (unsigned)SPRRAM[0],
+                 (unsigned)SPRRAM[1], (unsigned)SPRRAM[2], (unsigned)SPRRAM[3]);
+          fflush(stdout);
+        }
+      }
+#endif
       InfoNES_InvalidateSpriteActiveList();
+      if (MapperNo == 5)
+      {
+        /* MMC5 listens to the fully decoded OAMDMA write and resets its
+         * scanline counter.  The DMA source page itself is not captured by
+         * the mapper. */
+        Map5_OamDmaReset();
+      }
       K6502_ApplyOamDmaStall();
       break;
 
     case 0x15: /* 0x4015 */
       InfoNES_pAPUClearDmcIrq();
       InfoNES_pAPUWriteControl(wAddr, byData);
+      if (MapperNo == 5)
+      {
+        K6502_RefreshIrqLine();
+      }
 #if 0
           /* Unknown */
           if ( byData & 0x10 ) 
@@ -1214,6 +1371,15 @@ static inline void __not_in_flash_func(K6502_Write)(WORD wAddr, BYTE byData)
     if ((MapperNo != 4 || Map4_Wram_Write_Enabled) &&
         (MapperNo != 19 || Map19_WramWriteAllowed(wAddr)))
     {
+      /* MMC5 owns both sides of its banked $6000-$7fff window.  Writing
+       * the legacy SRAM array first would split a read-after-write pair
+       * whenever $5113 selected any bank other than that array. */
+      if (MapperNo == 5)
+      {
+        MapperSram(wAddr, byData);
+        break;
+      }
+
       SRAM[wAddr & 0x1fff] = byData;
       SRAMwritten = true;
 

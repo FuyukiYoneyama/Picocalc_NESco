@@ -78,6 +78,8 @@ extern struct MapperTable_tag MapperTable[];
 void Map0_Init();
 void Map0_Write(WORD wAddr, BYTE byData);
 void Map0_Sram(WORD wAddr, BYTE byData);
+BYTE Map0_ReadSram(WORD wAddr);
+BYTE Map0_IrqPending();
 void Map0_Apu(WORD wAddr, BYTE byData);
 BYTE Map0_ReadApu(WORD wAddr);
 void Map0_VSync();
@@ -107,12 +109,48 @@ void Map4_Set_CPU_Banks();
 void Map4_Set_PPU_Banks();
 
 void Map5_Init();
+void Map5_Release();
 void Map5_Write(WORD wAddr, BYTE byData);
+void Map5_Sram(WORD wAddr, BYTE byData);
+BYTE Map5_ReadSram(WORD wAddr);
+bool Map5_HasBatteryWram();
+uint16_t Map5_GetBatteryWramMask();
+BYTE *Map5_GetWramBankData(BYTE byBank);
+bool Map5_RestoreBatteryWramBank(BYTE byBank, const BYTE *pData, unsigned nBytes);
+bool Map5_IsBatteryWramDirty();
+void Map5_ClearBatteryWramDirty();
+bool Map5_HasBatteryExRam();
+const BYTE *Map5_GetBatteryExRamData();
+bool Map5_RestoreBatteryExRam(const BYTE *pData, unsigned nBytes);
+bool Map5_IsBatteryExRamDirty();
+void Map5_ClearBatteryExRamDirty();
+void Map5_NotePpuNametableWrite(WORD wAddr);
+extern BYTE Map5_PcmReadMode;
+BYTE Map5_IrqPending();
+BYTE Map5_ReadRom(WORD wAddr, BYTE byData);
+void Map5_ScanlineStart();
+void Map5_OamDmaReset();
 void Map5_Apu(WORD wAddr, BYTE byData);
 BYTE Map5_ReadApu(WORD wAddr);
+void Map5_VSync();
 void Map5_HSync();
 void Map5_RenderScreen(BYTE byMode);
+/* Select the CPU-visible MMC5 CHR register set immediately before a
+ * non-rendering $2007 pattern-table read. */
+void Map5_SyncCpuChrBanksForCpuRead();
+void Map5_RenderAudioSlice(int16_t *dst, int n, bool enabled);
+#ifdef NESCO_MAPPER5_AUDIO_DIAGNOSTICS
+void Map5_AudioDiagnosticsReset();
+void Map5_AudioDiagnosticsSnapshot(uint32_t *sample_count,
+                                   int16_t *min_sample,
+                                   int16_t *max_sample);
+#endif
 void Map5_Sync_Prg_Banks(void);
+bool Map5_ResolveBackgroundTile(int nTileY, int nTileX, int nScreenTileX,
+                                WORD wPpuPatternAddr,
+                                BYTE *pTile,
+                                BYTE *pPaletteBase,
+                                BYTE **ppPatternRow);
 
 void Map6_Init();
 void Map6_Release();

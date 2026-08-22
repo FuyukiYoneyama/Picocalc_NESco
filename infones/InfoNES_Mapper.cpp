@@ -43,6 +43,10 @@ void InfoNES_Mapper_ReleaseCurrent()
     break;
 #endif
 
+  case 5:
+    Map5_Release();
+    break;
+
   case 6:
     Map6_Release();
     break;
@@ -79,7 +83,7 @@ struct MapperTable_tag MapperTable[] =
         {2, Map2_Init},
         {3, Map3_Init},
         {4, Map4_Init},
-        //        {5, Map5_Init},
+        {5, Map5_Init},
         {6, Map6_Init},
         {7, Map7_Init},
         {8, Map8_Init},

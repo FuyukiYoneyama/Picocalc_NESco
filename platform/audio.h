@@ -46,6 +46,10 @@ void InfoNES_SoundOutputN163(int samples,
                              BYTE *wave1, BYTE *wave2, BYTE *wave3,
                              BYTE *wave4, BYTE *wave5,
                              const int16_t *n163, int n163_samples);
+void InfoNES_SoundOutputMMC5(int samples,
+                             BYTE *wave1, BYTE *wave2, BYTE *wave3,
+                             BYTE *wave4, BYTE *wave5,
+                             const int16_t *mmc5, int mmc5_samples);
 #endif
 
 #ifdef NESCO_MAPPER19_N163_ONLY_DIAGNOSTIC
