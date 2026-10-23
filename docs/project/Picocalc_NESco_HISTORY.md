@@ -10,6 +10,46 @@
   - ここには `HEAD` に残っている変更と、あとで戻した実験の両方を書く
   - 戻した実験は「現在の採用状態ではない」と明記する
 
+## `1.2.5` 拡大表示時の音声供給修正 — 実機確認待ち (2026-10-23)
+
+- 対象はフレーム制御と音声供給。目的は拡大表示中の音声不足を止めること。
+  負荷時は表示更新回数が減る。PPU/APUのサンプル生成、音量、ミキサーのチャンネル比は変更しない。
+- 原因をコードとホスト負荷試験で確認した。
+  - `InfoNES_LoadFrame()` は描画フレームだけで呼ばれ、複数フレーム分をまとめて待っていた。
+  - 拡大表示の既定モードは遅延に関係なく `FrameSkip=1` を強制していた。
+  - 音声残量による保護も Mapper 19 専用で、省略数は最低1にするだけだった。
+  - 描画に31 ms、省略フレームに8 msを注入すると、ゲーム/APUは51.282 fpsまで低下し、
+    3600エミュレーションフレーム中に223,037サンプルの不足を検出した。
+  - 【推定】ユーザー報告の音の濁りは、この音声不足に対するPWM側の無音挿入が原因。
+    対象実機・対象ROMでの聴感との照合は未実施。
+- 修正:
+  - 描画を省略したフレームでも16,667 us単位で進行を制御する。
+  - 期限に遅れている間は毎フレーム、次の画面更新を省略するか判断する。
+  - 全mapperで音声残量を確認し、1024以下なら1536へ回復するまで描画を追加で省略する。
+  - 待機がPCM予備量を使い切らないよう、実際の音声サンプルレートから待機上限を計算する。
+  - 拡大表示の既定モードは30fpsを目標上限とし、画面のヒントを `30fps TARGET` に変更した。
+- 検証:
+  - `python3 tools/test_frame_pacing.py --build-dir /tmp/nesco-stretch-audio.H6pJOv/tests`
+  - 実際の `platform/display.c` / `platform/audio.c` に時計・DMA消費・描画コストを注入。
+    RP2040実測値や、実ROMのPPU/APU波形を比較する試験ではない。
+  - 4096/8192 ring、clock lock OFF/ONの4構成×9シナリオ、計36条件が合格。
+    通常表示、拡大軽負荷・高負荷、MMC5、N163 64-sample block、adaptive、通常復帰を含む。
+  - 全条件で不足0、破棄0、ゲーム進行59.969〜60.000 fps。
+    上記31 ms / 8 ms条件は修正後59.969 fps、不足0。
+  - 予備量からの待機上限、音声未初期化・pause、フレーム制御resetも確認した。
+  - GitHub Actionsへ同じホスト試験を追加した。CI自体はまだ実行していない。
+- Release build:
+  - Pico SDK 2.2.0 / RP2040 / `pico`、runtime・計測ログOFFでclean configure/build成功。
+  - banner: `PicoCalc NESco Ver. 1.2.5`（ELF/UF2から確認）。
+  - UF2内のbuild情報: `Oct 23 2026`、`Release`。GNU build-id noteは存在しないためSHA-256で識別する。
+  - size: `text=304308 data=0 bss=119684`。1.2.4の記録と比べて静的RAMの増加なし。
+  - 実機確認用: `build/Picocalc_NESco.uf2`、`build/Picocalc_NESco.elf`。
+  - UF2 SHA-256: `82950659d3465c14fe3cdc8cd01c8491950b780efccf2d2fd503a23abf374821`
+  - ELF SHA-256: `f3a3c70ac3f58940a826f961b8bd12672088928867588fccd086e11e157ccff7`
+- 作業branchは `fix/stretch-audio`（基点 `origin/main` の `acf6053`）。既存診断branchは維持した。
+  実機確認未完のためmainへのmerge/push/releaseは行っていない。
+  実機確認項目は `TASKS.md` を参照する。
+
 ## `1.2.4` Mapper 5 / MMC5 実用対応 — 多分動く (2026-08-22)
 
 - Mapper 5 の PRG/CHR/WRAM、ExRAM、nametable/fill、extended attribute、vertical split、IRQ、MMC5 audio、

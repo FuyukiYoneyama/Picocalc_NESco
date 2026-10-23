@@ -30,6 +30,8 @@ void audio_init(void);
 void audio_close(void);
 BYTE audio_ring_pop_sample(void);
 int audio_ring_available(void);
+/* Maximum voluntary pacing sleep that preserves the requested PCM reserve. */
+uint32_t audio_frame_sleep_budget_us(unsigned reserve_samples);
 void audio_debug_poll(void);
 void audio_reset_runtime_state(void);
 void audio_pause_for_capture(void);

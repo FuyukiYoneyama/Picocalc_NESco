@@ -262,6 +262,19 @@ static int audio_ring_writable(void) {
     return (AUDIO_RING_SIZE - 1) - audio_ring_available();
 }
 
+uint32_t audio_frame_sleep_budget_us(unsigned reserve_samples) {
+    if (s_audio_hw_sample_rate <= 0 || s_audio_paused) {
+        return UINT32_MAX;
+    }
+
+    const unsigned available = (unsigned)audio_ring_available();
+    if (available <= reserve_samples) {
+        return 0;
+    }
+    return (uint32_t)(((uint64_t)(available - reserve_samples) * 1000000u) /
+                      (unsigned)s_audio_hw_sample_rate);
+}
+
 #if defined(PICO_BUILD) && defined(NESCO_MAPPER19_AUDIO_COMFORT)
 static BYTE AUDIO_MIX_RAMFUNC(audio_comfort_filter_sample)(BYTE incoming)
 {
