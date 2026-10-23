@@ -37,6 +37,9 @@ jobs:
           path: pico-sdk
           submodules: recursive
 
+      - name: Test frame pacing and audio supply
+        run: python3 tools/test_frame_pacing.py
+
       - name: Configure
         run: cmake -S . -B build -G Ninja -DPICO_SDK_PATH="$GITHUB_WORKSPACE/pico-sdk"
 

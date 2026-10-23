@@ -94,7 +94,7 @@ option(NESCO_LCD_DMA_STRIP4
 option(NESCO_AUDIO_DISPLAY_BACKOFF
        "Skip a display frame while the audio ring is below its low watermark" OFF)
 option(NESCO_AUDIO_FRAME_ADMISSION
-       "Use whole-frame display admission to protect Mapper 19 audio deadlines" ON)
+       "Use whole-frame display admission and pacing to protect audio deadlines" ON)
 option(NESCO_AUDIO_LCD_RING_GUARD
        "Defer LCD strip DMA briefly while the audio ring is below its low watermark" OFF)
 option(NESCO_DIAGNOSTIC_AUTOSTART_BUILTIN

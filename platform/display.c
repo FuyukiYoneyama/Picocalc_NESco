@@ -98,7 +98,6 @@ static uint32_t s_perf_palette_forced = 0;
 #ifdef PICO_BUILD
 static uint64_t s_last_frame_us = 0;
 static uint64_t s_next_frame_deadline_us = 0;
-static WORD s_active_frame_skip = 0;
 #endif
 
 #ifdef NESCO_AUDIO_DISPLAY_BACKOFF
@@ -373,7 +372,7 @@ static void display_draw_nes_view_hint(void) {
     static const WORD bg = 0x0000;
     static const WORD fg = 0x7BEF;
     static const char *hint_normal = "Shift+W Stretch Screen";
-    static const char *hint_stretch_fixed = "Shift+W Normal  30fps FIXED";
+    static const char *hint_stretch_fixed = "Shift+W Normal  30fps TARGET";
     static const char *hint_stretch_fast = "Shift+W Normal  FAST ADAPTIVE";
 
     if (s_nes_view_scale == NES_VIEW_SCALE_NORMAL) {
@@ -552,7 +551,6 @@ void display_init(void) {
 #ifdef PICO_BUILD
     s_last_frame_us = 0;
     s_next_frame_deadline_us = 0;
-    s_active_frame_skip = 0;
 #endif
 #ifdef NESCO_AUDIO_DISPLAY_BACKOFF
     s_audio_display_backoff = false;
@@ -624,7 +622,6 @@ void display_set_mode(display_mode_t mode) {
 #ifdef PICO_BUILD
     s_last_frame_us = 0;
     s_next_frame_deadline_us = 0;
-    s_active_frame_skip = 0;
 #endif
 #ifdef NESCO_AUDIO_DISPLAY_BACKOFF
     s_audio_display_backoff = false;
@@ -656,7 +653,6 @@ void display_toggle_nes_view_scale(void) {
 #ifdef PICO_BUILD
     s_last_frame_us = 0;
     s_next_frame_deadline_us = 0;
-    s_active_frame_skip = 0;
 #endif
 #if defined(PICO_BUILD) && defined(NESCO_AUDIO_FRAME_ADMISSION)
     s_audio_frame_admission_skip = false;
@@ -740,7 +736,6 @@ void display_reset_frame_pacing(void) {
 #ifdef PICO_BUILD
     s_last_frame_us = 0;
     s_next_frame_deadline_us = 0;
-    s_active_frame_skip = 0;
 #endif
 #if defined(PICO_BUILD) && defined(NESCO_AUDIO_FRAME_ADMISSION)
     s_audio_frame_admission_skip = false;
@@ -1317,52 +1312,67 @@ void InfoNES_PostDrawLine(int scanline, bool frommenu) {
 
 /* =====================================================================
  *  InfoNES_LoadFrame — frame pacing and frame skip calculation
- *  Returns 0 to render all frames (platform can implement FPS control).
- *
- *  Stretch view deliberately presents every other emulated frame.  The
- *  existing 16,667 us pacing target therefore produces an approximately
- *  30 fps display cadence and avoids the variable 0/1/2 skip pattern that
- *  can make scrolling appear uneven.
+ *  Called for every emulated frame, including frames omitted from the LCD.
+ *  The CPU/APU keep their 60 Hz timeline while stretch normally presents
+ *  every other frame. When PCM runs low, omit further whole LCD frames and
+ *  let the producer replenish the ring before resuming voluntary sleeps.
  * ===================================================================== */
 int InfoNES_LoadFrame(void) {
 #ifdef PICO_BUILD
     const uint64_t now_us = time_us_64();
     const uint64_t frame_target_us = 16667u;
-    const uint64_t frame_span_us = frame_target_us * (uint64_t)(s_active_frame_skip + 1);
     uint64_t late_us = 0;
+
+#if defined(NESCO_AUDIO_FRAME_ADMISSION)
+    const int audio_ring_level = audio_ring_available();
+    if (!s_audio_frame_admission_skip &&
+        audio_ring_level <= AUDIO_FRAME_ADMISSION_LOW_WATERMARK) {
+        s_audio_frame_admission_skip = true;
+    } else if (s_audio_frame_admission_skip &&
+               audio_ring_level >= AUDIO_FRAME_ADMISSION_RESUME_WATERMARK) {
+        s_audio_frame_admission_skip = false;
+    }
+#endif
 
     if (s_next_frame_deadline_us == 0) {
         s_next_frame_deadline_us = now_us;
     } else {
-        s_next_frame_deadline_us += frame_span_us;
+        s_next_frame_deadline_us += frame_target_us;
     }
 
     if (now_us < s_next_frame_deadline_us) {
-        const uint32_t sleep_for_us = (uint32_t)(s_next_frame_deadline_us - now_us);
-        sleep_us(sleep_for_us);
-        s_perf_frame_pacing_sleep_us += sleep_for_us;
-        s_perf_frame_pacing_sleep_count++;
+        uint64_t sleep_for_us = s_next_frame_deadline_us - now_us;
+#if defined(NESCO_AUDIO_FRAME_ADMISSION)
+        const uint32_t audio_budget_us = s_audio_frame_admission_skip
+            ? 0u : audio_frame_sleep_budget_us(AUDIO_FRAME_ADMISSION_LOW_WATERMARK);
+        if (sleep_for_us > audio_budget_us) {
+            sleep_for_us = audio_budget_us;
+        }
+#endif
+        if (sleep_for_us > 0) {
+            sleep_us(sleep_for_us);
+            s_perf_frame_pacing_sleep_us += sleep_for_us;
+            s_perf_frame_pacing_sleep_count++;
+        }
     } else {
         late_us = now_us - s_next_frame_deadline_us;
     }
 
+    /* A fixed skip ceiling can leave the CPU/APU permanently behind even
+     * when an interpolating audio sink conceals ring underruns. Reassess
+     * on every frame and omit the next LCD frame until time catches up. */
+    FrameSkip = late_us > 6000u ? FrameCnt + 1 : 0;
     if (display_get_nes_view_scale() == NES_VIEW_SCALE_STRETCH_320X300 &&
-        s_stretch_fixed_frame_skip) {
+        s_stretch_fixed_frame_skip && FrameSkip < 1) {
         FrameSkip = 1;
-    } else if (late_us > 20000u) {
-        FrameSkip = 2;
-    } else if (late_us > 6000u) {
-        FrameSkip = 1;
-    } else {
-        FrameSkip = 0;
     }
 #ifdef NESCO_AUDIO_DISPLAY_BACKOFF
-    const int audio_ring_level = audio_ring_available();
+    const int backoff_ring_level = audio_ring_available();
     if (!s_audio_display_backoff &&
-        audio_ring_level <= AUDIO_DISPLAY_BACKOFF_LOW_WATERMARK) {
+        backoff_ring_level <= AUDIO_DISPLAY_BACKOFF_LOW_WATERMARK) {
         s_audio_display_backoff = true;
     } else if (s_audio_display_backoff &&
-               audio_ring_level >= AUDIO_DISPLAY_BACKOFF_RESUME_WATERMARK) {
+               backoff_ring_level >= AUDIO_DISPLAY_BACKOFF_RESUME_WATERMARK) {
         s_audio_display_backoff = false;
     }
     if (s_audio_display_backoff && FrameSkip < 1) {
@@ -1370,21 +1380,12 @@ int InfoNES_LoadFrame(void) {
     }
 #endif
 #if defined(PICO_BUILD) && defined(NESCO_AUDIO_FRAME_ADMISSION)
-    if (MapperNo == 19) {
-        const int audio_ring_level = audio_ring_available();
-        if (!s_audio_frame_admission_skip &&
-            audio_ring_level <= AUDIO_FRAME_ADMISSION_LOW_WATERMARK) {
-            s_audio_frame_admission_skip = true;
-        } else if (s_audio_frame_admission_skip &&
-                   audio_ring_level >= AUDIO_FRAME_ADMISSION_RESUME_WATERMARK) {
-            s_audio_frame_admission_skip = false;
-        }
-        if (s_audio_frame_admission_skip && FrameSkip < 1) {
-            FrameSkip = 1;
-        }
+    if (s_audio_frame_admission_skip && FrameSkip <= FrameCnt) {
+        /* Decide again at the next emulated frame. Extending by one avoids
+         * a fixed skip limit that can still starve PCM on expensive ROMs. */
+        FrameSkip = FrameCnt + 1;
     }
 #endif
-    s_active_frame_skip = FrameSkip;
     s_last_frame_us = time_us_64();
 #else
     FrameSkip = 0;

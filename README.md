@@ -3,7 +3,7 @@
 `Picocalc_NESco` は、PicoCalc 向けに調整している NES エミュレーター firmware です。
 現在の実装は `infones` ベースで、PicoCalc の LCD、I2C keyboard、PWM audio、SD / flash ROM 選択 menu に接続しています。
 
-現在の埋め込み version は `1.2.4` です。
+現在の埋め込み version は `1.2.5` です。
 このプロジェクトは PicoCalc 専用 firmware を対象にしています。
 PicoCalc 向け以外の build は未検証なので、現在は明示的に無効化しています。
 `infones` 側にある他環境向け build は、このプロジェクトの対象外です。
@@ -94,7 +94,11 @@ In game:
 - `F1` : reset
 - `F5` : screenshot
 - `Shift+W` : `256x240` / `320x300` view toggle
-- `Shift+F` : stretch の `30fps固定` / `高速adaptive` 切り替え
+- `Shift+F` : stretch の `30fps優先` / `高速adaptive` 切り替え
+
+拡大表示でもゲームと音声は約60 Hzの進行を目標にします。描画が遅れる場合や
+音声バッファが不足する場合は、画面の更新を追加で省略して音声供給を優先します。
+`30fps優先` は表示の目標上限であり、負荷によっては30fps未満になります。
 
 ## ビルド
 
@@ -171,7 +175,11 @@ build 後は、生成物から次を自動表示するようにしています�
 - `build/Picocalc_NESco.elf`
 - `build/Picocalc_NESco.uf2`
 
-GitHub Actions では、push / pull request / manual run 時に clean configure / build と `*.elf` / `*.uf2` 生成確認だけを自動実行します。実機確認は含みません。
+GitHub Actions では、push / pull request / manual run 時にフレーム制御のホスト回帰試験、
+clean configure / build と `*.elf` / `*.uf2` 生成確認を自動実行します。実機確認は含みません。
+
+フレーム制御・音声供給のホスト回帰試験は `python3 tools/test_frame_pacing.py` で実行できます。
+描画コストと時刻を注入する試験であり、実機の速度や聴感を測るものではありません。
 
 実行時メモ:
 

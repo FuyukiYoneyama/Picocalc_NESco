@@ -2137,10 +2137,10 @@ int __not_in_flash_func(InfoNES_HSync)()
       fflush(stdout);
     }
 #endif
+    // Pace the CPU/APU even when this frame was omitted from the LCD.
+    InfoNES_LoadFrame();
     if (FrameCnt == 0)
     {
-      // Transfer the contents of work frame on the screen
-      InfoNES_LoadFrame();
       const uint64_t frame_now_us = time_us_64();
       if constexpr (kPerfLogToSerial)
       {
